@@ -7,6 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "trackmeet",
     "userInterfaceStyle": "automatic",
+    "hostUri": "192.168.1.4:8081",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
@@ -38,7 +39,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,
