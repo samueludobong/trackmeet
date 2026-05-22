@@ -16,11 +16,13 @@ import {
   Keyboard,
   Image,
   KeyboardAvoidingView,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRef, useState, useEffect, createContext, useContext } from "react";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
+import { supabase } from "../lib/supabase";
 import {
   AVATAR_MAP,
   STORIES, POSTS, DUMMY_COMMENTS, NAV_ITEMS,
@@ -36,8 +38,11 @@ import {
   type Post, type DummyComment, type DummyPlaylist, type DummySong,
   type DummyCommunity, type CarouselItem, type ProfileTab, type MeetStream,
   type NowPlayingStory,
-  type DirectMessage, type GroupChat, type CommunityItem, type ChatMessage,
+  type DirectMessage, type GroupChat, type CommunityItem, type ChatMessage, type UserProfile,
 } from "./data/mock";
+
+import { getCurrentlyPlaying, refreshSpotifyToken, openSpotifyLink } from '../lib/spotify'
+import { useNowPlaying } from '../lib/useNowPlaying'
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
@@ -47,6 +52,17 @@ const COMPOSER_ABOVE_NAV = NAVBAR_H + BOTTOM_INSET + 8;
 
 // Lets any component inside a post card open the detail view without prop-drilling through card types
 const OpenDetailCtx = createContext<(() => void) | undefined>(undefined);
+
+// ─── Now Playing context ──────────────────────────────────────────────────────
+// The hook lives in FeedScreen (never unmounts) so tab switches don't destroy
+// the token cache or needsReconnect state.
+type NowPlayingCtxValue = ReturnType<typeof useNowPlaying>
+const NowPlayingCtx = createContext<NowPlayingCtxValue | null>(null)
+const useNowPlayingCtx = () => {
+  const ctx = useContext(NowPlayingCtx)
+  if (!ctx) throw new Error('useNowPlayingCtx must be used inside NowPlayingCtx.Provider')
+  return ctx
+}
 
 
 // ─── Now Playing bubble (replaces plain story bubble) ────────────────────────
@@ -78,27 +94,71 @@ function NowPlayingBubble({ item }: { item: NowPlayingStory }) {
 
 const WAVE_H = [5, 10, 15, 10, 18, 8, 14, 6];
 
+function AnimatedWaveform({ color }: { color: string }) {
+  const anims = useRef(WAVE_H.map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    const loops = anims.map((anim, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 80),
+          Animated.timing(anim, { toValue: 1, duration: 380 + i * 40, useNativeDriver: false }),
+          Animated.timing(anim, { toValue: 0, duration: 380 + i * 40, useNativeDriver: false }),
+        ])
+      )
+    );
+    loops.forEach(l => l.start());
+    return () => loops.forEach(l => l.stop());
+  }, []);
+
+  return (
+    <View style={styles.nowPlayingWaves}>
+      {WAVE_H.map((base, i) => {
+        const height = anims[i].interpolate({
+          inputRange: [0, 1],
+          outputRange: [Math.max(3, base * 0.4), base],
+        });
+        return (
+          <Animated.View
+            key={i}
+            style={[styles.nowPlayingWaveBar, { height, backgroundColor: color + "99" }]}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 function NowPlayingBanner() {
+  const { track } = useNowPlayingCtx();
+
+  if (!track?.isPlaying) return null;
+
+  const COLOR = "#1DB954";
+
   return (
     <View style={styles.nowPlayingBar}>
-      {/* Color swatch / art */}
-      <View style={[styles.nowPlayingBarSwatch, { backgroundColor: MY_NOW_PLAYING.color + "33", borderColor: MY_NOW_PLAYING.color + "55" }]}>
-        <Ionicons name="musical-note" size={13} color={MY_NOW_PLAYING.color} />
-      </View>
+      {/* Album art or fallback swatch */}
+      {track.albumArt ? (
+        <Image source={{ uri: track.albumArt }} style={[styles.nowPlayingBarSwatch, { borderWidth: 0 }]} />
+      ) : (
+        <View style={[styles.nowPlayingBarSwatch, { backgroundColor: COLOR + "33", borderColor: COLOR + "55" }]}>
+          <Ionicons name="musical-note" size={13} color={COLOR} />
+        </View>
+      )}
+
       {/* Track info */}
       <View style={{ flex: 1 }}>
-        <Text style={styles.nowPlayingBarSong} numberOfLines={1}>{MY_NOW_PLAYING.song}</Text>
-        <Text style={styles.nowPlayingBarArtist} numberOfLines={1}>{MY_NOW_PLAYING.artist}</Text>
+        <Text style={styles.nowPlayingBarSong} numberOfLines={1}>{track.name}</Text>
+        <Text style={styles.nowPlayingBarArtist} numberOfLines={1}>{track.artist}</Text>
       </View>
-      {/* Mini waveform */}
-      <View style={styles.nowPlayingWaves}>
-        {WAVE_H.map((h, i) => (
-          <View key={i} style={[styles.nowPlayingWaveBar, { height: h, backgroundColor: MY_NOW_PLAYING.color + "99" }]} />
-        ))}
-      </View>
+
+      {/* Animated waveform */}
+      <AnimatedWaveform color={COLOR} />
+
       {/* Share to chat */}
       <TouchableOpacity style={styles.nowPlayingShareBtn} activeOpacity={0.75}>
-        <Ionicons name="paper-plane-outline" size={14} color={MY_NOW_PLAYING.color} />
+        <Ionicons name="paper-plane-outline" size={14} color={COLOR} />
       </TouchableOpacity>
     </View>
   );
@@ -932,6 +992,16 @@ function DiscoverView() {
   const [joinedMeets, setJoinedMeets]         = useState<Set<string>>(new Set());
   const [followedArtists, setFollowedArtists] = useState<Set<string>>(new Set());
   const [likedRecs, setLikedRecs]             = useState<Set<string>>(new Set());
+  const [refreshing, setRefreshing]           = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    // Reset local interaction state on pull-to-refresh
+    setJoinedMeets(new Set());
+    setFollowedArtists(new Set());
+    setLikedRecs(new Set());
+    setRefreshing(false);
+  };
 
   const toggleSet = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
     setter((p) => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s; });
@@ -949,7 +1019,13 @@ function DiscoverView() {
   const noResults       = q && filteredArtists.length === 0 && filteredMeets.length === 0 && filteredRecs.length === 0;
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={ds.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={ds.scrollContent}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#AB00FF" />}
+    >
       {/* Header */}
       <View style={ds.header}>
         <Text style={ds.headerTitle}>Discover</Text>
@@ -1395,8 +1471,16 @@ type MeetsTab = "For You" | "Meets" | "Live";
 const MEETS_TABS: MeetsTab[] = ["For You", "Meets", "Live"];
 
 function MeetsView() {
-  const [activeTab, setActiveTab] = useState<MeetsTab>("For You");
+  const [activeTab, setActiveTab]   = useState<MeetsTab>("For You");
   const [searchText, setSearchText] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setSearchText("");
+    setActiveTab("For You");
+    setRefreshing(false);
+  };
 
   const q = searchText.toLowerCase();
   const filtered = MEETS_STREAMS.filter((s) => {
@@ -1409,7 +1493,13 @@ function MeetsView() {
   const rightCol = filtered.filter((_, i) => i % 2 === 1);
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={ms.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={ms.scrollContent}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#AB00FF" />}
+    >
       {/* Header */}
       <View style={ms.header}>
         <Text style={ms.headerTitle}>Meets</Text>
@@ -2788,7 +2878,56 @@ const PROFILE_BANNER_H = 172;
 const PROFILE_AVATAR_SIZE = 86;
 const PROFILE_AVATAR_OVERLAP = Math.round(PROFILE_AVATAR_SIZE * 0.44);
 
+// Cached once per login session — cleared on pull-to-refresh
+let _profileCache: UserProfile | null = null;
+
 function ProfileView() {
+  const { track, liveProgressMs, gradient, needsReconnect, reconnect } = useNowPlayingCtx();
+  const [profile,    setProfile]    = useState<UserProfile | null>(_profileCache);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchProfile = async (force = false) => {
+    if (_profileCache && !force) { setProfile(_profileCache); return; }
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) throw new Error("Not authenticated");
+
+      const { data, error } = await supabase
+        .from("users")
+        .select("username, display_name, bio, is_verified, followers_count, following_count")
+        .eq("id", user.id)
+        .single<UserProfile>();
+
+      if (error) throw new Error(error.message);
+
+      _profileCache = data;
+      setProfile(data);
+    } catch (err) {
+      console.error("fetchProfile:", err);
+    }
+  };
+
+  useEffect(() => { fetchProfile(); }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    _profileCache = null;
+    await fetchProfile(true);
+    setRefreshing(false);
+  };
+
+  const getInitials = (name?: string | null) => {
+  if (!name) return "";
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  const first = words[0].charAt(0).toUpperCase();
+  if (words.length === 1) return first;
+  const last = words[words.length - 1].charAt(0).toUpperCase();
+  return `${first}${last}`;
+};
+
+
+
   return (
     <View style={{ flex: 1 }}>
       {/* ─── Top bar ─────────────────────────────────────────────── */}
@@ -2807,7 +2946,11 @@ function ProfileView() {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={profileStyles.scrollContent}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={profileStyles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#AB00FF" />}
+      >
       <View style={profileStyles.card}>
         {/* Banner */}
         <View style={profileStyles.bannerWrap}>
@@ -2843,30 +2986,31 @@ function ProfileView() {
         {/* Avatar row — negative margin overlaps banner bottom */}
         <View style={[profileStyles.avatarRow, { marginTop: -PROFILE_AVATAR_OVERLAP }]}>
           <View style={profileStyles.avatar}>
-            <Text style={profileStyles.avatarInitials}>JD</Text>
+            <Text style={profileStyles.avatarInitials}>{getInitials(profile?.display_name)}</Text>
           </View>
         </View>
 
         {/* Info */}
         <View style={profileStyles.infoSection}>
           <View style={profileStyles.nameRow}>
-            <Text style={profileStyles.name}>Jane Doe</Text>
-            <View style={profileStyles.verifiedBadge}>
-              <Text style={profileStyles.verifiedText}>✓</Text>
-            </View>
+            <Text style={profileStyles.name}>{profile?.display_name}</Text>
+            {profile?.is_verified && (
+              <View style={profileStyles.verifiedBadge}>
+                <Text style={profileStyles.verifiedText}>✓</Text>
+              </View>
+            )}
           </View>
-          <Text style={profileStyles.handle}>@thejanedoe</Text>
+          <Text style={profileStyles.handle}>@{profile?.username}</Text>
 
           <Text style={profileStyles.bio}>
-            {"Creative Designer w/ Marketing Expertise\nEx Art Director → "}
-            <Text style={profileStyles.mention}>@apple</Text>
+            {profile?.bio || "No bio available"}
           </Text>
 
           <View style={profileStyles.statsRow}>
-            <Text style={profileStyles.statNum}>100</Text>
+            <Text style={profileStyles.statNum}>{profile?.following_count?.toLocaleString() || "0"}</Text>
             <Text style={profileStyles.statLabel}> Following</Text>
             <View style={{ width: 22 }} />
-            <Text style={profileStyles.statNum}>23.6K</Text>
+            <Text style={profileStyles.statNum}>{profile?.followers_count?.toLocaleString() || "0"}</Text>
             <Text style={profileStyles.statLabel}> Followers</Text>
           </View>
 
@@ -2883,41 +3027,78 @@ function ProfileView() {
         </View>
       </View>
 
-      {/* ─── Now Playing card ────────────────────────────────────── */}
-      <LinearGradient
-        colors={["#3D1A0C", "#1E0D08", "#0E0907"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={profileStyles.nowPlayingCard}
-      >
-        {/* Album art + song info row */}
-        <View style={profileStyles.npTopRow}>
-          <View style={profileStyles.npArt}>
-            <Text style={profileStyles.npArtEmoji}>🎵</Text>
+      {/* ─── Spotify reconnect prompt ────────────────────────────── */}
+      {needsReconnect && (
+        <TouchableOpacity
+          style={profileStyles.reconnectCard}
+          activeOpacity={0.82}
+          onPress={reconnect}
+        >
+          <FontAwesome5 name="spotify" size={16} color="#1DB954" />
+          <View style={{ flex: 1 }}>
+            <Text style={profileStyles.reconnectTitle}>Reconnect Spotify</Text>
+            <Text style={profileStyles.reconnectSub}>Your session expired — tap to reconnect</Text>
           </View>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+        </TouchableOpacity>
+      )}
 
-          <View style={profileStyles.npInfo}>
-            <Text style={profileStyles.npTitle} numberOfLines={1}>Kini Mereka Tahu</Text>
-            <Text style={profileStyles.npArtist} numberOfLines={1}>Bernadya</Text>
+      {/* ─── Now Playing card — only shown while actively playing ── */}
+      {!needsReconnect && track?.isPlaying && (() => {
+        const progress = track.durationMs > 0 ? liveProgressMs / track.durationMs : 0;
+        const fmt = (ms: number) => {
+          const s = Math.floor(ms / 1000);
+          return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+        };
+        return (
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={() => openSpotifyLink(
+              `spotify:track:${track.id}`,
+              `https://open.spotify.com/track/${track.id}`,
+            )}
+          >
+            <LinearGradient
+              colors={gradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={profileStyles.nowPlayingCard}
+            >
+              {/* Album art + song info row */}
+              <View style={profileStyles.npTopRow}>
+                {track.albumArt ? (
+                  <Image source={{ uri: track.albumArt }} style={profileStyles.npArt} />
+                ) : (
+                  <View style={[profileStyles.npArt, profileStyles.npArtFallback]}>
+                    <Text style={profileStyles.npArtEmoji}>🎵</Text>
+                  </View>
+                )}
 
-            {/* Progress bar */}
-            <View style={profileStyles.npProgressTrack}>
-              <View style={profileStyles.npProgressFill}>
-                <View style={profileStyles.npProgressThumb} />
+                <View style={profileStyles.npInfo}>
+                  <Text style={profileStyles.npTitle} numberOfLines={1}>{track.name}</Text>
+                  <Text style={profileStyles.npArtist} numberOfLines={1}>{track.artist}</Text>
+
+                  {/* Progress bar */}
+                  <View style={profileStyles.npProgressTrack}>
+                    <View style={[profileStyles.npProgressFill, { width: `${progress * 100}%` as any }]}>
+                      <View style={profileStyles.npProgressThumb} />
+                    </View>
+                  </View>
+
+                  {/* Timestamps */}
+                  <View style={profileStyles.npTimestamps}>
+                    <Text style={profileStyles.npTime}>{fmt(liveProgressMs)}</Text>
+                    <Text style={profileStyles.npTime}>{fmt(track.durationMs)}</Text>
+                  </View>
+                </View>
               </View>
-            </View>
 
-            {/* Timestamps */}
-            <View style={profileStyles.npTimestamps}>
-              <Text style={profileStyles.npTime}>0:55</Text>
-              <Text style={profileStyles.npTime}>2:58</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Broadcast row */}
-        <BroadcastRow />
-      </LinearGradient>
+              {/* Broadcast row */}
+              <BroadcastRow />
+            </LinearGradient>
+          </TouchableOpacity>
+        );
+      })()}
 
       {/* ─── Section tabs ────────────────────────────────────────── */}
       <ProfileTabs />
@@ -2996,6 +3177,21 @@ const profileStyles = StyleSheet.create({
   metaIcon: { fontSize: 13, color: "rgba(255,255,255,0.28)" },
   metaText: { fontSize: 13, color: "rgba(255,255,255,0.32)" },
 
+  // Spotify reconnect
+  reconnectCard: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(29,185,84,0.08)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(29,185,84,0.2)",
+    padding: 14,
+  },
+  reconnectTitle: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  reconnectSub: { fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 },
+
   // Now Playing card
   nowPlayingCard: {
     marginTop: 12,
@@ -3016,6 +3212,7 @@ const profileStyles = StyleSheet.create({
     justifyContent: "center",
     flexShrink: 0,
   },
+  npArtFallback: { backgroundColor: "#2a1a10", alignItems: "center", justifyContent: "center" },
   npArtEmoji: { fontSize: 26, opacity: 0.5 },
   npInfo: { flex: 1, gap: 3 },
   npTitle: { fontSize: 15, fontWeight: "700", color: "#ffffff" },
@@ -3142,6 +3339,9 @@ const profileStyles = StyleSheet.create({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function FeedScreen() {
+  // Instantiate once at the top level so token cache + needsReconnect survive tab switches
+  const nowPlaying = useNowPlaying();
+
   const [menuVisible, setMenuVisible] = useState(false);
   const [activeNav, setActiveNav] = useState("Feed");
   const [quickReplyPost, setQuickReplyPost] = useState<Post | null>(null);
@@ -3149,6 +3349,14 @@ export default function FeedScreen() {
   const [openDm, setOpenDm]         = useState<DirectMessage | null>(null);
   const [keyboardUp, setKeyboardUp] = useState(false);
   const [feedScrollEnabled, setFeedScrollEnabled] = useState(true);
+  const [feedRefreshing, setFeedRefreshing] = useState(false);
+
+  const onFeedRefresh = async () => {
+    setFeedRefreshing(true);
+    // When feed data is live, re-fetch posts here
+    await new Promise(r => setTimeout(r, 600));
+    setFeedRefreshing(false);
+  };
 
   // Composer bottom animates between resting position (above nav) and above keyboard
   const composerBottom = useRef(new Animated.Value(COMPOSER_ABOVE_NAV)).current;
@@ -3179,6 +3387,7 @@ export default function FeedScreen() {
   }, []);
 
   return (
+    <NowPlayingCtx.Provider value={nowPlaying}>
     <View style={styles.container}>
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         {activeNav === "Profile" ? (
@@ -3197,6 +3406,7 @@ export default function FeedScreen() {
             showsVerticalScrollIndicator={false}
             scrollEnabled={feedScrollEnabled}
             keyboardShouldPersistTaps="handled"
+            refreshControl={<RefreshControl refreshing={feedRefreshing} onRefresh={onFeedRefresh} tintColor="#AB00FF" />}
             ListHeaderComponent={
               <>
                 <View style={styles.navbar}>
@@ -3283,6 +3493,7 @@ export default function FeedScreen() {
         <ChatDetailView dm={openDm} onClose={() => setOpenDm(null)} />
       )}
     </View>
+    </NowPlayingCtx.Provider>
   );
 }
 

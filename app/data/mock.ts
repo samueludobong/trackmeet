@@ -15,6 +15,15 @@ export const AVATAR_MAP: Record<string, any> = {
   "dan.b": require("../../assets/avatars/dan.jpg"),
 };
 
+export type UserProfile = {
+  username: string;
+  display_name: string | null;
+  bio: string | null;
+  is_verified: boolean;
+  followers_count: number | null;
+  following_count: number | null;
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type PostType = "text" | "image" | "video" | "music" | "poll";
@@ -27,7 +36,7 @@ export type Post = {
   handle: string;
   initials: string;
   avatarColor: string;
-  bio: string;
+  bio: string | null;
   time: string;
   text?: string;
   type: PostType;

@@ -1,8 +1,9 @@
 import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
+import { supabase } from '../../lib/supabase';
 
-// Prevents re-triggering the animation when navigating back from onboarding
+// Prevents re-triggering the animation when navigating back from a screen
 let hasLaunched = false;
 
 export default function SplashScreen() {
@@ -13,6 +14,13 @@ export default function SplashScreen() {
 
   useEffect(() => {
     if (hasLaunched) return;
+
+    // Check for a saved session in parallel with the splash animation.
+    // By the time the animation ends (~2s) the session check is always done.
+    let destination: '/feed' | '/onboarding' = '/onboarding';
+    const sessionCheck = supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) destination = '/feed';
+    });
 
     const timer = setTimeout(() => {
       hasLaunched = true;
@@ -29,7 +37,6 @@ export default function SplashScreen() {
           easing: Easing.in(Easing.exp),
           useNativeDriver: true,
         }),
-
         Animated.sequence([
           Animated.delay(300),
           Animated.timing(overlayOpacity, {
@@ -38,7 +45,10 @@ export default function SplashScreen() {
             useNativeDriver: true,
           }),
         ]),
-      ]).start(() => router.replace('/onboarding'));
+      ]).start(async () => {
+        await sessionCheck; // ensure session check finished before navigating
+        router.replace(destination);
+      });
     }, 2000);
 
     return () => clearTimeout(timer);
