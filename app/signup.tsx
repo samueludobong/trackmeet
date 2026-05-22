@@ -301,21 +301,7 @@ export default function SignupScreen() {
             )}
             style={[styles.bottomCard, cardAnimStyle]}
           >
-            {/* Step progress dots — outside switchFade so they update instantly */}
-            {mode === "signup" && (
-              <View style={styles.stepDots}>
-                {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.stepDot,
-                      i < step ? styles.stepDotDone : styles.stepDotPending,
-                    ]}
-                  />
-                ))}
-              </View>
-            )}
-
+            
             {/* All content fades together */}
             <Animated.View style={[styles.modeBlock, { opacity: switchFade }]}>
 
@@ -362,10 +348,10 @@ export default function SignupScreen() {
                     <Text style={styles.dividerText}>or continue with</Text>
                     <View style={styles.dividerLine} />
                   </View>
-                  <TouchableOpacity style={styles.socialBtn} activeOpacity={0.88}>
+                  {/* <TouchableOpacity style={styles.socialBtn} activeOpacity={0.88}>
                     <Text style={styles.socialIcon}>🍎</Text>
                     <Text style={styles.socialBtnText}>Continue with Apple</Text>
-                  </TouchableOpacity>
+                  </TouchableOpacity> */}
                   <TouchableOpacity style={styles.socialBtn} activeOpacity={0.88}>
                     <Text style={styles.socialIcon}>G</Text>
                     <Text style={styles.socialBtnText}>Continue with Google</Text>
@@ -473,10 +459,10 @@ export default function SignupScreen() {
                     <Text style={styles.dividerText}>or continue with</Text>
                     <View style={styles.dividerLine} />
                   </View>
-                  <TouchableOpacity style={styles.socialBtn} activeOpacity={0.88}>
+                  {/* <TouchableOpacity style={styles.socialBtn} activeOpacity={0.88}>
                     <Text style={styles.socialIcon}>🍎</Text>
                     <Text style={styles.socialBtnText}>Continue with Apple</Text>
-                  </TouchableOpacity>
+                  </TouchableOpacity> */}
                   <TouchableOpacity style={styles.socialBtn} activeOpacity={0.88}>
                     <Text style={styles.socialIcon}>G</Text>
                     <Text style={styles.socialBtnText}>Continue with Google</Text>
