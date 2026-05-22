@@ -12,6 +12,20 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useState, useRef, useEffect } from 'react';
+import { supabase } from '../lib/supabase'
+
+// Inside any useEffect
+useEffect(() => {
+  const test = async () => {
+    const { data, error } = await supabase
+      .from('users')
+      .select('count')
+    
+    console.log('Supabase connected:', data)
+    console.log('Error:', error)
+  }
+  test()
+}, [])
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
