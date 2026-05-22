@@ -111,6 +111,34 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Profile",  icon: "person-outline",        iconActive: "person"        },
 ];
 
+// ─── Now Playing stories ─────────────────────────────────────────────────────
+
+export type NowPlayingStory = {
+  id: string;
+  user: string;
+  song: string;
+  artist: string;
+  color: string;
+  initials: string;
+};
+
+export const NOW_PLAYING_STORIES: NowPlayingStory[] = [
+  { id: "np1", user: "maya_v",  song: "Essence",           artist: "Wizkid",          color: "#FF6B35", initials: "M" },
+  { id: "np2", user: "jaykay",  song: "APT.",               artist: "ROSÉ",            color: "#AB00FF", initials: "J" },
+  { id: "np3", user: "tolu",    song: "Calm Down",          artist: "Rema",            color: "#CAFF00", initials: "T" },
+  { id: "np4", user: "seren",   song: "Slow Burn",          artist: "K. Musgraves",    color: "#FF3CAC", initials: "S" },
+  { id: "np5", user: "nate_x",  song: "Stargazing",         artist: "Migos",           color: "#00C2FF", initials: "N" },
+  { id: "np6", user: "ayo",     song: "Bloody Samaritan",   artist: "Ayra Starr",      color: "#7B61FF", initials: "A" },
+  { id: "np7", user: "priya",   song: "Espresso",           artist: "S. Carpenter",    color: "#FF6B35", initials: "P" },
+];
+
+// The signed-in user's currently playing track (used in the composer banner)
+export const MY_NOW_PLAYING = {
+  song:   "Kini Mereka Tahu",
+  artist: "Bernadya",
+  color:  "#AB00FF",
+};
+
 // ─── Feed data ────────────────────────────────────────────────────────────────
 
 export const STORIES = [

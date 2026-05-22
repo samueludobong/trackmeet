@@ -15,6 +15,7 @@ import {
   Switch,
   Keyboard,
   Image,
+  KeyboardAvoidingView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRef, useState, useEffect, createContext, useContext } from "react";
@@ -27,12 +28,14 @@ import {
   DISCOVER_FILTERS, CAROUSEL_CARD_W, CAROUSEL_GAP, CAROUSEL_ITEMS,
   TRENDING_ARTISTS, FOR_YOU_RECS, UPCOMING_MEETS,
   MEETS_STREAMS,
+  NOW_PLAYING_STORIES, MY_NOW_PLAYING,
   DIRECT_MESSAGES, GROUP_CHATS, COMMUNITY_ITEMS, MESSAGES_UNREAD, CHAT_MESSAGES,
   PROFILE_TABS, PROFILE_POSTS, PROFILE_REPOSTS,
   DUMMY_PLAYLISTS, DUMMY_COMMUNITIES, ALL_SONGS, PLAYLIST_SONGS,
   fmtCount,
   type Post, type DummyComment, type DummyPlaylist, type DummySong,
   type DummyCommunity, type CarouselItem, type ProfileTab, type MeetStream,
+  type NowPlayingStory,
   type DirectMessage, type GroupChat, type CommunityItem, type ChatMessage,
 } from "./data/mock";
 
@@ -46,12 +49,12 @@ const COMPOSER_ABOVE_NAV = NAVBAR_H + BOTTOM_INSET + 8;
 const OpenDetailCtx = createContext<(() => void) | undefined>(undefined);
 
 
-// ─── Story bubble ─────────────────────────────────────────────────────────────
+// ─── Now Playing bubble (replaces plain story bubble) ────────────────────────
 
-function StoryBubble({ item }: { item: (typeof STORIES)[0] }) {
-  const photo = AVATAR_MAP[item.name];
+function NowPlayingBubble({ item }: { item: NowPlayingStory }) {
+  const photo = AVATAR_MAP[item.user];
   return (
-    <TouchableOpacity style={styles.storyItem} activeOpacity={0.8}>
+    <TouchableOpacity style={styles.nowPlayingItem} activeOpacity={0.8}>
       <View style={[styles.storyRing, { borderColor: item.color }]}>
         {photo ? (
           <Image source={photo} style={styles.storyAvatar} />
@@ -60,9 +63,44 @@ function StoryBubble({ item }: { item: (typeof STORIES)[0] }) {
             <Text style={[styles.storyInitials, { color: item.color }]}>{item.initials}</Text>
           </View>
         )}
+        {/* Music badge */}
+        <View style={[styles.nowPlayingBadge, { backgroundColor: item.color }]}>
+          <Ionicons name="musical-note" size={9} color="#0D0D0D" />
+        </View>
       </View>
-      <Text style={styles.storyName} numberOfLines={1}>{item.name}</Text>
+      <Text style={styles.storyName} numberOfLines={1}>{item.song}</Text>
+      <Text style={styles.storyArtistSub} numberOfLines={1}>{item.artist}</Text>
     </TouchableOpacity>
+  );
+}
+
+// ─── Now Playing banner (shown above composer) ────────────────────────────────
+
+const WAVE_H = [5, 10, 15, 10, 18, 8, 14, 6];
+
+function NowPlayingBanner() {
+  return (
+    <View style={styles.nowPlayingBar}>
+      {/* Color swatch / art */}
+      <View style={[styles.nowPlayingBarSwatch, { backgroundColor: MY_NOW_PLAYING.color + "33", borderColor: MY_NOW_PLAYING.color + "55" }]}>
+        <Ionicons name="musical-note" size={13} color={MY_NOW_PLAYING.color} />
+      </View>
+      {/* Track info */}
+      <View style={{ flex: 1 }}>
+        <Text style={styles.nowPlayingBarSong} numberOfLines={1}>{MY_NOW_PLAYING.song}</Text>
+        <Text style={styles.nowPlayingBarArtist} numberOfLines={1}>{MY_NOW_PLAYING.artist}</Text>
+      </View>
+      {/* Mini waveform */}
+      <View style={styles.nowPlayingWaves}>
+        {WAVE_H.map((h, i) => (
+          <View key={i} style={[styles.nowPlayingWaveBar, { height: h, backgroundColor: MY_NOW_PLAYING.color + "99" }]} />
+        ))}
+      </View>
+      {/* Share to chat */}
+      <TouchableOpacity style={styles.nowPlayingShareBtn} activeOpacity={0.75}>
+        <Ionicons name="paper-plane-outline" size={14} color={MY_NOW_PLAYING.color} />
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -1688,6 +1726,20 @@ function MessagesView({ onOpenChat }: { onOpenChat: (dm: DirectMessage) => void 
         </View>
       </View>
 
+      {/* ── Now Playing stories strip ── */}
+      <View style={msgStyles.nowPlayingSection}>
+        <Text style={msgStyles.nowPlayingLabel}>Now Listening</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={msgStyles.nowPlayingRow}
+        >
+          {NOW_PLAYING_STORIES.map((s) => (
+            <NowPlayingBubble key={s.id} item={s} />
+          ))}
+        </ScrollView>
+      </View>
+
       {/* Backdrop to close dropdown */}
       {dropdownOpen && (
         <Pressable
@@ -1902,39 +1954,37 @@ const msgStyles = StyleSheet.create({
   authorName: { fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: "700" },
   authorFollowers: { fontSize: 11, color: "rgba(255,255,255,0.25)" },
   authorDate: { fontSize: 12, color: "rgba(255,255,255,0.25)" },
+
+  // ── Now Playing stories strip ──
+  nowPlayingSection: {
+    paddingTop: 4,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  nowPlayingLabel: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.35)",
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  nowPlayingRow: { paddingHorizontal: 16, gap: 20 },
 });
 
 // ─── Chat detail view ─────────────────────────────────────────────────────────
 
 function ChatDetailView({ dm, onClose }: { dm: DirectMessage; onClose: () => void }) {
-  const slideX      = useRef(new Animated.Value(SW)).current;
-  const inputBottom = useRef(new Animated.Value(BOTTOM_INSET)).current;
+  const slideX = useRef(new Animated.Value(SW)).current;
   const [msgText, setMsgText] = useState("");
   const [localMessages, setLocalMessages] = useState<ChatMessage[]>(CHAT_MESSAGES[dm.id] ?? []);
   const flatRef = useRef<FlatList<ChatMessage>>(null);
 
+  // Slide in on mount
   useEffect(() => {
-    // Slide in
     Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start();
-
-    // Keyboard tracking
-    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSub = Keyboard.addListener(showEvt, (e) => {
-      Animated.timing(inputBottom, {
-        toValue: e.endCoordinates.height,
-        duration: Platform.OS === "ios" ? (e.duration ?? 260) : 260,
-        useNativeDriver: false,
-      }).start();
-    });
-    const hideSub = Keyboard.addListener(hideEvt, (e) => {
-      Animated.timing(inputBottom, {
-        toValue: BOTTOM_INSET,
-        duration: Platform.OS === "ios" ? (e.duration ?? 260) : 260,
-        useNativeDriver: false,
-      }).start();
-    });
-    return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
   const handleClose = () => {
@@ -1942,7 +1992,7 @@ function ChatDetailView({ dm, onClose }: { dm: DirectMessage; onClose: () => voi
     Animated.timing(slideX, { toValue: SW, duration: 260, useNativeDriver: true }).start(onClose);
   };
 
-  // Swipe right to go back
+  // Swipe right to dismiss
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
@@ -1970,7 +2020,8 @@ function ChatDetailView({ dm, onClose }: { dm: DirectMessage; onClose: () => voi
     };
     setLocalMessages((prev) => [...prev, newMsg]);
     setMsgText("");
-    setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 80);
+    // Scroll to bottom after state settles
+    setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 60);
   };
 
   return (
@@ -1992,93 +2043,100 @@ function ChatDetailView({ dm, onClose }: { dm: DirectMessage; onClose: () => voi
 
           <View style={chatStyles.headerCenter}>
             <View style={{ position: "relative" }}>
-              <AvatarCircle user={dm.user} size={38} />
+              <AvatarCircle user={dm.user} size={36} />
               {dm.online && <View style={chatStyles.headerOnlineDot} />}
             </View>
-            <View style={{ gap: 1 }}>
-              <Text style={chatStyles.headerName}>{dm.name}</Text>
-              <Text style={[chatStyles.headerStatus, !dm.online && { color: "rgba(255,255,255,0.3)" }]}>
+            <View style={{ gap: 1, flex: 1 }}>
+              <Text style={chatStyles.headerName} numberOfLines={1}>{dm.name}</Text>
+              <Text style={[chatStyles.headerStatus, !dm.online && { color: "rgba(255,255,255,0.28)" }]}>
                 {dm.online ? "● Online" : "Offline"}
               </Text>
             </View>
           </View>
 
-          <TouchableOpacity style={ds.iconBtn} activeOpacity={0.7}>
-            <Ionicons name="videocam-outline" size={20} color="#fff" />
+          {/* Start Jam */}
+          <TouchableOpacity style={chatStyles.jamBtn} activeOpacity={0.8}>
+            <Ionicons name="musical-notes" size={12} color="#0D0D0D" />
+            <Text style={chatStyles.jamBtnText}>Jam</Text>
+          </TouchableOpacity>
+
+          {/* Audio call */}
+          <TouchableOpacity style={chatStyles.headerIconBtn} activeOpacity={0.7}>
+            <Ionicons name="call-outline" size={17} color="#fff" />
+          </TouchableOpacity>
+
+          {/* Video call */}
+          <TouchableOpacity style={chatStyles.headerIconBtn} activeOpacity={0.7}>
+            <Ionicons name="videocam-outline" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
 
-        {/* ── Messages ── */}
-        <FlatList
-          ref={flatRef}
-          data={localMessages}
-          keyExtractor={(m) => m.id}
-          contentContainerStyle={chatStyles.messagesContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
-          renderItem={({ item: msg, index }) => {
-            const prev = localMessages[index - 1];
-            const next = localMessages[index + 1];
-            const firstInGroup = !prev || prev.fromMe !== msg.fromMe;
-            const lastInGroup  = !next || next.fromMe !== msg.fromMe;
-
-            // Shape the bubble tail based on position in group
-            const bubbleRadius = msg.fromMe
-              ? { borderTopRightRadius:    firstInGroup ? 6 : 18,
-                  borderBottomRightRadius: lastInGroup  ? 18 : 6 }
-              : { borderTopLeftRadius:     firstInGroup ? 6 : 18,
-                  borderBottomLeftRadius:  lastInGroup  ? 18 : 6 };
-
-            return (
-              <View style={[chatStyles.msgWrap, msg.fromMe && chatStyles.msgWrapMe,
-                { marginTop: firstInGroup ? 12 : 3 }]}>
-                <View style={[
-                  chatStyles.bubble,
-                  msg.fromMe ? chatStyles.bubbleMe : chatStyles.bubbleThem,
-                  bubbleRadius,
-                ]}>
-                  <Text style={[chatStyles.bubbleText, msg.fromMe && chatStyles.bubbleTextMe]}>
-                    {msg.text}
-                  </Text>
-                  <Text style={[chatStyles.bubbleTime, msg.fromMe && chatStyles.bubbleTimeMe]}>
-                    {msg.time}
-                  </Text>
+        {/* ── Messages + input inside KeyboardAvoidingView so it scrolls with keyboard ── */}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          <FlatList
+            ref={flatRef}
+            data={localMessages}
+            keyExtractor={(m) => m.id}
+            contentContainerStyle={chatStyles.messagesContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: true })}
+            renderItem={({ item: msg, index }) => {
+              const prev = localMessages[index - 1];
+              const next = localMessages[index + 1];
+              const firstInGroup = !prev || prev.fromMe !== msg.fromMe;
+              const lastInGroup  = !next || next.fromMe !== msg.fromMe;
+              const bubbleRadius = msg.fromMe
+                ? { borderTopRightRadius: firstInGroup ? 6 : 18, borderBottomRightRadius: lastInGroup ? 18 : 6 }
+                : { borderTopLeftRadius:  firstInGroup ? 6 : 18, borderBottomLeftRadius:  lastInGroup ? 18 : 6 };
+              return (
+                <View style={[chatStyles.msgWrap, msg.fromMe && chatStyles.msgWrapMe, { marginTop: firstInGroup ? 12 : 3 }]}>
+                  <View style={[chatStyles.bubble, msg.fromMe ? chatStyles.bubbleMe : chatStyles.bubbleThem, bubbleRadius]}>
+                    <Text style={[chatStyles.bubbleText, msg.fromMe && chatStyles.bubbleTextMe]}>{msg.text}</Text>
+                    <Text style={[chatStyles.bubbleTime, msg.fromMe && chatStyles.bubbleTimeMe]}>{msg.time}</Text>
+                  </View>
                 </View>
-              </View>
-            );
-          }}
-        />
-      </SafeAreaView>
-
-      {/* ── Input bar (floats above keyboard) ── */}
-      <Animated.View style={[chatStyles.inputBar, { bottom: inputBottom }]}>
-        <TouchableOpacity style={chatStyles.inputPlusBtn} activeOpacity={0.7}>
-          <Ionicons name="add-circle-outline" size={30} color="rgba(255,255,255,0.4)" />
-        </TouchableOpacity>
-
-        <View style={chatStyles.inputWrap}>
-          <TextInput
-            style={chatStyles.input}
-            placeholder="Message..."
-            placeholderTextColor="rgba(255,255,255,0.28)"
-            value={msgText}
-            onChangeText={setMsgText}
-            multiline
-            maxLength={500}
-            returnKeyType="default"
+              );
+            }}
           />
-          {msgText.length === 0 ? (
-            <TouchableOpacity style={chatStyles.inputAction} activeOpacity={0.7}>
-              <Ionicons name="mic-outline" size={19} color="rgba(255,255,255,0.38)" />
+
+          {/* ── Now playing banner — share what you're listening to ── */}
+          <View style={{ paddingHorizontal: 12 }}>
+            <NowPlayingBanner />
+          </View>
+
+          {/* ── Input bar (in document flow — moves with KeyboardAvoidingView) ── */}
+          <View style={chatStyles.inputBar}>
+            <TouchableOpacity style={chatStyles.inputPlusBtn} activeOpacity={0.7}>
+              <Ionicons name="add-circle-outline" size={28} color="rgba(255,255,255,0.38)" />
             </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={[chatStyles.inputAction, chatStyles.sendBtn]} activeOpacity={0.8} onPress={sendMessage}>
-              <Ionicons name="send" size={14} color="#0D0D0D" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </Animated.View>
+            <View style={chatStyles.inputWrap}>
+              <TextInput
+                style={chatStyles.input}
+                placeholder="Message..."
+                placeholderTextColor="rgba(255,255,255,0.28)"
+                value={msgText}
+                onChangeText={setMsgText}
+                multiline
+                maxLength={500}
+                returnKeyType="default"
+              />
+              {msgText.length === 0 ? (
+                <TouchableOpacity style={chatStyles.inputAction} activeOpacity={0.7}>
+                  <Ionicons name="mic-outline" size={18} color="rgba(255,255,255,0.38)" />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={[chatStyles.inputAction, chatStyles.sendBtn]} activeOpacity={0.8} onPress={sendMessage}>
+                  <Ionicons name="send" size={14} color="#0D0D0D" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </Animated.View>
   );
 }
@@ -2087,61 +2145,64 @@ const chatStyles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 10,
-    gap: 10,
+    gap: 6,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.07)",
   },
-  backBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  headerCenter: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
+  backBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
+  headerCenter: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 },
   headerOnlineDot: {
-    position: "absolute",
-    bottom: 0, right: 0,
-    width: 11, height: 11, borderRadius: 6,
+    position: "absolute", bottom: 0, right: 0,
+    width: 10, height: 10, borderRadius: 5,
     backgroundColor: "#00E5A0",
     borderWidth: 2, borderColor: "#0D0D0D",
   },
-  headerName: { fontSize: 16, fontWeight: "800", color: "#fff" },
-  headerStatus: { fontSize: 12, color: "#00E5A0", fontWeight: "600" },
+  headerName: { fontSize: 15, fontWeight: "800", color: "#fff" },
+  headerStatus: { fontSize: 11, color: "#00E5A0", fontWeight: "600" },
 
-  messagesContent: {
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 90,
+  // Start Jam pill
+  jamBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "#CAFF00", borderRadius: 20,
+    paddingHorizontal: 11, paddingVertical: 6,
+  },
+  jamBtnText: { fontSize: 12, color: "#0D0D0D", fontWeight: "800" },
+
+  // Call / video icon buttons
+  headerIconBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.09)",
   },
 
+  // Messages list
+  messagesContent: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 16 },
   msgWrap: { alignSelf: "flex-start", maxWidth: SW * 0.74 },
   msgWrapMe: { alignSelf: "flex-end" },
-
-  bubble: {
-    paddingHorizontal: 14,
-    paddingTop: 9,
-    paddingBottom: 7,
-    borderRadius: 18,
-  },
+  bubble: { paddingHorizontal: 14, paddingTop: 9, paddingBottom: 7, borderRadius: 18 },
   bubbleThem: { backgroundColor: "#1C1C1E" },
   bubbleMe:   { backgroundColor: "#AB00FF" },
-
   bubbleText: { fontSize: 15, color: "rgba(255,255,255,0.82)", lineHeight: 21 },
   bubbleTextMe: { color: "#fff" },
   bubbleTime: { fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "right", marginTop: 3 },
   bubbleTimeMe: { color: "rgba(255,255,255,0.55)" },
 
+  // Input bar — no longer absolute, sits in document flow
   inputBar: {
-    position: "absolute",
-    left: 0, right: 0,
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 8,
     paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: 10,
+    paddingBottom: BOTTOM_INSET,
     backgroundColor: "#0D0D0D",
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.07)",
   },
-  inputPlusBtn: { paddingBottom: 6 },
+  inputPlusBtn: { paddingBottom: 4 },
   inputWrap: {
     flex: 1,
     flexDirection: "row",
@@ -3139,7 +3200,7 @@ export default function FeedScreen() {
             ListHeaderComponent={
               <>
                 <View style={styles.navbar}>
-                  <Text style={styles.navTitle}>Feed</Text>
+                  <View style={{ width: 40 }} />
                   <Text style={styles.navBrand}>trackmeet</Text>
                   <TouchableOpacity style={styles.notifBtn} activeOpacity={0.7}>
                     <Ionicons name="notifications-outline" size={22} color="#fff" />
@@ -3151,7 +3212,7 @@ export default function FeedScreen() {
                   contentContainerStyle={styles.storiesContent}
                   style={styles.storiesStrip}
                 >
-                  {STORIES.map((s) => <StoryBubble key={s.id} item={s} />)}
+                  {NOW_PLAYING_STORIES.map((s) => <NowPlayingBubble key={s.id} item={s} />)}
                 </ScrollView>
                 <View style={styles.stripDivider} />
               </>
@@ -3170,7 +3231,7 @@ export default function FeedScreen() {
       </SafeAreaView>
 
       {/* Floating composer — only on Feed tab */}
-      {activeNav !== "Profile" && activeNav !== "Discover" && activeNav !== "Messages" && (
+      {activeNav === "Feed" && (
         <Animated.View style={[styles.composerWrap, { bottom: composerBottom }]}>
           <View style={styles.composerGlass}>
             <TouchableOpacity
@@ -3243,13 +3304,11 @@ const styles = StyleSheet.create({
   },
   navTitle: { fontSize: 48, fontWeight: "900", color: "#ffffff", letterSpacing: -1, lineHeight: 52 },
   navBrand: {
-    position: "absolute",
-    left: 0, right: 0,
+    flex: 1,
     textAlign: "center",
     fontSize: 25,
     fontFamily: "Pacifico_400Regular",
     color: "#AB00FF",
-    pointerEvents: "none",
   },
   notifBtn: {
     width: 40, height: 40, borderRadius: 20,
@@ -3266,7 +3325,51 @@ const styles = StyleSheet.create({
   storyAvatar: { width: 76, height: 76, borderRadius: 78, alignItems: "center", justifyContent: "center" },
   storyInitials: { fontSize: 17, fontWeight: "800" },
   storyName: { fontSize: 10, color: "rgba(255,255,255,0.4)", textAlign: "center" },
+  storyArtistSub: { fontSize: 9, color: "rgba(255,255,255,0.22)", textAlign: "center" },
   stripDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.07)", marginBottom: 12 },
+
+  // Now-playing bubble (wider than storyItem to fit artist line)
+  nowPlayingItem: { alignItems: "center", width: 72 },
+  nowPlayingBadge: {
+    position: "absolute", bottom: -2, right: -2,
+    width: 18, height: 18, borderRadius: 9,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 2, borderColor: "#0D0D0D",
+  },
+
+  // Now-playing composer banner
+  nowPlayingBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "rgba(18,18,24,0.95)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(171,0,255,0.22)",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 8,
+    shadowColor: "#AB00FF",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  nowPlayingBarSwatch: {
+    width: 32, height: 32, borderRadius: 9,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1,
+  },
+  nowPlayingBarSong:   { fontSize: 12, color: "#fff", fontWeight: "700" },
+  nowPlayingBarArtist: { fontSize: 11, color: "rgba(255,255,255,0.38)", marginTop: 1 },
+  nowPlayingWaves: { flexDirection: "row", alignItems: "center", gap: 2 },
+  nowPlayingWaveBar: { width: 3, borderRadius: 2 },
+  nowPlayingShareBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: "rgba(171,0,255,0.12)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(171,0,255,0.3)",
+  },
 
   // Card shell
   card: { backgroundColor: "#ffffff0e", borderRadius: 20, marginHorizontal: 13, paddingTop: 16, overflow: "hidden" },
@@ -3346,7 +3449,7 @@ const styles = StyleSheet.create({
   },
   composerPlus: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" },
   composerPlusIcon: { fontSize: 24, color: "#fff", lineHeight: 28 },
-  composerInput: { flex: 1, fontSize: 15, color: "#ffffff", paddingVertical: 6, paddingHorizontal: 4 },
+  composerInput: { flex: 1, fontSize: 15, color: "#ffffff", paddingVertical: 0, paddingHorizontal: 4, textAlignVertical: "center" },
   composerSend: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#AB00FF", alignItems: "center", justifyContent: "center" },
   composerSendIcon: { fontSize: 18, color: "#fff", fontWeight: "700" },
 
