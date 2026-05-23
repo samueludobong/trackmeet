@@ -424,6 +424,13 @@ export type ChatMessage = {
   text: string;
   time: string;
   fromMe: boolean;
+  type?: 'text' | 'spotify_track';
+  spotifyTrack?: {
+    id: string;
+    name: string;
+    artist: string;
+    albumArt: string | null;
+  };
 };
 
 export const CHAT_MESSAGES: Record<string, ChatMessage[]> = {
@@ -444,6 +451,9 @@ export const CHAT_MESSAGES: Record<string, ChatMessage[]> = {
     { id: "dm2-4", text: "exactly!! I had to rewind it 3 times",                                time: "9:44",  fromMe: false },
     { id: "dm2-5", text: "That track you dropped last night was absolute fire 🔥",              time: "9:58",  fromMe: false },
     { id: "dm2-6", text: "what's the name of that last track? I need it in my life",            time: "9:58",  fromMe: false },
+    { id: "dm2-7", text: "", time: "10:01", fromMe: true, type: "spotify_track",
+      spotifyTrack: { id: "4uLU6hMCjMI75M1A2tKUQC", name: "SICKO MODE", artist: "Travis Scott", albumArt: null } },
+    { id: "dm2-8", text: "this one 🔥",                                                          time: "10:01", fromMe: true  },
   ],
   dm3: [
     { id: "dm3-1", text: "Hey, got a min to chat about the project?",                           time: "9:10",  fromMe: false },

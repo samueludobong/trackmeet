@@ -18,6 +18,8 @@ const SPOTIFY_SCOPES = [
   'user-modify-playback-state',
   'playlist-read-private',
   'playlist-read-collaborative',
+  'user-library-modify',    // needed for Save to Liked Songs
+  'user-library-read',      // needed to check if track is already liked
 ].join(' ')
 
 // Generate redirect URI
@@ -385,5 +387,39 @@ export const getCurrentlyPlaying = async (accessToken: string) => {
   } catch (error) {
     console.log('Currently playing error:', error)
     return null
+  }
+}
+
+// Save a track to the user's Liked Songs library.
+// Requires the user-library-modify scope (added in SPOTIFY_SCOPES above).
+// Returns true on success, false on failure (including missing scope).
+export const saveTrackToLiked = async (accessToken: string, trackId: string): Promise<boolean> => {
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/tracks', {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids: [trackId] }),
+    })
+    return res.status === 200
+  } catch {
+    return false
+  }
+}
+
+// Check if a track is already in the user's Liked Songs.
+export const isTrackSaved = async (accessToken: string, trackId: string): Promise<boolean> => {
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/me/tracks/contains?ids=${trackId}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (!res.ok) return false
+    const data = await res.json()
+    return data[0] === true
+  } catch {
+    return false
   }
 }

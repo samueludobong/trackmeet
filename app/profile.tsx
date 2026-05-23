@@ -12,7 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { useNowPlaying } from "../lib/useNowPlaying";
+import { useNowPlaying, type NowPlayingTrack } from "../lib/useNowPlaying";
 import { openSpotifyLink } from "../lib/spotify";
 
 const BANNER_H = 172;
@@ -21,8 +21,23 @@ const AVATAR_OVERLAP = Math.round(AVATAR_SIZE * 0.44);
 
 // ─── Now Playing card ────────────────────────────────────────────────────────
 
-function NowPlayingCard() {
-  const { track, liveProgressMs, gradient, loading, needsReconnect, reconnect } = useNowPlaying();
+type NowPlayingCardProps = {
+  track: NowPlayingTrack | null;
+  liveProgressMs: number;
+  gradient: [string, string, string];
+  loading: boolean;
+  needsReconnect: boolean;
+  reconnect: () => void;
+};
+
+function NowPlayingCard({
+  track,
+  liveProgressMs,
+  gradient,
+  loading,
+  needsReconnect,
+  reconnect,
+}: NowPlayingCardProps) {
   const pulse = useRef(new Animated.Value(1)).current;
 
   // Pulse the green dot while playing
@@ -59,9 +74,7 @@ function NowPlayingCard() {
     );
   }
 
-  if (!track?.isPlaying) {
-    return null;
-  }
+  if (!track?.isPlaying) return null;
 
   const progress = track.durationMs > 0 ? liveProgressMs / track.durationMs : 0;
   const fmt = (ms: number) => {
@@ -85,44 +98,48 @@ function NowPlayingCard() {
         end={{ x: 1, y: 1 }}
         style={npStyles.card}
       >
-      {/* Header row */}
-      <View style={npStyles.header}>
-        <Animated.View style={[npStyles.dot, { opacity: pulse }]} />
-        <Text style={npStyles.label}>LISTENING NOW</Text>
-        <FontAwesome5 name="spotify" size={13} color="#1DB954" />
-      </View>
+        {/* Header row */}
+        <View style={npStyles.header}>
+          <Animated.View style={[npStyles.dot, { opacity: pulse }]} />
+          <Text style={npStyles.label}>LISTENING NOW</Text>
+          <FontAwesome5 name="spotify" size={13} color="#1DB954" />
+        </View>
 
-      {/* Body */}
-      <View style={npStyles.body}>
-        {track.albumArt ? (
-          <Image source={{ uri: track.albumArt }} style={npStyles.albumArt} />
-        ) : (
-          <View style={[npStyles.albumArt, npStyles.albumArtFallback]}>
-            <FontAwesome5 name="music" size={18} color="rgba(255,255,255,0.3)" />
-          </View>
-        )}
+        {/* Body */}
+        <View style={npStyles.body}>
+          {track.albumArt ? (
+            <Image source={{ uri: track.albumArt }} style={npStyles.albumArt} />
+          ) : (
+            <View style={[npStyles.albumArt, npStyles.albumArtFallback]}>
+              <FontAwesome5 name="music" size={18} color="rgba(255,255,255,0.3)" />
+            </View>
+          )}
 
-        <View style={npStyles.info}>
-          <Text style={npStyles.trackName} numberOfLines={1}>{track.name}</Text>
-          <Text style={npStyles.artistName} numberOfLines={1}>{track.artist}</Text>
+          <View style={npStyles.info}>
+            <Text style={npStyles.trackName} numberOfLines={1}>{track.name}</Text>
+            <Text style={npStyles.artistName} numberOfLines={1}>{track.artist}</Text>
 
-          {/* Progress bar */}
-          <View style={npStyles.progressTrack}>
-            <View style={[npStyles.progressFill, { width: `${progress * 100}%` as any }]} />
-          </View>
-          <View style={npStyles.progressTimes}>
-            <Text style={npStyles.timeText}>{fmt(liveProgressMs)}</Text>
-            <Text style={npStyles.timeText}>{fmt(track.durationMs)}</Text>
+            {/* Progress bar */}
+            <View style={npStyles.progressTrack}>
+              <View style={[npStyles.progressFill, { width: `${progress * 100}%` as any }]} />
+            </View>
+            <View style={npStyles.progressTimes}>
+              <Text style={npStyles.timeText}>{fmt(liveProgressMs)}</Text>
+              <Text style={npStyles.timeText}>{fmt(track.durationMs)}</Text>
+            </View>
           </View>
         </View>
-      </View>
+
       </LinearGradient>
     </TouchableOpacity>
   );
 }
 
+// ─── Profile screen ───────────────────────────────────────────────────────────
+
 export default function ProfileScreen() {
   const router = useRouter();
+  const { track, liveProgressMs, gradient, loading, needsReconnect, reconnect } = useNowPlaying();
 
   return (
     <View style={styles.screen}>
@@ -155,7 +172,7 @@ export default function ProfileScreen() {
               {/* Spotlight glow */}
               <View style={styles.bannerGlow} />
 
-              {/* Social icons + Follow — inside banner, bottom-right */}
+              {/* Banner actions */}
               <View style={styles.bannerActions}>
                 <TouchableOpacity style={styles.socialBtn} activeOpacity={0.7}>
                   <Text style={styles.socialIcon}>𝕏</Text>
@@ -163,11 +180,9 @@ export default function ProfileScreen() {
                 <TouchableOpacity style={styles.socialBtn} activeOpacity={0.7}>
                   <Text style={styles.socialIcon}>◎</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.socialBtn} activeOpacity={0.7}>
-                  <Text style={styles.socialIcon}>🎙</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.followBtn} activeOpacity={0.85}>
-                  <Text style={styles.followBtnText}>Follow</Text>
+
+                <TouchableOpacity style={styles.editBtn} activeOpacity={0.85}>
+                  <Text style={styles.editBtnText}>Edit Profile</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -216,7 +231,14 @@ export default function ProfileScreen() {
           </View>
 
           {/* ─── Now Playing ───────────────────────────────────────────── */}
-          <NowPlayingCard />
+          <NowPlayingCard
+            track={track}
+            liveProgressMs={liveProgressMs}
+            gradient={gradient}
+            loading={loading}
+            needsReconnect={needsReconnect}
+            reconnect={reconnect}
+          />
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -274,15 +296,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   socialIcon: { fontSize: 15, color: "#fff" },
-  followBtn: {
+  editBtn: {
     paddingHorizontal: 18,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "#ffffff",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
     alignItems: "center",
     justifyContent: "center",
   },
-  followBtnText: { fontSize: 14, fontWeight: "700", color: "#111" },
+  editBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 
   // Avatar row
   avatarRow: {
@@ -383,12 +407,6 @@ const npStyles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 1.1,
     color: "rgba(255,255,255,0.35)",
-  },
-  empty: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.25)",
-    textAlign: "center",
-    paddingVertical: 6,
   },
   body: {
     flexDirection: "row",

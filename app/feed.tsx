@@ -17,6 +17,7 @@ import {
   Image,
   KeyboardAvoidingView,
   RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRef, useState, useEffect, createContext, useContext } from "react";
@@ -30,19 +31,26 @@ import {
   DISCOVER_FILTERS, CAROUSEL_CARD_W, CAROUSEL_GAP, CAROUSEL_ITEMS,
   TRENDING_ARTISTS, FOR_YOU_RECS, UPCOMING_MEETS,
   MEETS_STREAMS,
-  NOW_PLAYING_STORIES, MY_NOW_PLAYING,
-  DIRECT_MESSAGES, GROUP_CHATS, COMMUNITY_ITEMS, MESSAGES_UNREAD, CHAT_MESSAGES,
+  NOW_PLAYING_STORIES,
+  GROUP_CHATS, COMMUNITY_ITEMS, MESSAGES_UNREAD,
   PROFILE_TABS, PROFILE_POSTS, PROFILE_REPOSTS,
   DUMMY_PLAYLISTS, DUMMY_COMMUNITIES, ALL_SONGS, PLAYLIST_SONGS,
   fmtCount,
   type Post, type DummyComment, type DummyPlaylist, type DummySong,
   type DummyCommunity, type CarouselItem, type ProfileTab, type MeetStream,
   type NowPlayingStory,
-  type DirectMessage, type GroupChat, type CommunityItem, type ChatMessage, type UserProfile,
+  type GroupChat, type CommunityItem, type UserProfile,
 } from "./data/mock";
 
-import { getCurrentlyPlaying, refreshSpotifyToken, openSpotifyLink } from '../lib/spotify'
-import { useNowPlaying } from '../lib/useNowPlaying'
+import { openSpotifyLink, saveTrackToLiked } from '../lib/spotify'
+import { useNowPlaying, type NowPlayingTrack } from '../lib/useNowPlaying'
+import { useLocalSearchParams, useRouter } from 'expo-router'
+import {
+  type ConversationInfo, type DbMessage,
+  getConversations, getMessages,
+  sendTextMessage, sendSpotifyTrackMessage,
+} from '../lib/messages'
+import { followUser, unfollowUser } from '../lib/follows'
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
@@ -64,6 +72,180 @@ const useNowPlayingCtx = () => {
   return ctx
 }
 
+
+// ─── Spotify track card (shown inside chat when a track is shared) ───────────
+
+function SpotifyTrackCard({
+  track,
+  fromMe,
+}: {
+  track: { id: string; name: string; artist: string; albumArt: string | null };
+  fromMe: boolean;
+}) {
+  const [saved,   setSaved]   = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [checked, setChecked] = useState(false);
+
+  // On mount, check if already saved
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from('users')
+          .select('spotify_access_token')
+          .eq('id', user.id)
+          .single();
+        if (data?.spotify_access_token) {
+          const res = await fetch(
+            `https://api.spotify.com/v1/me/tracks/contains?ids=${track.id}`,
+            { headers: { Authorization: `Bearer ${data.spotify_access_token}` } },
+          );
+          if (res.ok) {
+            const arr = await res.json();
+            setSaved(arr[0] === true);
+          }
+        }
+      } catch {}
+      setChecked(true);
+    })();
+  }, [track.id]);
+
+  const handleSave = async () => {
+    if (saved || saving) return;
+    setSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('users')
+        .select('spotify_access_token')
+        .eq('id', user.id)
+        .single();
+      if (data?.spotify_access_token) {
+        const ok = await saveTrackToLiked(data.spotify_access_token, track.id);
+        if (ok) setSaved(true);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={[spCard.card, fromMe && spCard.cardMe]}>
+      {track.albumArt ? (
+        <Image source={{ uri: track.albumArt }} style={spCard.art} resizeMode="cover" />
+      ) : (
+        <View style={spCard.artFallback}>
+          <Ionicons name="musical-notes" size={22} color="#1DB954" />
+        </View>
+      )}
+
+      <View style={spCard.info}>
+        <View style={spCard.spotifyRow}>
+          <FontAwesome5 name="spotify" size={11} color="#1DB954" />
+          <Text style={spCard.spotifyLabel}>Spotify</Text>
+        </View>
+        <Text style={spCard.trackName} numberOfLines={1}>{track.name}</Text>
+        <Text style={spCard.artistName} numberOfLines={1}>{track.artist}</Text>
+
+        <View style={spCard.btnRow}>
+          <TouchableOpacity
+            style={spCard.openBtn}
+            activeOpacity={0.8}
+            onPress={() => openSpotifyLink(
+              `spotify:track:${track.id}`,
+              `https://open.spotify.com/track/${track.id}`,
+            )}
+          >
+            <Ionicons name="open-outline" size={11} color="#1DB954" />
+            <Text style={spCard.openBtnText}>Open</Text>
+          </TouchableOpacity>
+
+          {checked && (
+            <TouchableOpacity
+              style={[spCard.saveBtn, saved && spCard.savedBtn]}
+              activeOpacity={0.8}
+              onPress={handleSave}
+              disabled={saved || saving}
+            >
+              <Ionicons
+                name={saved ? "heart" : "heart-outline"}
+                size={11}
+                color={saved ? "#1DB954" : "rgba(255,255,255,0.45)"}
+              />
+              <Text style={[spCard.saveBtnText, saved && spCard.savedBtnText]}>
+                {saving ? "…" : saved ? "Saved" : "Save"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const spCard = StyleSheet.create({
+  card: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "center",
+    alignSelf: "flex-start",       // don't stretch to fill parent
+    backgroundColor: "#0F1A12",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(29,185,84,0.25)",
+    padding: 12,
+    maxWidth: SW * 0.72,
+  },
+  cardMe: { alignSelf: "flex-end" },
+  art: { width: 54, height: 54, borderRadius: 10, overflow: "hidden" },
+  artFallback: {
+    width: 54,
+    height: 54,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "rgba(29,185,84,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  info: { flex: 1, gap: 2 },
+  spotifyRow: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 4 },
+  spotifyLabel: { fontSize: 10, fontWeight: "700", color: "#1DB954", letterSpacing: 0.5 },
+  trackName: { fontSize: 13, fontWeight: "700", color: "#fff", letterSpacing: -0.2 },
+  artistName: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginBottom: 8 },
+  btnRow: { flexDirection: "row", gap: 7 },
+  openBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: "rgba(29,185,84,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(29,185,84,0.35)",
+  },
+  openBtnText: { fontSize: 11, fontWeight: "700", color: "#1DB954" },
+  saveBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  savedBtn: {
+    backgroundColor: "rgba(29,185,84,0.12)",
+    borderColor: "rgba(29,185,84,0.3)",
+  },
+  saveBtnText: { fontSize: 11, fontWeight: "600", color: "rgba(255,255,255,0.45)" },
+  savedBtnText: { color: "#1DB954" },
+});
 
 // ─── Now Playing bubble (replaces plain story bubble) ────────────────────────
 
@@ -129,7 +311,7 @@ function AnimatedWaveform({ color }: { color: string }) {
   );
 }
 
-function NowPlayingBanner() {
+function NowPlayingBanner({ onShare }: { onShare?: (track: NowPlayingTrack) => void } = {}) {
   const { track } = useNowPlayingCtx();
 
   if (!track?.isPlaying) return null;
@@ -157,7 +339,11 @@ function NowPlayingBanner() {
       <AnimatedWaveform color={COLOR} />
 
       {/* Share to chat */}
-      <TouchableOpacity style={styles.nowPlayingShareBtn} activeOpacity={0.75}>
+      <TouchableOpacity
+        style={styles.nowPlayingShareBtn}
+        activeOpacity={0.75}
+        onPress={() => track && onShare?.(track)}
+      >
         <Ionicons name="paper-plane-outline" size={14} color={COLOR} />
       </TouchableOpacity>
     </View>
@@ -986,13 +1172,59 @@ function TrendingCarousel({
 
 // ─── Discover view ────────────────────────────────────────────────────────────
 
+type DiscoverUser = {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  followers_count: number;
+};
+
 function DiscoverView() {
+  const router = useRouter();
   const [activeFilter, setActiveFilter]       = useState("All");
   const [searchText, setSearchText]           = useState("");
   const [joinedMeets, setJoinedMeets]         = useState<Set<string>>(new Set());
   const [followedArtists, setFollowedArtists] = useState<Set<string>>(new Set());
   const [likedRecs, setLikedRecs]             = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing]           = useState(false);
+
+  // ── People search ──────────────────────────────────────────────────────────
+  const [userResults, setUserResults]   = useState<DiscoverUser[]>([]);
+  const [userFollowing, setUserFollowing] = useState<Set<string>>(new Set());
+  const [userLoading, setUserLoading]   = useState(false);
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    const q = searchText.trim();
+    if (q.length < 2) { setUserResults([]); setUserLoading(false); return; }
+    setUserLoading(true);
+    searchDebounce.current = setTimeout(async () => {
+      const { data: { user: me } } = await supabase.auth.getUser();
+      const { data } = await supabase
+        .from('users')
+        .select('id, username, display_name, avatar_url, followers_count')
+        .or(`username.ilike.%${q}%,display_name.ilike.%${q}%`)
+        .neq('id', me?.id ?? '')          // don't show yourself
+        .order('followers_count', { ascending: false })
+        .limit(20);
+      const results = (data ?? []) as DiscoverUser[];
+      setUserResults(results);
+      // Batch-check which results are already followed
+      if (results.length > 0 && me) {
+        const ids = results.map(u => u.id);
+        const { data: fData } = await supabase
+          .from('follows')
+          .select('following_id')
+          .eq('follower_id', me.id)
+          .in('following_id', ids);
+        setUserFollowing(new Set((fData ?? []).map((f: { following_id: string }) => f.following_id)));
+      }
+      setUserLoading(false);
+    }, 350);
+    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
+  }, [searchText]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -1016,7 +1248,8 @@ function DiscoverView() {
   const filteredArtists = TRENDING_ARTISTS.filter((a) => !q || a.name.toLowerCase().includes(q) || a.genre.toLowerCase().includes(q));
   const filteredMeets   = UPCOMING_MEETS.filter((m)   => !q || m.title.toLowerCase().includes(q) || m.tags.some((t) => t.toLowerCase().includes(q)));
   const filteredRecs    = FOR_YOU_RECS.filter((r)     => !q || r.title.toLowerCase().includes(q) || r.artist.toLowerCase().includes(q));
-  const noResults       = q && filteredArtists.length === 0 && filteredMeets.length === 0 && filteredRecs.length === 0;
+  const showPeople      = q.length >= 2;
+  const noResults       = q && !userLoading && userResults.length === 0 && filteredArtists.length === 0 && filteredMeets.length === 0 && filteredRecs.length === 0;
 
   return (
     <ScrollView
@@ -1062,6 +1295,62 @@ function DiscoverView() {
           );
         })}
       </ScrollView>
+
+      {/* ── People search results ─────────────────────────────── */}
+      {showPeople && (
+        <View style={{ marginBottom: 28, marginHorizontal: 16 }}>
+          <View style={ds.sectionHeader}>
+            <Text style={ds.sectionTitle}>People</Text>
+          </View>
+          {userLoading ? (
+            <ActivityIndicator color="#AB00FF" style={{ marginTop: 18 }} />
+          ) : userResults.length === 0 ? (
+            <Text style={{ color: "rgba(255,255,255,0.28)", fontSize: 14, marginTop: 10, paddingHorizontal: 4 }}>
+              No users found for "{searchText.trim()}"
+            </Text>
+          ) : (
+            userResults.map(u => {
+              const name = u.display_name || u.username;
+              const initials = name.trim().split(/\s+/).map((p: string) => p[0]?.toUpperCase() ?? '').slice(0, 2).join('');
+              const following = userFollowing.has(u.id);
+              return (
+                <View key={u.id} style={pplStyles.row}>
+                  <TouchableOpacity activeOpacity={0.85} onPress={() => router.push({ pathname: '/user-profile', params: { userId: u.id } })}>
+                    {u.avatar_url ? (
+                      <Image source={{ uri: u.avatar_url }} style={pplStyles.avatar} />
+                    ) : (
+                      <View style={[pplStyles.avatar, pplStyles.avatarFallback]}>
+                        <Text style={pplStyles.avatarInitials}>{initials}</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity style={{ flex: 1, minWidth: 0 }} activeOpacity={0.85} onPress={() => router.push({ pathname: '/user-profile', params: { userId: u.id } })}>
+                    <Text style={pplStyles.name} numberOfLines={1}>{name}</Text>
+                    <Text style={pplStyles.username} numberOfLines={1}>@{u.username}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[pplStyles.followBtn, following && pplStyles.followingBtn]}
+                    activeOpacity={0.8}
+                    onPress={async () => {
+                      if (following) {
+                        setUserFollowing(prev => { const s = new Set(prev); s.delete(u.id); return s; });
+                        await unfollowUser(u.id);
+                      } else {
+                        setUserFollowing(prev => new Set([...prev, u.id]));
+                        await followUser(u.id);
+                      }
+                    }}
+                  >
+                    <Text style={[pplStyles.followBtnText, following && pplStyles.followingBtnText]}>
+                      {following ? "Following" : "Follow"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })
+          )}
+        </View>
+      )}
 
       {/* Carousel */}
       {showCarousel && !q && (
@@ -1598,6 +1887,34 @@ const ms = StyleSheet.create({
   cardHost: { fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 1 },
 });
 
+// ─── People search styles (Discover) ─────────────────────────────────────────
+const pplStyles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  avatar: { width: 46, height: 46, borderRadius: 23 },
+  avatarFallback: { backgroundColor: "#AB00FF33", alignItems: "center", justifyContent: "center" },
+  avatarInitials: { fontSize: 16, fontWeight: "800", color: "#AB00FF" },
+  name: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  username: { fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 2 },
+  followBtn: {
+    paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20,
+    backgroundColor: "#fff",
+  },
+  followingBtn: {
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+  },
+  followBtnText: { fontSize: 13, fontWeight: "700", color: "#111" },
+  followingBtnText: { color: "#fff" },
+});
+
 // ─── Messages page ────────────────────────────────────────────────────────────
 
 type MessagesTab = "Messages" | "Group Chats" | "Community";
@@ -1615,28 +1932,77 @@ function AvatarCircle({ user, size }: { user: string; size: number }) {
   );
 }
 
-function DirectMessagesList({ onSelect }: { onSelect: (dm: DirectMessage) => void }) {
+function DirectMessagesList({ onSelect }: { onSelect: (conv: ConversationInfo) => void }) {
+  const [conversations, setConversations] = useState<ConversationInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getConversations().then(c => { setConversations(c); setLoading(false); });
+  }, []);
+
+  const fmtTime = (iso: string | null) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
+    if (diffDays === 0) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return d.toLocaleDateString([], { weekday: "short" });
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  };
+
+  const initials = (u: ConversationInfo["otherUser"]) => {
+    const name = u.display_name || u.username;
+    const parts = name.trim().split(/\s+/);
+    return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+  };
+
+  if (loading) {
+    return (
+      <View style={{ paddingTop: 40, alignItems: "center" }}>
+        <ActivityIndicator color="#AB00FF" />
+      </View>
+    );
+  }
+
+  if (conversations.length === 0) {
+    return (
+      <View style={{ paddingTop: 60, alignItems: "center", gap: 10 }}>
+        <Ionicons name="chatbubble-outline" size={40} color="rgba(255,255,255,0.12)" />
+        <Text style={{ color: "rgba(255,255,255,0.3)", fontSize: 15 }}>No messages yet</Text>
+        <Text style={{ color: "rgba(255,255,255,0.18)", fontSize: 13 }}>Follow people and start a conversation</Text>
+      </View>
+    );
+  }
+
   return (
     <View>
-      {DIRECT_MESSAGES.map((dm: DirectMessage) => (
-        <TouchableOpacity key={dm.id} style={msgStyles.dmRow} activeOpacity={0.75} onPress={() => onSelect(dm)}>
+      {conversations.map(conv => (
+        <TouchableOpacity
+          key={conv.conversationId}
+          style={msgStyles.dmRow}
+          activeOpacity={0.75}
+          onPress={() => onSelect(conv)}
+        >
           <View style={msgStyles.dmAvatarWrap}>
-            <AvatarCircle user={dm.user} size={52} />
-            {dm.online && <View style={msgStyles.onlineDot} />}
+            {conv.otherUser.avatar_url ? (
+              <Image source={{ uri: conv.otherUser.avatar_url }} style={{ width: 52, height: 52, borderRadius: 26 }} />
+            ) : (
+              <View style={[msgStyles.dmAvatar, { backgroundColor: "#AB00FF33" }]}>
+                <Text style={msgStyles.dmAvatarText}>{initials(conv.otherUser)}</Text>
+              </View>
+            )}
           </View>
           <View style={msgStyles.dmContent}>
             <View style={msgStyles.dmTopRow}>
-              <Text style={[msgStyles.dmName, dm.unread > 0 && msgStyles.dmNameUnread]}>{dm.name}</Text>
-              <Text style={msgStyles.dmTime}>{dm.time}</Text>
+              <Text style={msgStyles.dmName} numberOfLines={1}>
+                {conv.otherUser.display_name || conv.otherUser.username}
+              </Text>
+              <Text style={msgStyles.dmTime}>{fmtTime(conv.last_message_at)}</Text>
             </View>
-            <View style={msgStyles.dmBottomRow}>
-              <Text style={[msgStyles.dmPreview, dm.unread > 0 && msgStyles.dmPreviewUnread]} numberOfLines={1}>{dm.preview}</Text>
-              {dm.unread > 0 && (
-                <View style={msgStyles.dmUnreadBadge}>
-                  <Text style={msgStyles.dmUnreadBadgeText}>{dm.unread}</Text>
-                </View>
-              )}
-            </View>
+            <Text style={msgStyles.dmPreview} numberOfLines={1}>
+              {conv.last_message_preview || "Say hello!"}
+            </Text>
           </View>
         </TouchableOpacity>
       ))}
@@ -1762,7 +2128,7 @@ function CommunityList() {
   );
 }
 
-function MessagesView({ onOpenChat }: { onOpenChat: (dm: DirectMessage) => void }) {
+function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationInfo) => void }) {
   const [activeTab, setActiveTab] = useState<MessagesTab>("Messages");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownAnim = useRef(new Animated.Value(0)).current;
@@ -1940,6 +2306,8 @@ const msgStyles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.05)",
   },
   dmAvatarWrap: { position: "relative" },
+  dmAvatar: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center" },
+  dmAvatarText: { fontSize: 18, fontWeight: "800", color: "#AB00FF" },
   onlineDot: {
     position: "absolute",
     bottom: 1, right: 1,
@@ -2064,25 +2432,177 @@ const msgStyles = StyleSheet.create({
   nowPlayingRow: { paddingHorizontal: 16, gap: 20 },
 });
 
+// ─── Swipe-to-reply wrapper ───────────────────────────────────────────────────
+// Uses existing PanResponder (no new package). Only intercepts leftward swipes
+// so it doesn't conflict with the outer swipe-right-to-dismiss handler.
+
+function SwipeToReply({ onReply, children }: { onReply: () => void; children: React.ReactNode }) {
+  const x = useRef(new Animated.Value(0)).current;
+  const fired = useRef(false);
+  const THRESHOLD = 55;
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, g) => g.dx < -6 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+    onShouldBlockNativeResponder: () => false,
+    onPanResponderMove: (_, g) => {
+      if (g.dx >= 0) return;
+      x.setValue(Math.max(g.dx * 0.62, -THRESHOLD - 10));
+      if (!fired.current && g.dx < -THRESHOLD) fired.current = true;
+    },
+    onPanResponderRelease: (_, g) => {
+      if (g.dx < -THRESHOLD) onReply();
+      fired.current = false;
+      Animated.spring(x, { toValue: 0, useNativeDriver: true, tension: 280, friction: 18 }).start();
+    },
+  })).current;
+
+  const iconOpacity = x.interpolate({ inputRange: [-THRESHOLD, -18, 0], outputRange: [1, 0.3, 0], extrapolate: 'clamp' });
+  const iconScale   = x.interpolate({ inputRange: [-THRESHOLD, -18, 0], outputRange: [1, 0.7, 0.5], extrapolate: 'clamp' });
+
+  return (
+    <View {...pan.panHandlers}>
+      <Animated.View style={{ transform: [{ translateX: x }] }}>
+        {children}
+      </Animated.View>
+      <Animated.View style={{
+        position: 'absolute', right: 6, top: 0, bottom: 0,
+        justifyContent: 'center',
+        opacity: iconOpacity,
+        transform: [{ scale: iconScale }],
+      }}>
+        <Ionicons name="arrow-undo-outline" size={17} color="rgba(255,255,255,0.65)" />
+      </Animated.View>
+    </View>
+  );
+}
+
+// ─── Animated typing bubble ───────────────────────────────────────────────────
+
+function TypingBubble({ name }: { name: string }) {
+  const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
+
+  useEffect(() => {
+    const anims = dots.map((d, i) =>
+      Animated.loop(Animated.sequence([
+        Animated.delay(i * 140),
+        Animated.timing(d, { toValue: 1, duration: 280, useNativeDriver: true }),
+        Animated.timing(d, { toValue: 0, duration: 280, useNativeDriver: true }),
+        Animated.delay(560 - i * 140),
+      ]))
+    );
+    anims.forEach(a => a.start());
+    return () => anims.forEach(a => a.stop());
+  }, []);
+
+  return (
+    <View style={chatStyles.typingRow}>
+      <View style={chatStyles.typingBubble}>
+        {dots.map((d, i) => (
+          <Animated.View key={i} style={[chatStyles.typingDot, {
+            opacity: d.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }),
+            transform: [{ translateY: d.interpolate({ inputRange: [0, 1], outputRange: [0, -3] }) }],
+          }]} />
+        ))}
+      </View>
+      <Text style={chatStyles.typingName}>{name}</Text>
+    </View>
+  );
+}
+
 // ─── Chat detail view ─────────────────────────────────────────────────────────
 
-function ChatDetailView({ dm, onClose }: { dm: DirectMessage; onClose: () => void }) {
+function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onClose: () => void }) {
   const slideX = useRef(new Animated.Value(SW)).current;
-  const [msgText, setMsgText] = useState("");
-  const [localMessages, setLocalMessages] = useState<ChatMessage[]>(CHAT_MESSAGES[dm.id] ?? []);
-  const flatRef = useRef<FlatList<ChatMessage>>(null);
+  const [msgText,       setMsgText]    = useState("");
+  const [msgs,          setMsgs]       = useState<DbMessage[]>([]);
+  const [currentUserId, setCurUid]     = useState<string | null>(null);
+  const [loading,       setLoading]    = useState(true);
+  const [isOtherTyping, setOtherTyping]= useState(false);
+  const [replyTo, setReplyTo]          = useState<{ id: string; preview: string; senderName: string } | null>(null);
 
-  // Slide in on mount
+  const flatRef          = useRef<FlatList<DbMessage>>(null);
+  const channelRef       = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const userIdRef        = useRef<string | null>(null);
+  const typingOutRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const otherTypingOutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Slide in + load messages + subscribe to realtime + broadcast
   useEffect(() => {
     Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start();
-  }, []);
+
+    let active = true;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!active) return;
+      userIdRef.current = user?.id ?? null;
+      setCurUid(user?.id ?? null);
+      const loaded = await getMessages(conv.conversationId);
+      if (!active) return;
+      setMsgs(loaded);
+      setLoading(false);
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 60);
+    })();
+
+    const ch = supabase
+      .channel(`conv:${conv.conversationId}`)
+      // Real-time new messages
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.conversationId}` },
+        (payload) => {
+          const msg = payload.new as DbMessage;
+          setMsgs(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
+          setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 60);
+        })
+      // Typing indicator (broadcast — no DB write needed)
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (payload.userId === userIdRef.current) return;
+        setOtherTyping(payload.isTyping);
+        clearTimeout(otherTypingOutRef.current ?? undefined);
+        if (payload.isTyping) {
+          otherTypingOutRef.current = setTimeout(() => setOtherTyping(false), 4000);
+        }
+      })
+      .subscribe();
+
+    channelRef.current = ch;
+
+    return () => {
+      active = false;
+      clearTimeout(typingOutRef.current ?? undefined);
+      clearTimeout(otherTypingOutRef.current ?? undefined);
+      ch.unsubscribe();
+      channelRef.current = null;
+    };
+  }, [conv.conversationId]);
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  const broadcastTyping = (isTyping: boolean) => {
+    if (!channelRef.current || !userIdRef.current) return;
+    channelRef.current.send({
+      type: 'broadcast', event: 'typing',
+      payload: { userId: userIdRef.current, isTyping },
+    });
+  };
+
+  const handleTextChange = (v: string) => {
+    setMsgText(v);
+    broadcastTyping(v.length > 0);
+    clearTimeout(typingOutRef.current ?? undefined);
+    if (v.length > 0) {
+      typingOutRef.current = setTimeout(() => broadcastTyping(false), 2000);
+    }
+  };
 
   const handleClose = () => {
     Keyboard.dismiss();
+    broadcastTyping(false);
+    clearTimeout(typingOutRef.current ?? undefined);
     Animated.timing(slideX, { toValue: SW, duration: 260, useNativeDriver: true }).start(onClose);
   };
 
-  // Swipe right to dismiss
+  // Swipe right to dismiss whole chat
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
@@ -2090,29 +2610,40 @@ function ChatDetailView({ dm, onClose }: { dm: DirectMessage; onClose: () => voi
       onShouldBlockNativeResponder: () => false,
       onPanResponderMove: (_, { dx }) => { if (dx > 0) slideX.setValue(dx); },
       onPanResponderRelease: (_, { dx, vx }) => {
-        if (dx > SW * 0.35 || vx > 0.8) {
-          handleClose();
-        } else {
-          Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start();
-        }
+        if (dx > SW * 0.35 || vx > 0.8) handleClose();
+        else Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start();
       },
     })
   ).current;
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     const text = msgText.trim();
     if (!text) return;
-    const newMsg: ChatMessage = {
-      id: `new-${Date.now()}`,
-      text,
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      fromMe: true,
-    };
-    setLocalMessages((prev) => [...prev, newMsg]);
     setMsgText("");
-    // Scroll to bottom after state settles
+    broadcastTyping(false);
+    clearTimeout(typingOutRef.current ?? undefined);
+    const reply = replyTo;
+    setReplyTo(null);
+
+    const tempId = `pending-${Date.now()}`;
+    const optimistic: DbMessage = {
+      id: tempId, conversation_id: conv.conversationId,
+      sender_id: currentUserId ?? '', body: text, type: 'text',
+      spotify_track_id: null, spotify_track_name: null,
+      spotify_track_artist: null, spotify_album_art: null,
+      reply_to_id: reply?.id ?? null,
+      reply_to_preview: reply?.preview ?? null,
+      created_at: new Date().toISOString(),
+    };
+    setMsgs(prev => [...prev, optimistic]);
     setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 60);
+    const result = await sendTextMessage(conv.conversationId, text, reply ?? undefined);
+    if (result) setMsgs(prev => [...prev.filter(m => m.id !== tempId), result]);
   };
+
+  const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const otherName = conv.otherUser.display_name || conv.otherUser.username;
+  const otherInitials = otherName.trim().split(/\s+/).map(p => p[0]?.toUpperCase() ?? '').slice(0, 2).join('');
 
   return (
     <Animated.View
@@ -2132,73 +2663,142 @@ function ChatDetailView({ dm, onClose }: { dm: DirectMessage; onClose: () => voi
           </TouchableOpacity>
 
           <View style={chatStyles.headerCenter}>
-            <View style={{ position: "relative" }}>
-              <AvatarCircle user={dm.user} size={36} />
-              {dm.online && <View style={chatStyles.headerOnlineDot} />}
-            </View>
+            {conv.otherUser.avatar_url ? (
+              <Image source={{ uri: conv.otherUser.avatar_url }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+            ) : (
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#AB00FF33", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 14, fontWeight: "800", color: "#AB00FF" }}>{otherInitials}</Text>
+              </View>
+            )}
             <View style={{ gap: 1, flex: 1 }}>
-              <Text style={chatStyles.headerName} numberOfLines={1}>{dm.name}</Text>
-              <Text style={[chatStyles.headerStatus, !dm.online && { color: "rgba(255,255,255,0.28)" }]}>
-                {dm.online ? "● Online" : "Offline"}
-              </Text>
+              <Text style={chatStyles.headerName} numberOfLines={1}>{otherName}</Text>
+              <Text style={[chatStyles.headerStatus, { color: "rgba(255,255,255,0.35)" }]}>@{conv.otherUser.username}</Text>
             </View>
           </View>
 
-          {/* Start Jam */}
           <TouchableOpacity style={chatStyles.jamBtn} activeOpacity={0.8}>
             <Ionicons name="musical-notes" size={12} color="#0D0D0D" />
             <Text style={chatStyles.jamBtnText}>Jam</Text>
           </TouchableOpacity>
-
-          {/* Audio call */}
           <TouchableOpacity style={chatStyles.headerIconBtn} activeOpacity={0.7}>
             <Ionicons name="call-outline" size={17} color="#fff" />
           </TouchableOpacity>
-
-          {/* Video call */}
           <TouchableOpacity style={chatStyles.headerIconBtn} activeOpacity={0.7}>
             <Ionicons name="videocam-outline" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
 
-        {/* ── Messages + input inside KeyboardAvoidingView so it scrolls with keyboard ── */}
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
-          <FlatList
-            ref={flatRef}
-            data={localMessages}
-            keyExtractor={(m) => m.id}
-            contentContainerStyle={chatStyles.messagesContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: true })}
-            renderItem={({ item: msg, index }) => {
-              const prev = localMessages[index - 1];
-              const next = localMessages[index + 1];
-              const firstInGroup = !prev || prev.fromMe !== msg.fromMe;
-              const lastInGroup  = !next || next.fromMe !== msg.fromMe;
-              const bubbleRadius = msg.fromMe
-                ? { borderTopRightRadius: firstInGroup ? 6 : 18, borderBottomRightRadius: lastInGroup ? 18 : 6 }
-                : { borderTopLeftRadius:  firstInGroup ? 6 : 18, borderBottomLeftRadius:  lastInGroup ? 18 : 6 };
-              return (
-                <View style={[chatStyles.msgWrap, msg.fromMe && chatStyles.msgWrapMe, { marginTop: firstInGroup ? 12 : 3 }]}>
-                  <View style={[chatStyles.bubble, msg.fromMe ? chatStyles.bubbleMe : chatStyles.bubbleThem, bubbleRadius]}>
-                    <Text style={[chatStyles.bubbleText, msg.fromMe && chatStyles.bubbleTextMe]}>{msg.text}</Text>
-                    <Text style={[chatStyles.bubbleTime, msg.fromMe && chatStyles.bubbleTimeMe]}>{msg.time}</Text>
-                  </View>
-                </View>
-              );
-            }}
-          />
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+          {loading ? (
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <ActivityIndicator color="#AB00FF" />
+            </View>
+          ) : (
+            <FlatList
+              ref={flatRef}
+              data={msgs}
+              keyExtractor={(m) => m.id}
+              contentContainerStyle={chatStyles.messagesContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: true })}
+              renderItem={({ item: msg, index }) => {
+                const fromMe = msg.sender_id === currentUserId;
+                const prev = msgs[index - 1];
+                const next = msgs[index + 1];
+                const firstInGroup = !prev || (prev.sender_id === currentUserId) !== fromMe;
+                const lastInGroup  = !next || (next.sender_id === currentUserId) !== fromMe;
+                const senderName   = fromMe ? "You" : otherName;
 
-          {/* ── Now playing banner — share what you're listening to ── */}
+                // ── Spotify track card ──────────────────────────────────────
+                if (msg.type === "spotify_track" && msg.spotify_track_id) {
+                  return (
+                    <SwipeToReply onReply={() => setReplyTo({
+                      id: msg.id,
+                      preview: `🎵 ${msg.spotify_track_name ?? "Track"}`,
+                      senderName,
+                    })}>
+                      <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: firstInGroup ? 12 : 3 }]}>
+                        <SpotifyTrackCard
+                          track={{ id: msg.spotify_track_id, name: msg.spotify_track_name ?? "Unknown", artist: msg.spotify_track_artist ?? "Unknown", albumArt: msg.spotify_album_art }}
+                          fromMe={fromMe}
+                        />
+                        <Text style={[chatStyles.bubbleTime, fromMe && chatStyles.bubbleTimeMe, { paddingHorizontal: 4, marginTop: 3 }]}>
+                          {fmtTime(msg.created_at)}
+                        </Text>
+                      </View>
+                    </SwipeToReply>
+                  );
+                }
+
+                // ── Regular text bubble ─────────────────────────────────────
+                const bubbleRadius = fromMe
+                  ? { borderTopRightRadius: firstInGroup ? 6 : 18, borderBottomRightRadius: lastInGroup ? 18 : 6 }
+                  : { borderTopLeftRadius:  firstInGroup ? 6 : 18, borderBottomLeftRadius:  lastInGroup ? 18 : 6 };
+                return (
+                  <SwipeToReply onReply={() => setReplyTo({
+                    id: msg.id,
+                    preview: msg.body ?? "",
+                    senderName,
+                  })}>
+                    <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: firstInGroup ? 12 : 3 }]}>
+                      {/* Reply quote */}
+                      {!!msg.reply_to_preview && (
+                        <View style={[chatStyles.replyQuote, fromMe && chatStyles.replyQuoteMe]}>
+                          <View style={chatStyles.replyQuoteAccent} />
+                          <Text style={chatStyles.replyQuoteText} numberOfLines={2}>{msg.reply_to_preview}</Text>
+                        </View>
+                      )}
+                      <View style={[chatStyles.bubble, fromMe ? chatStyles.bubbleMe : chatStyles.bubbleThem, bubbleRadius]}>
+                        <Text style={[chatStyles.bubbleText, fromMe && chatStyles.bubbleTextMe]}>{msg.body}</Text>
+                        <Text style={[chatStyles.bubbleTime, fromMe && chatStyles.bubbleTimeMe]}>{fmtTime(msg.created_at)}</Text>
+                      </View>
+                    </View>
+                  </SwipeToReply>
+                );
+              }}
+            />
+          )}
+
+          {/* Typing indicator */}
+          {isOtherTyping && <TypingBubble name={otherName} />}
+
+          {/* Now playing banner */}
           <View style={{ paddingHorizontal: 12 }}>
-            <NowPlayingBanner />
+            <NowPlayingBanner onShare={async (t) => {
+              const tempId = `pending-sp-${Date.now()}`;
+              const optimistic: DbMessage = {
+                id: tempId, conversation_id: conv.conversationId,
+                sender_id: currentUserId ?? '', body: null, type: 'spotify_track',
+                spotify_track_id: t.id, spotify_track_name: t.name,
+                spotify_track_artist: t.artist, spotify_album_art: t.albumArt,
+                reply_to_id: null, reply_to_preview: null,
+                created_at: new Date().toISOString(),
+              };
+              setMsgs(prev => [...prev, optimistic]);
+              setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 60);
+              const result = await sendSpotifyTrackMessage(conv.conversationId, {
+                id: t.id, name: t.name, artist: t.artist, albumArt: t.albumArt,
+              });
+              if (result) setMsgs(prev => [...prev.filter(m => m.id !== tempId), result]);
+            }} />
           </View>
 
-          {/* ── Input bar (in document flow — moves with KeyboardAvoidingView) ── */}
+          {/* Reply preview strip */}
+          {!!replyTo && (
+            <View style={chatStyles.replyBar}>
+              <View style={chatStyles.replyBarAccent} />
+              <View style={{ flex: 1 }}>
+                <Text style={chatStyles.replyBarName}>{replyTo.senderName}</Text>
+                <Text style={chatStyles.replyBarPreview} numberOfLines={1}>{replyTo.preview}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={16} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Input bar */}
           <View style={chatStyles.inputBar}>
             <TouchableOpacity style={chatStyles.inputPlusBtn} activeOpacity={0.7}>
               <Ionicons name="add-circle-outline" size={28} color="rgba(255,255,255,0.38)" />
@@ -2209,7 +2809,7 @@ function ChatDetailView({ dm, onClose }: { dm: DirectMessage; onClose: () => voi
                 placeholder="Message..."
                 placeholderTextColor="rgba(255,255,255,0.28)"
                 value={msgText}
-                onChangeText={setMsgText}
+                onChangeText={handleTextChange}
                 multiline
                 maxLength={500}
                 returnKeyType="default"
@@ -2308,6 +2908,66 @@ const chatStyles = StyleSheet.create({
   input: { flex: 1, fontSize: 15, color: "#fff", maxHeight: 100, paddingVertical: 0 },
   inputAction: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
   sendBtn: { backgroundColor: "#AB00FF", borderRadius: 15 },
+
+  // Reply quote shown inside received/sent bubbles
+  replyQuote: {
+    flexDirection: "row",
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 10,
+    marginBottom: 4,
+    overflow: "hidden",
+    maxWidth: SW * 0.65,
+  },
+  replyQuoteMe: { alignSelf: "flex-end" },
+  replyQuoteAccent: { width: 3, backgroundColor: "rgba(255,255,255,0.35)" },
+  replyQuoteText: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.45)",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    flex: 1,
+  },
+
+  // Reply-to strip above input bar
+  replyBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
+  },
+  replyBarAccent: { width: 3, height: 32, borderRadius: 2, backgroundColor: "#AB00FF" },
+  replyBarName: { fontSize: 11, fontWeight: "700", color: "#AB00FF", marginBottom: 2 },
+  replyBarPreview: { fontSize: 12, color: "rgba(255,255,255,0.5)" },
+
+  // Typing indicator
+  typingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  typingBubble: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#1C1C1E",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  typingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.55)",
+  },
+  typingName: { fontSize: 11, color: "rgba(255,255,255,0.3)" },
 });
 
 // ─── Bottom glass navbar ──────────────────────────────────────────────────────
@@ -2477,15 +3137,18 @@ const THUMB_TRAVEL = TOGGLE_W - THUMB_SIZE - 6; // 3px padding each side
 function GradientToggle({ value, onValueChange }: { value: boolean; onValueChange: (v: boolean) => void }) {
   const anim = useRef(new Animated.Value(value ? 1 : 0)).current;
 
-  const handlePress = () => {
-    const next = !value;
-    onValueChange(next);
+  // Sync animation when value changes externally (e.g. initial DB load)
+  useEffect(() => {
     Animated.spring(anim, {
-      toValue: next ? 1 : 0,
+      toValue: value ? 1 : 0,
       useNativeDriver: true,
       damping: 18,
       stiffness: 260,
     }).start();
+  }, [value]);
+
+  const handlePress = () => {
+    onValueChange(!value);
   };
 
   const thumbX = anim.interpolate({ inputRange: [0, 1], outputRange: [0, THUMB_TRAVEL] });
@@ -2512,12 +3175,17 @@ function GradientToggle({ value, onValueChange }: { value: boolean; onValueChang
 // ─── Broadcast row ────────────────────────────────────────────────────────────
 
 function BroadcastRow() {
-  const [broadcasting, setBroadcasting] = useState(false);
+  const { broadcastingEnabled, broadcastLoading, toggleBroadcasting } = useNowPlayingCtx();
   return (
-    <View style={profileStyles.broadcastRow}>
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={toggleBroadcasting}
+      disabled={broadcastLoading}
+      style={profileStyles.broadcastRow}
+    >
       <Text style={profileStyles.broadcastLabel}>Broadcast session</Text>
-      <GradientToggle value={broadcasting} onValueChange={setBroadcasting} />
-    </View>
+      <GradientToggle value={broadcastingEnabled} onValueChange={toggleBroadcasting} />
+    </TouchableOpacity>
   );
 }
 
@@ -2977,8 +3645,8 @@ function ProfileView() {
             <TouchableOpacity style={profileStyles.socialBtn} activeOpacity={0.7}>
               <Text style={profileStyles.socialIcon}>🎙</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={profileStyles.followBtn} activeOpacity={0.85}>
-              <Text style={profileStyles.followBtnText}>Follow</Text>
+            <TouchableOpacity style={profileStyles.editProfileBtn} activeOpacity={0.85}>
+              <Text style={profileStyles.editProfileBtnText}>Edit Profile</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -3158,6 +3826,8 @@ const profileStyles = StyleSheet.create({
   socialIcon: { fontSize: 15, color: "#fff" },
   followBtn: { paddingHorizontal: 18, height: 34, borderRadius: 17, backgroundColor: "#ffffff", alignItems: "center", justifyContent: "center" },
   followBtnText: { fontSize: 14, fontWeight: "700", color: "#111" },
+  editProfileBtn: { paddingHorizontal: 16, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" },
+  editProfileBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
   avatarRow: { paddingHorizontal: 18, paddingBottom: 12 },
   avatar: { width: PROFILE_AVATAR_SIZE, height: PROFILE_AVATAR_SIZE, borderRadius: 18, backgroundColor: "#FF6B35", borderWidth: 3, borderColor: "#161618", alignItems: "center", justifyContent: "center" },
   avatarInitials: { fontSize: 28, fontWeight: "800", color: "#fff" },
@@ -3342,11 +4012,33 @@ export default function FeedScreen() {
   // Instantiate once at the top level so token cache + needsReconnect survive tab switches
   const nowPlaying = useNowPlaying();
 
+  // Allow other screens (e.g. user-profile DM button) to open a specific tab / conversation
+  const { openTab, openConvId, openConvUserId, openConvUserName, openConvAvatar } =
+    useLocalSearchParams<{
+      openTab?: string;
+      openConvId?: string;
+      openConvUserId?: string;
+      openConvUserName?: string;
+      openConvAvatar?: string;
+    }>();
+
   const [menuVisible, setMenuVisible] = useState(false);
-  const [activeNav, setActiveNav] = useState("Feed");
+  const [activeNav, setActiveNav] = useState(openTab ?? "Feed");
   const [quickReplyPost, setQuickReplyPost] = useState<Post | null>(null);
   const [detailPost, setDetailPost] = useState<Post | null>(null);
-  const [openDm, setOpenDm]         = useState<DirectMessage | null>(null);
+  const [openConv, setOpenConv]     = useState<ConversationInfo | null>(null);
+
+  // Auto-open a conversation when navigated here from user-profile DM button
+  useEffect(() => {
+    if (openConvId && openConvUserId && openConvUserName) {
+      setOpenConv({
+        conversationId: openConvId,
+        otherUser: { id: openConvUserId, username: openConvUserName, display_name: null, avatar_url: openConvAvatar || null },
+        last_message_at: null,
+        last_message_preview: null,
+      });
+    }
+  }, [openConvId]);
   const [keyboardUp, setKeyboardUp] = useState(false);
   const [feedScrollEnabled, setFeedScrollEnabled] = useState(true);
   const [feedRefreshing, setFeedRefreshing] = useState(false);
@@ -3397,7 +4089,7 @@ export default function FeedScreen() {
         ) : activeNav === "Meets" ? (
           <MeetsView />
         ) : activeNav === "Messages" ? (
-          <MessagesView onOpenChat={setOpenDm} />
+          <MessagesView onOpenChat={setOpenConv} />
         ) : (
           <FlatList
             data={POSTS}
@@ -3489,8 +4181,8 @@ export default function FeedScreen() {
       )}
 
       {/* Chat detail — slides in from right over everything */}
-      {openDm && (
-        <ChatDetailView dm={openDm} onClose={() => setOpenDm(null)} />
+      {openConv && (
+        <ChatDetailView conv={openConv} onClose={() => setOpenConv(null)} />
       )}
     </View>
     </NowPlayingCtx.Provider>

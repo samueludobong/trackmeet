@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
 import { getCurrentlyPlaying, refreshSpotifyToken, reconnectSpotify } from './spotify'
+import { registerBackgroundSync, unregisterBackgroundSync } from './backgroundSync'
 
 export type NowPlayingTrack = {
   id: string
@@ -18,14 +19,69 @@ export type NowPlayingTrack = {
 export const DEFAULT_GRADIENT: [string, string, string] = ['#3D1A0C', '#1E0D08', '#0E0907']
 
 export function useNowPlaying() {
-  const [track,          setTrack]          = useState<NowPlayingTrack | null>(null)
-  const [liveProgressMs, setLiveProgressMs] = useState(0)
-  const [loading,        setLoading]        = useState(true)
-  const [needsReconnect, setNeedsReconnect] = useState(false)
+  const [track,               setTrack]               = useState<NowPlayingTrack | null>(null)
+  const [liveProgressMs,      setLiveProgressMs]      = useState(0)
+  const [loading,             setLoading]             = useState(true)
+  const [needsReconnect,      setNeedsReconnect]      = useState(false)
+  const [broadcastingEnabled, setBroadcastingEnabled] = useState(false)
+  const [broadcastLoading,    setBroadcastLoading]    = useState(true)
 
-  const tokenCache   = useRef<{ token: string; expiresAt: string } | null>(null)
-  const fetchedAt    = useRef<number>(Date.now())
-  const baseProgress = useRef<number>(0)
+  const tokenCache      = useRef<{ token: string; expiresAt: string } | null>(null)
+  const fetchedAt       = useRef<number>(Date.now())
+  const baseProgress    = useRef<number>(0)
+  const lastBroadcastId = useRef<string | null>(null)  // track id last written to DB
+  const broadcastingRef = useRef(false)                // sync ref so poll() closure reads current value
+
+  // Keep ref in sync with state so the poll closure always reads the latest value
+  useEffect(() => { broadcastingRef.current = broadcastingEnabled }, [broadcastingEnabled])
+
+  // Load initial broadcasting state from DB
+  useEffect(() => {
+    ;(async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setBroadcastLoading(false); return }
+      const { data } = await supabase
+        .from('users')
+        .select('is_broadcasting')
+        .eq('id', user.id)
+        .single()
+      const enabled = data?.is_broadcasting ?? false
+      setBroadcastingEnabled(enabled)
+      broadcastingRef.current = enabled
+      setBroadcastLoading(false)
+    })()
+  }, [])
+
+  // Toggle broadcasting on/off — writes to DB, clears song data when turning off,
+  // and registers/unregisters the background sync task.
+  const toggleBroadcasting = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const newVal = !broadcastingEnabled
+    setBroadcastingEnabled(newVal)
+    broadcastingRef.current = newVal
+
+    if (!newVal) {
+      lastBroadcastId.current = null
+      await supabase.from('users').update({
+        is_broadcasting:     false,
+        current_song_name:        null,
+        current_song_artist:      null,
+        current_song_id:          null,
+        current_song_album_art:   null,
+        current_song_duration_ms: null,
+        current_song_progress_ms: null,
+        current_song_updated_at:  null,
+      }).eq('id', user.id)
+      await unregisterBackgroundSync()
+    } else {
+      await supabase.from('users').update({ is_broadcasting: true }).eq('id', user.id)
+      await registerBackgroundSync()
+      // Reset dedup so the next poll immediately writes the current song
+      lastBroadcastId.current = null
+    }
+  }
 
   const getValidToken = async (userId: string): Promise<string | null> => {
     if (tokenCache.current) {
@@ -56,12 +112,10 @@ export function useNowPlaying() {
       const refreshed = await refreshSpotifyToken(userId, profile.spotify_refresh_token)
       if (refreshed) {
         token = refreshed
-        // Cache with a fresh 55-minute window so we don't re-check until near expiry
         tokenCache.current = { token, expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }
         setNeedsReconnect(false)
         return token
       } else {
-        // Refresh token is dead — clear cache, stop polling, ask user to reconnect
         tokenCache.current = null
         setNeedsReconnect(true)
         return null
@@ -94,6 +148,24 @@ export function useNowPlaying() {
     fetchedAt.current    = Date.now()
     baseProgress.current = result?.progressMs ?? 0
 
+    // Only broadcast to other profiles when broadcasting is enabled.
+    // Only write when the track actually changes (not every 3s poll).
+    if (broadcastingRef.current) {
+      const broadcastId = result?.isPlaying ? result.id : null
+      if (broadcastId !== lastBroadcastId.current) {
+        lastBroadcastId.current = broadcastId
+        supabase.from('users').update({
+          current_song_name:        result?.isPlaying ? result.name       : null,
+          current_song_artist:      result?.isPlaying ? result.artist     : null,
+          current_song_id:          result?.isPlaying ? result.id         : null,
+          current_song_album_art:   result?.isPlaying ? result.albumArt   : null,
+          current_song_duration_ms: result?.isPlaying ? result.durationMs : null,
+          current_song_progress_ms: result?.isPlaying ? result.progressMs : null,
+          current_song_updated_at:  result?.isPlaying ? new Date().toISOString() : null,
+        }).eq('id', user.id).then(() => {})  // fire-and-forget
+      }
+    }
+
     setTrack(result)
     setLiveProgressMs(result?.progressMs ?? 0)
     setLoading(false)
@@ -117,11 +189,7 @@ export function useNowPlaying() {
     return () => clearInterval(id)
   }, [track?.id, track?.isPlaying, track?.durationMs])
 
-  // Call this when the user taps "Reconnect Spotify".
-  // Uses the lightweight reconnectSpotify (no top-artists fetch) so there
-  // are fewer failure points. Pre-seeds the token cache with the fresh
-  // access token so the very first post-reconnect poll doesn't need a DB
-  // round-trip (and can't accidentally re-read a stale row).
+  // Reconnect Spotify after token revocation
   const reconnect = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -133,13 +201,13 @@ export function useNowPlaying() {
       return
     }
 
-    // Pre-seed cache with the fresh token so the first poll uses it directly
     tokenCache.current = { token: result.accessToken, expiresAt: result.expiresAt }
-
-    // Flip the flag — the useEffect([needsReconnect]) will re-run, call poll(),
-    // and restart the 3-second interval automatically.
     setNeedsReconnect(false)
   }
 
-  return { track, liveProgressMs, gradient: DEFAULT_GRADIENT, loading, needsReconnect, refresh: poll, reconnect }
+  return {
+    track, liveProgressMs, gradient: DEFAULT_GRADIENT, loading,
+    needsReconnect, refresh: poll, reconnect,
+    broadcastingEnabled, broadcastLoading, toggleBroadcasting,
+  }
 }
