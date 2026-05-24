@@ -18,7 +18,10 @@ import {
   KeyboardAvoidingView,
   RefreshControl,
   ActivityIndicator,
+  Alert,
+  Linking,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRef, useState, useEffect, createContext, useContext } from "react";
 import { LinearGradient } from "expo-linear-gradient";
@@ -26,7 +29,7 @@ import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import {
   AVATAR_MAP,
-  STORIES, POSTS, DUMMY_COMMENTS, NAV_ITEMS,
+  STORIES, DUMMY_COMMENTS, NAV_ITEMS,
   FAKE_PHOTO_COLORS,
   DISCOVER_FILTERS, CAROUSEL_CARD_W, CAROUSEL_GAP, CAROUSEL_ITEMS,
   TRENDING_ARTISTS, FOR_YOU_RECS, UPCOMING_MEETS,
@@ -42,7 +45,7 @@ import {
   type GroupChat, type CommunityItem, type UserProfile,
 } from "./data/mock";
 
-import { openSpotifyLink, saveTrackToLiked } from '../lib/spotify'
+import { openSpotifyLink, saveTrackToLiked, searchSpotifyTracks, type SpotifyTrackResult } from '../lib/spotify'
 import { useNowPlaying, type NowPlayingTrack } from '../lib/useNowPlaying'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import {
@@ -51,12 +54,42 @@ import {
   sendTextMessage, sendSpotifyTrackMessage,
 } from '../lib/messages'
 import { followUser, unfollowUser } from '../lib/follows'
+import { useVideoPlayer, VideoView } from 'expo-video'
+import * as SecureStore from 'expo-secure-store'
+
+
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
 const NAVBAR_H = 70;
 const BOTTOM_INSET = 34;
 const COMPOSER_ABOVE_NAV = NAVBAR_H + BOTTOM_INSET + 8;
+
+// Card inner width (card has marginHorizontal: 13 → SW - 26) used for collage layouts
+const COLLAGE_W = SW - 26;
+const COLLAGE_GAP = 2;
+
+// ─── Social platform config ───────────────────────────────────────────────────
+
+type SocialPlatform = {
+  key: string;
+  label: string;
+  icon: string;            // FontAwesome5 icon name
+  color: string;
+  placeholder: string;
+};
+
+const SOCIAL_PLATFORMS: SocialPlatform[] = [
+  { key: "instagram",  label: "Instagram",   icon: "instagram",   color: "#ffffff", placeholder: "instagram.com/yourname" },
+  { key: "x",          label: "X",           icon: "twitter",     color: "#ffffff", placeholder: "x.com/yourname" },
+  { key: "tiktok",     label: "TikTok",      icon: "tiktok",      color: "#ffffff", placeholder: "tiktok.com/@yourname" },
+  { key: "youtube",    label: "YouTube",     icon: "youtube",     color: "#ffffff", placeholder: "youtube.com/@channel" },
+  { key: "soundcloud", label: "SoundCloud",  icon: "soundcloud",  color: "#ffffff", placeholder: "soundcloud.com/yourname" },
+  { key: "facebook",   label: "Facebook",    icon: "facebook",    color: "#ffffff", placeholder: "facebook.com/yourname" },
+];
+
+// Order in which platforms are shown on the profile banner (most relevant first)
+const BANNER_PLATFORM_PRIORITY = ["instagram", "x", "youtube", "tiktok", "soundcloud", "facebook"];
 
 // Lets any component inside a post card open the detail view without prop-drilling through card types
 const OpenDetailCtx = createContext<(() => void) | undefined>(undefined);
@@ -72,6 +105,19 @@ const useNowPlayingCtx = () => {
   return ctx
 }
 
+// ─── Feed user context (current-user liked-post IDs + toggle handler) ────────
+// Passed down to ActionRow without prop-drilling through every card layer.
+
+type FeedUserCtxValue = {
+  currentUserId: string | null;
+  likedPostIds: Set<string>;
+  onToggleLike: (postId: string) => void;
+};
+const FeedUserCtx = createContext<FeedUserCtxValue>({
+  currentUserId: null,
+  likedPostIds: new Set(),
+  onToggleLike: () => {},
+});
 
 // ─── Spotify track card (shown inside chat when a track is shared) ───────────
 
@@ -311,12 +357,24 @@ function AnimatedWaveform({ color }: { color: string }) {
   );
 }
 
-function NowPlayingBanner({ onShare }: { onShare?: (track: NowPlayingTrack) => void } = {}) {
+function NowPlayingBanner({
+  onShare,
+  onAttach,
+}: {
+  onShare?: (track: NowPlayingTrack) => void;
+  onAttach?: (track: NowPlayingTrack) => void;
+} = {}) {
   const { track } = useNowPlayingCtx();
 
   if (!track?.isPlaying) return null;
 
   const COLOR = "#1DB954";
+  // When onAttach is provided (quick-post context) show a "+" button;
+  // otherwise fall back to the paper-plane share-to-chat button.
+  const handleBtn = () => {
+    if (!track) return;
+    onAttach ? onAttach(track) : onShare?.(track);
+  };
 
   return (
     <View style={styles.nowPlayingBar}>
@@ -338,13 +396,17 @@ function NowPlayingBanner({ onShare }: { onShare?: (track: NowPlayingTrack) => v
       {/* Animated waveform */}
       <AnimatedWaveform color={COLOR} />
 
-      {/* Share to chat */}
+      {/* Action button */}
       <TouchableOpacity
         style={styles.nowPlayingShareBtn}
         activeOpacity={0.75}
-        onPress={() => track && onShare?.(track)}
+        onPress={handleBtn}
       >
-        <Ionicons name="paper-plane-outline" size={14} color={COLOR} />
+        <Ionicons
+          name={onAttach ? "add-circle-outline" : "paper-plane-outline"}
+          size={onAttach ? 22 : 14}
+          color={COLOR}
+        />
       </TouchableOpacity>
     </View>
   );
@@ -353,15 +415,18 @@ function NowPlayingBanner({ onShare }: { onShare?: (track: NowPlayingTrack) => v
 // ─── Action row ───────────────────────────────────────────────────────────────
 
 function ActionRow({ post }: { post: Post }) {
-  const [liked, setLiked] = useState(false);
+  const { currentUserId, likedPostIds, onToggleLike } = useContext(FeedUserCtx);
+  const liked = likedPostIds.has(post.id);
   const [likeCount, setLikeCount] = useState(post.likes);
   const openDetail = useContext(OpenDetailCtx);
 
+  // Keep local count in sync when the post prop changes (e.g. after DB sync)
+  useEffect(() => { setLikeCount(post.likes); }, [post.likes]);
+
   const handleLike = () => {
-    setLiked((prev) => {
-      setLikeCount((c) => (prev ? c - 1 : c + 1));
-      return !prev;
-    });
+    if (!currentUserId) return;
+    setLikeCount((c) => (liked ? Math.max(0, c - 1) : c + 1));
+    onToggleLike(post.id);
   };
 
   return (
@@ -371,7 +436,7 @@ function ActionRow({ post }: { post: Post }) {
         {likeCount > 0 && <Text style={[styles.actionCount, liked && styles.actionCountLiked]}>{likeCount}</Text>}
       </TouchableOpacity>
       <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7} onPress={openDetail}>
-        <Text style={styles.actionIcon}>💬</Text>
+        <Ionicons name="chatbubble-outline" size={17} color="rgba(255,255,255,0.7)" />
         {post.comments > 0 && <Text style={styles.actionCount}>{post.comments}</Text>}
       </TouchableOpacity>
       <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7} onPress={() => {}}>
@@ -386,24 +451,164 @@ function ActionRow({ post }: { post: Post }) {
   );
 }
 
+// ─── Lightbox styles ─────────────────────────────────────────────────────────
+
+const lbStyles = StyleSheet.create({
+  backdrop:  { flex: 1, backgroundColor: "#000" },
+  header:    {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 20, paddingTop: 54, paddingBottom: 10,
+  },
+  counter:   { fontSize: 15, color: "rgba(255,255,255,0.6)", fontWeight: "600" },
+  closeBtn:  { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
+  page:      { width: SW, flex: 1, justifyContent: "center", alignItems: "center" },
+  fullImage: { width: SW, height: SH * 0.78 },
+  videoFull: { width: SW, height: SH * 0.62 },
+});
+
+// ─── Fullscreen image lightbox ─────────────────────────────────────────────────
+
+function MediaLightbox({
+  urls,
+  startIndex,
+  onClose,
+}: {
+  urls: string[];
+  startIndex: number;
+  onClose: () => void;
+}) {
+  const [currentIndex, setCurrentIndex] = useState(startIndex);
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    if (startIndex > 0) {
+      const t = setTimeout(() => {
+        scrollRef.current?.scrollTo({ x: startIndex * SW, animated: false });
+      }, 30);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <View style={lbStyles.backdrop}>
+        {/* Counter + close */}
+        <View style={lbStyles.header}>
+          <Text style={lbStyles.counter}>
+            {urls.length > 1 ? `${currentIndex + 1} / ${urls.length}` : " "}
+          </Text>
+          <TouchableOpacity onPress={onClose} hitSlop={12} style={lbStyles.closeBtn}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Horizontally paged images */}
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(e) =>
+            setCurrentIndex(Math.round(e.nativeEvent.contentOffset.x / SW))
+          }
+          style={{ flex: 1 }}
+        >
+          {urls.map((url, i) => (
+            <View key={i} style={lbStyles.page}>
+              <Image
+                source={{ uri: url }}
+                style={lbStyles.fullImage}
+                resizeMode="contain"
+              />
+            </View>
+          ))}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Fullscreen video lightbox ─────────────────────────────────────────────────
+
+function VideoLightbox({ uri, onClose }: { uri: string; onClose: () => void }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = false;
+    p.play();
+  });
+
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <View style={lbStyles.backdrop}>
+        <View style={lbStyles.header}>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity onPress={onClose} hitSlop={12} style={lbStyles.closeBtn}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        <View style={{ flex: 1, justifyContent: "center" }}>
+          <VideoView
+            player={player}
+            style={lbStyles.videoFull}
+            nativeControls
+            contentFit="contain"
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // ─── Post header ──────────────────────────────────────────────────────────────
 
 function PostHeader({ post }: { post: Post }) {
   const photo = AVATAR_MAP[post.user];
+  const router = useRouter();
+
+  const handleAuthorPress = () => {
+    if (post.authorId) {
+      router.push({ pathname: "/user-profile", params: { userId: post.authorId } });
+    }
+  };
+
+  const avatarEl = post.avatarUrl ? (
+    <Image source={{ uri: post.avatarUrl }} style={styles.postAvatar} />
+  ) : photo ? (
+    <Image source={photo} style={styles.postAvatar} />
+  ) : (
+    <View style={[styles.postAvatar, { backgroundColor: post.avatarColor + "22" }]}>
+      <Text style={[styles.postAvatarText, { color: post.avatarColor }]}>{post.initials}</Text>
+    </View>
+  );
+
   return (
     <View style={styles.postHeader}>
-      {photo ? (
-        <Image source={photo} style={styles.postAvatar} />
-      ) : (
-        <View style={[styles.postAvatar, { backgroundColor: post.avatarColor + "22" }]}>
-          <Text style={[styles.postAvatarText, { color: post.avatarColor }]}>{post.initials}</Text>
-        </View>
-      )}
+      {/* Avatar → opens author profile */}
+      <TouchableOpacity activeOpacity={0.72} onPress={handleAuthorPress} disabled={!post.authorId}>
+        {avatarEl}
+      </TouchableOpacity>
+
       <View style={{ flex: 1 }}>
-        <Text style={styles.postUser}>{post.handle}</Text>
-        <Text style={styles.postBio} numberOfLines={1}>{post.bio} · {post.time}</Text>
+        {/* Display name → opens author profile */}
+        <TouchableOpacity activeOpacity={0.72} onPress={handleAuthorPress} disabled={!post.authorId}>
+          <Text style={styles.postUser}>{post.bio}</Text>
+        </TouchableOpacity>
+        {/* Handle → also opens author profile */}
+        <TouchableOpacity activeOpacity={0.6} onPress={handleAuthorPress} disabled={!post.authorId}>
+          <Text style={styles.postBio} numberOfLines={1}>{post.handle} · {post.time}</Text>
+        </TouchableOpacity>
       </View>
     </View>
+  );
+}
+
+// ─── Tappable post text — opens detail view ────────────────────────────────────
+
+function PostText({ text }: { text: string }) {
+  const openDetail = useContext(OpenDetailCtx);
+  return (
+    <TouchableOpacity activeOpacity={0.75} onPress={openDetail}>
+      <Text style={styles.postText}>{text}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -413,8 +618,92 @@ function TextCard({ post }: { post: Post }) {
   return (
     <View style={styles.card}>
       <PostHeader post={post} />
-      <Text style={styles.postText}>{post.text}</Text>
+      {post.text && <PostText text={post.text} />}
       <ActionRow post={post} />
+    </View>
+  );
+}
+
+// ─── Image collage layout ─────────────────────────────────────────────────────
+
+function ImageCollage({
+  urls,
+  onPress,
+}: {
+  urls: string[];
+  onPress: (idx: number) => void;
+}) {
+  // ── 1 image: full width ──────────────────────────────────────────────────────
+  if (urls.length === 1) {
+    return (
+      <TouchableOpacity activeOpacity={0.9} onPress={() => onPress(0)}>
+        <Image source={{ uri: urls[0] }} style={{ width: COLLAGE_W, height: 280 }} resizeMode="cover" />
+      </TouchableOpacity>
+    );
+  }
+
+  // ── 2 images: side by side ───────────────────────────────────────────────────
+  if (urls.length === 2) {
+    const w = (COLLAGE_W - COLLAGE_GAP) / 2;
+    return (
+      <View style={{ flexDirection: "row", gap: COLLAGE_GAP }}>
+        {urls.map((url, i) => (
+          <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => onPress(i)}>
+            <Image source={{ uri: url }} style={{ width: w, height: 220 }} resizeMode="cover" />
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  }
+
+  // ── 3 images: large left + two stacked right ─────────────────────────────────
+  if (urls.length === 3) {
+    const leftW  = Math.round(COLLAGE_W * 0.62);
+    const rightW = COLLAGE_W - leftW - COLLAGE_GAP;
+    const totalH = 250;
+    const rightH = (totalH - COLLAGE_GAP) / 2;
+    return (
+      <View style={{ flexDirection: "row", gap: COLLAGE_GAP }}>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => onPress(0)}>
+          <Image source={{ uri: urls[0] }} style={{ width: leftW, height: totalH }} resizeMode="cover" />
+        </TouchableOpacity>
+        <View style={{ gap: COLLAGE_GAP }}>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => onPress(1)}>
+            <Image source={{ uri: urls[1] }} style={{ width: rightW, height: rightH }} resizeMode="cover" />
+          </TouchableOpacity>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => onPress(2)}>
+            <Image source={{ uri: urls[2] }} style={{ width: rightW, height: rightH }} resizeMode="cover" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ── 4+ images: 2×2 grid, last cell shows +N badge ────────────────────────────
+  const cellW  = (COLLAGE_W - COLLAGE_GAP) / 2;
+  const cellH  = Math.round(cellW * 0.72);
+  const shown  = urls.slice(0, 4);
+  const extra  = urls.length - 4;
+  return (
+    <View style={{ gap: COLLAGE_GAP }}>
+      {[0, 2].map((rowStart) => (
+        <View key={rowStart} style={{ flexDirection: "row", gap: COLLAGE_GAP }}>
+          {shown.slice(rowStart, rowStart + 2).map((url, j) => {
+            const idx  = rowStart + j;
+            const isLast = idx === 3 && extra > 0;
+            return (
+              <TouchableOpacity key={idx} activeOpacity={0.9} onPress={() => onPress(idx)} style={{ position: "relative" }}>
+                <Image source={{ uri: url }} style={{ width: cellW, height: cellH }} resizeMode="cover" />
+                {isLast && (
+                  <View style={styles.collageMoreOverlay}>
+                    <Text style={styles.collageMoreText}>+{extra}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 }
@@ -422,14 +711,27 @@ function TextCard({ post }: { post: Post }) {
 // ─── Image card ───────────────────────────────────────────────────────────────
 
 function ImageCard({ post }: { post: Post }) {
+  const urls = post.mediaUrls ?? [];
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   return (
     <View style={styles.card}>
       <PostHeader post={post} />
-      {post.text && <Text style={styles.postText}>{post.text}</Text>}
-      <View style={[styles.mediaBlock, { backgroundColor: post.mediaColor ?? "#1a1a1a" }]}>
-        <Text style={styles.mediaPlaceholder}>🖼</Text>
-      </View>
+      {post.text && <PostText text={post.text} />}
+      {urls.length > 0 ? (
+        <ImageCollage urls={urls} onPress={(i) => setLightboxIdx(i)} />
+      ) : (
+        <View style={[styles.mediaBlock, { backgroundColor: post.mediaColor ?? "#1a1a1a" }]}>
+          <Text style={styles.mediaPlaceholder}>🖼</Text>
+        </View>
+      )}
       <ActionRow post={post} />
+      {lightboxIdx !== null && (
+        <MediaLightbox
+          urls={urls}
+          startIndex={lightboxIdx}
+          onClose={() => setLightboxIdx(null)}
+        />
+      )}
     </View>
   );
 }
@@ -440,7 +742,7 @@ function VideoCard({ post }: { post: Post }) {
   return (
     <View style={styles.card}>
       <PostHeader post={post} />
-      {post.text && <Text style={styles.postText}>{post.text}</Text>}
+      {post.text && <PostText text={post.text} />}
       <View style={[styles.mediaBlock, { backgroundColor: post.mediaColor ?? "#1a1a1a" }]}>
         <View style={styles.videoPlayCircle}>
           <Text style={styles.videoPlayIcon}>▶</Text>
@@ -456,51 +758,96 @@ function VideoCard({ post }: { post: Post }) {
   );
 }
 
-// ─── Music card (visual only, no playback) ────────────────────────────────────
+// ─── Music card ───────────────────────────────────────────────────────────────
 
 function MusicCard({ post }: { post: Post }) {
   const accent = post.albumAccent ?? "#AB00FF";
-  const bg = post.albumColor ?? "#111";
+  const bg     = post.albumColor  ?? "#111";
+  const [saved,   setSaved]   = useState(false);
+  const [saving,  setSaving]  = useState(false);
+
+  const handleOpen = () => {
+    if (!post.songId) return;
+    openSpotifyLink(
+      `spotify:track:${post.songId}`,
+      `https://open.spotify.com/track/${post.songId}`,
+    );
+  };
+
+  const handleSave = async () => {
+    if (!post.songId || saving || saved) return;
+    setSaving(true);
+    try {
+      // Fetch the user's Spotify access token from the DB
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("users")
+        .select("spotify_access_token")
+        .eq("id", user.id)
+        .single();
+      const token = data?.spotify_access_token;
+      if (!token) return;
+      const ok = await saveTrackToLiked(token, post.songId);
+      if (ok) setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <View style={styles.card}>
       <PostHeader post={post} />
-      {post.text && <Text style={styles.postText}>{post.text}</Text>}
+      {post.text && <PostText text={post.text} />}
 
       <View style={[styles.musicPlayerCard, { backgroundColor: bg }]}>
-        {/* Art area */}
+        {/* Art — song info overlaid at bottom */}
         <View style={styles.musicArtArea}>
-          <View style={[styles.musicArtFill, { backgroundColor: accent + "28" }]}>
-            <Text style={styles.musicArtEmoji}>🎵</Text>
-          </View>
-          {/* Gradient fade from art to bottom info */}
-          <View style={[styles.musicGradientOverlay, { backgroundColor: bg }]} />
-          {/* Glass action buttons */}
-          <View style={styles.musicTopRight}>
-            <TouchableOpacity style={styles.musicGlassBtn} activeOpacity={0.8}>
-              <Text style={styles.musicGlassBtnIcon}>↗</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.musicGlassBtn} activeOpacity={0.8}>
-              <Text style={styles.musicGlassBtnIcon}>+</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Song info + progress bar (no controls) */}
-        <View style={styles.musicBottom}>
-          <Text style={styles.musicSongTitle} numberOfLines={1}>{post.song}</Text>
-          <Text style={styles.musicArtistName} numberOfLines={1}>{post.artist}</Text>
-
-          <View style={styles.musicProgressRow}>
-            <View style={styles.musicProgressTrack}>
-              <View style={[styles.musicProgressFill, { backgroundColor: accent, width: "35%" }]}>
-                <View style={styles.musicProgressThumb} />
-              </View>
+          {post.albumArt ? (
+            <Image source={{ uri: post.albumArt }} style={styles.musicArtFill} resizeMode="cover" />
+          ) : (
+            <View style={[styles.musicArtFill, { backgroundColor: accent + "28" }]}>
+              <Text style={styles.musicArtEmoji}>🎵</Text>
             </View>
+          )}
+
+          {/* Bottom scrim + song info */}
+          <LinearGradient
+            colors={["transparent", "rgba(0,0,0,0.72)"]}
+            style={styles.musicInfoOverlay}
+            pointerEvents="none"
+          />
+          <View style={styles.musicInfoText} pointerEvents="none">
+            <Text style={styles.musicSongTitle} numberOfLines={1}>{post.song}</Text>
+            <Text style={styles.musicArtistName} numberOfLines={1}>{post.artist}</Text>
           </View>
-          <View style={styles.musicTimestamps}>
-            <Text style={styles.musicTime}>0:55</Text>
-            <Text style={styles.musicTime}>2:58</Text>
+
+          {/* Top-right: open in Spotify + save to Liked Songs */}
+          <View style={styles.musicTopRight}>
+            <TouchableOpacity
+              style={styles.musicGlassBtn}
+              activeOpacity={0.8}
+              onPress={handleSave}
+              disabled={saving || saved}
+            >
+              {saving
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons
+                    name={saved ? "heart" : "heart-outline"}
+                    size={17}
+                    color={saved ? "#ff4d6d" : "#fff"}
+                  />
+              }
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.musicGlassBtn, { backgroundColor: "rgb(0, 0, 0)", borderColor: "rgba(255, 255, 255, 0.93)" }]}
+              activeOpacity={0.8}
+              onPress={handleOpen}
+              disabled={!post.songId}
+            >
+              <FontAwesome5 name="spotify" size={17} color="#1DB954" />
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -514,27 +861,75 @@ function MusicCard({ post }: { post: Post }) {
 
 function PollCard({ post }: { post: Post }) {
   const [voted, setVoted] = useState<string | null>(null);
-  const total = post.totalVotes ?? 1;
+  const [localOptions, setLocalOptions] = useState(post.pollOptions ?? []);
+  const [voting, setVoting] = useState(false);
+
+  // Derive total from live localOptions (not a snapshot), handle 0-vote state
+  const displayTotal = localOptions.reduce((s, o) => s + o.votes, 0);
+  const total = displayTotal || 1; // avoid division-by-zero for pct calculation
+
+  const handleVote = async (optId: string) => {
+    // Tapping the already-selected option is a no-op
+    if (optId === voted || voting) return;
+
+    const prevVoted = voted;
+    const prevOptions = localOptions;
+
+    // Optimistic update: increment new, decrement old
+    const optimistic = localOptions.map((o) => {
+      if (o.id === optId)      return { ...o, votes: o.votes + 1 };
+      if (o.id === prevVoted)  return { ...o, votes: Math.max(0, o.votes - 1) };
+      return o;
+    });
+    setVoted(optId);
+    setLocalOptions(optimistic);
+    setVoting(true);
+
+    // Persist via SECURITY DEFINER RPC — bypasses RLS so any voter can update
+    const { data, error } = await supabase.rpc("vote_on_poll", {
+      p_post_id:     post.id,
+      p_opt_id:      optId,
+      p_prev_opt_id: prevVoted,
+    });
+
+    setVoting(false);
+
+    if (error) {
+      // Revert on failure
+      console.log("[PollCard] vote error:", error.message);
+      setVoted(prevVoted);
+      setLocalOptions(prevOptions);
+    } else if (data?.options) {
+      // Sync with server-authoritative counts
+      setLocalOptions(data.options);
+    }
+  };
+
+  const maxVotes = Math.max(...localOptions.map((o) => o.votes));
 
   return (
     <View style={styles.card}>
       <PostHeader post={post} />
-      {post.text && <Text style={styles.postText}>{post.text}</Text>}
+      {post.text && <PostText text={post.text} />}
 
       <View style={styles.pollContainer}>
         <Text style={styles.pollQuestion}>{post.pollQuestion}</Text>
         <View style={styles.pollOptions}>
-          {(post.pollOptions ?? []).map((opt) => {
-            const pct = Math.round((opt.votes / total) * 100);
-            const isWinner = opt.votes === Math.max(...(post.pollOptions ?? []).map((o) => o.votes));
+          {localOptions.map((opt) => {
+            const pct       = Math.round((opt.votes / total) * 100);
+            const isVoted   = voted === opt.id;
+            const isWinner  = voted !== null && opt.votes === maxVotes && opt.votes > 0;
+
             return (
               <TouchableOpacity
                 key={opt.id}
-                style={styles.pollOption}
-                activeOpacity={0.8}
-                onPress={() => { if (!voted) setVoted(opt.id); }}
+                style={[styles.pollOption, isVoted && { borderColor: "rgba(171,0,255,0.45)" }]}
+                activeOpacity={voted ? 0.65 : 0.8}
+                onPress={() => handleVote(opt.id)}
+                disabled={voting}
               >
-                {voted && (
+                {/* Fill bar — visible once any vote has been cast */}
+                {voted !== null && (
                   <View
                     style={[
                       styles.pollFillBar,
@@ -543,25 +938,76 @@ function PollCard({ post }: { post: Post }) {
                   />
                 )}
                 <View style={styles.pollOptionInner}>
-                  <Text style={[styles.pollOptionLabel, voted === opt.id && { color: "#AB00FF" }]}>
+                  <Text style={[styles.pollOptionLabel, isVoted && { color: "#AB00FF" }]}>
                     {opt.label}
                   </Text>
-                  {voted && (
-                    <Text style={[styles.pollPct, isWinner && { color: "#AB00FF" }]}>{pct}%</Text>
-                  )}
+                  {/* Right side: checkmark for current vote, pct after voting */}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    {voted !== null && (
+                      <Text style={[styles.pollPct, isWinner && { color: "#AB00FF" }]}>{pct}%</Text>
+                    )}
+                    {isVoted && (
+                      <Ionicons name="checkmark-circle" size={15} color="#AB00FF" />
+                    )}
+                  </View>
                 </View>
               </TouchableOpacity>
             );
           })}
         </View>
         <Text style={styles.pollMeta}>
-          {total.toLocaleString()} votes · {voted ? "results" : "tap to vote"}
+          {(voted === null ? displayTotal : displayTotal).toLocaleString()} votes
+          {voted !== null ? " · tap another option to change" : " · tap to vote"}
         </Text>
       </View>
 
       <ActionRow post={post} />
     </View>
   );
+}
+
+// ─── DB row → Post adapter ────────────────────────────────────────────────────
+
+function dbRowToPost(row: any): Post {
+  const author = Array.isArray(row.users) ? row.users[0] : row.users;
+  const diffMin = Math.floor((Date.now() - new Date(row.created_at).getTime()) / 60_000);
+  const time =
+    diffMin < 1 ? "just now"
+    : diffMin < 60 ? `${diffMin}m`
+    : diffMin < 1440 ? `${Math.floor(diffMin / 60)}h`
+    : `${Math.floor(diffMin / 1440)}d`;
+  const name = author?.display_name ?? author?.username ?? "User";
+  const words = name.trim().split(/\s+/);
+  const initials =
+    words.length > 1
+      ? (words[0][0] + words[words.length - 1][0]).toUpperCase()
+      : name.slice(0, 2).toUpperCase();
+  return {
+    id: row.id,
+    authorId: author?.id ?? undefined,
+    user: author?.username ?? "user",
+    handle: `@${author?.username ?? "user"}`,
+    initials,
+    avatarColor: "#AB00FF",
+    avatarUrl: author?.avatar_url ?? null,
+    bio: author?.display_name ?? null,
+    time,
+    text: row.text ?? undefined,
+    type: row.type as Post["type"],
+    mediaUrls: row.media_urls ?? [],
+    song:     row.song_name      ?? undefined,
+    artist:   row.song_artist    ?? undefined,
+    songId:   row.song_id        ?? undefined,
+    albumArt: row.song_album_art ?? undefined,
+    pollQuestion: row.poll_question ?? undefined,
+    pollOptions: row.poll_options ?? undefined,
+    totalVotes: row.poll_options
+      ? (row.poll_options as any[]).reduce((s: number, o: any) => s + (o.votes ?? 0), 0)
+      : undefined,
+    likes: row.likes_count ?? 0,
+    comments: row.comments_count ?? 0,
+    shares: 0,
+  };
 }
 
 // ─── Post card router ─────────────────────────────────────────────────────────
@@ -575,39 +1021,74 @@ function PostCard({ item }: { item: Post }) {
   return null;
 }
 
-// ─── Comment row (swipeable, likeable) ────────────────────────────────────────
+// ─── Comment type + adapter ───────────────────────────────────────────────────
+
+type Comment = {
+  id: string;
+  postId: string;
+  userId: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  text: string;
+  likesCount: number;
+  parentCommentId: string | null;
+  time: string;
+};
+
+function rowToComment(row: any): Comment {
+  const author  = Array.isArray(row.users) ? row.users[0] : row.users;
+  const diffMin = Math.floor((Date.now() - new Date(row.created_at).getTime()) / 60_000);
+  const time    = diffMin < 1 ? "just now" : diffMin < 60 ? `${diffMin}m` : diffMin < 1440 ? `${Math.floor(diffMin / 60)}h` : `${Math.floor(diffMin / 1440)}d`;
+  return {
+    id:              row.id,
+    postId:          row.post_id,
+    userId:          row.user_id,
+    username:        author?.username   ?? "user",
+    displayName:     author?.display_name ?? null,
+    avatarUrl:       author?.avatar_url   ?? null,
+    text:            row.text,
+    likesCount:      row.likes_count    ?? 0,
+    parentCommentId: row.parent_comment_id ?? null,
+    time,
+  };
+}
+
+const COMMENT_SELECT =
+  "id, post_id, user_id, parent_comment_id, text, likes_count, created_at, users!user_id(id, username, display_name, avatar_url)";
+
+// ─── Comment row (swipeable, double-tap to like) ───────────────────────────────
 
 function CommentRow({
   comment,
-  onQuickReply,
+  currentUserId,
+  onReply,
 }: {
-  comment: DummyComment;
-  onQuickReply: (c: DummyComment) => void;
+  comment: Comment;
+  currentUserId: string | null;
+  onReply: (c: Comment) => void;
 }) {
-  const [liked, setLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(comment.likes);
-  const translateX = useRef(new Animated.Value(0)).current;
-  const isLocked = useRef(false);
-  const onQuickReplyRef = useRef(onQuickReply);
-  useEffect(() => { onQuickReplyRef.current = onQuickReply; }, [onQuickReply]);
+  const [liked,     setLiked]     = useState(false);
+  const [likeCount, setLikeCount] = useState(comment.likesCount);
+  const translateX  = useRef(new Animated.Value(0)).current;
+  const heartScale  = useRef(new Animated.Value(1)).current;
+  const isLocked    = useRef(false);
+  const lastTapRef  = useRef(0);
+  const onReplyRef  = useRef(onReply);
+  useEffect(() => { onReplyRef.current = onReply; }, [onReply]);
 
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, { dx, dy }) => {
-        if (dx < -2 && Math.abs(dx) >= Math.abs(dy)) {
-          isLocked.current = true;
-          return true;
-        }
+        if (dx < -2 && Math.abs(dx) >= Math.abs(dy)) { isLocked.current = true; return true; }
         return false;
       },
       onShouldBlockNativeResponder: () => true,
-      onPanResponderMove: (_, { dx }) => {
-        if (dx < 0) translateX.setValue(Math.max(dx, -90));
-      },
-      onPanResponderRelease: (_, { dx }) => {
+      onPanResponderMove:   (_, { dx }) => { if (dx < 0) translateX.setValue(Math.max(dx, -90)); },
+      onPanResponderRelease:(_, { dx }) => {
         isLocked.current = false;
-        if (dx < -50) onQuickReplyRef.current(comment);
+        if (dx < -50) onReplyRef.current(comment);
         Animated.spring(translateX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 240 }).start();
       },
       onPanResponderTerminate: () => {
@@ -617,19 +1098,32 @@ function CommentRow({
     })
   ).current;
 
-  const photo = AVATAR_MAP[comment.user];
   const indicatorOpacity = translateX.interpolate({ inputRange: [-70, -15, 0], outputRange: [1, 0, 0], extrapolate: "clamp" });
 
-  const handleLike = () => {
-    setLiked((prev) => {
-      setLikeCount((c) => prev ? c - 1 : c + 1);
-      return !prev;
-    });
+  const handleLike = async () => {
+    if (!currentUserId) return;
+    const wasLiked = liked;
+    setLiked(!wasLiked);
+    setLikeCount((c) => wasLiked ? Math.max(0, c - 1) : c + 1);
+    // Bounce the heart
+    Animated.sequence([
+      Animated.spring(heartScale, { toValue: 1.45, useNativeDriver: true, damping: 6, stiffness: 500 }),
+      Animated.spring(heartScale, { toValue: 1,    useNativeDriver: true, damping: 12, stiffness: 300 }),
+    ]).start();
+    supabase.rpc("toggle_comment_like", { p_comment_id: comment.id, p_user_id: currentUserId });
   };
+
+  // Double-tap on the bubble body to like
+  const handleBubbleTap = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) handleLike();
+    lastTapRef.current = now;
+  };
+
+  const initials = (comment.displayName ?? comment.username).slice(0, 2).toUpperCase();
 
   return (
     <View style={styles.commentWrap} {...pan.panHandlers}>
-      {/* Reply indicator behind */}
       <Animated.View style={[styles.commentReplyHint, { opacity: indicatorOpacity }]}>
         <Text style={styles.replyIndicatorArrow}>←</Text>
         <Text style={styles.replyIndicatorLabel}>Reply</Text>
@@ -637,28 +1131,39 @@ function CommentRow({
 
       <Animated.View style={[styles.commentRow, { transform: [{ translateX }] }]}>
         {/* Avatar */}
-        {photo ? (
-          <Image source={photo} style={[styles.commentAvatar, { borderColor: comment.color + "55" }]} />
+        {comment.avatarUrl ? (
+          <Image source={{ uri: comment.avatarUrl }} style={styles.commentAvatar} />
         ) : (
-          <View style={[styles.commentAvatar, { backgroundColor: comment.color + "22", borderColor: comment.color + "55" }]}>
-            <Text style={[styles.commentAvatarText, { color: comment.color }]}>{comment.initials}</Text>
+          <View style={[styles.commentAvatar, { backgroundColor: "#AB00FF22", borderColor: "#AB00FF44" }]}>
+            <Text style={[styles.commentAvatarText, { color: "#AB00FF" }]}>{initials}</Text>
           </View>
         )}
 
-        {/* Bubble */}
-        <View style={styles.commentBody}>
+        {/* Bubble — double-tap anywhere on it to like */}
+        <TouchableOpacity style={styles.commentBody} activeOpacity={0.85} onPress={handleBubbleTap}>
           <View style={styles.commentMeta}>
-            <Text style={styles.commentHandle}>@{comment.user}</Text>
+            <Text style={styles.commentHandle}>{comment.displayName ?? `@${comment.username}`}</Text>
             <Text style={styles.commentTime}>{comment.time}</Text>
           </View>
+          {comment.parentCommentId && (
+            <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 2 }}>↩ reply</Text>
+          )}
           <Text style={styles.commentText}>{comment.text}</Text>
-        </View>
-
-        {/* Like */}
-        <TouchableOpacity style={styles.commentLikeBtn} onPress={handleLike} activeOpacity={0.7}>
-          <Text style={[styles.commentLikeIcon, liked && { color: "#FF3CAC" }]}>{liked ? "♥" : "♡"}</Text>
-          <Text style={styles.commentLikeCount}>{likeCount}</Text>
         </TouchableOpacity>
+
+        {/* Like button */}
+        <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+          <TouchableOpacity style={styles.commentLikeBtn} onPress={handleLike} activeOpacity={0.7}>
+            <Ionicons
+              name={liked ? "heart" : "heart-outline"}
+              size={15}
+              color={liked ? "#FF3CAC" : "rgba(255,255,255,0.4)"}
+            />
+            {likeCount > 0 && (
+              <Text style={[styles.commentLikeCount, liked && { color: "#FF3CAC" }]}>{likeCount}</Text>
+            )}
+          </TouchableOpacity>
+        </Animated.View>
       </Animated.View>
     </View>
   );
@@ -752,15 +1257,10 @@ function SwipeablePost({
       </Animated.View>
 
       {/* Card slides left on top of the indicator */}
-      <OpenDetailCtx.Provider value={onPress}>
+      {/* Only the PostHeader is tappable — context guards against swipe false-fires */}
+      <OpenDetailCtx.Provider value={() => { if (!swipeActivated.current) onPress(); }}>
         <Animated.View style={{ transform: [{ translateX }] }}>
           <PostCard item={item} />
-          {/* Invisible tap area — covers the card body but stops above the action row
-              so action buttons (like, comment, share) receive their own touches */}
-          <Pressable
-            style={[StyleSheet.absoluteFill, { bottom: 58 }]}
-            onPress={() => { if (!swipeActivated.current) onPress(); }}
-          />
         </Animated.View>
       </OpenDetailCtx.Provider>
     </View>
@@ -780,11 +1280,33 @@ function QuickReplyOverlay({
 }) {
   const [text, setText] = useState("");
   const [menuVisible, setMenuVisible] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ initials: string; avatarUrl: string | null } | null>(null);
   const backdropAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
   const inputBottomAnim = useRef(new Animated.Value(BOTTOM_INSET + 16)).current;
 
   useEffect(() => {
+    // Fetch current user profile for avatar
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setCurrentUserId(user.id);
+      const { data } = await supabase
+        .from("users")
+        .select("username, display_name, avatar_url")
+        .eq("id", user.id)
+        .single();
+      if (data) {
+        const name: string = data.display_name ?? data.username ?? "?";
+        setCurrentUser({
+          initials: name.slice(0, 1).toUpperCase(),
+          avatarUrl: data.avatar_url ?? null,
+        });
+      }
+    })();
+
     Animated.parallel([
       Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
       Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, damping: 22, stiffness: 220 }),
@@ -819,6 +1341,20 @@ function QuickReplyOverlay({
       Animated.timing(backdropAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
       Animated.timing(scaleAnim, { toValue: 0.95, duration: 160, useNativeDriver: true }),
     ]).start(onClose);
+  };
+
+  const handleSend = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || !currentUserId || sending) return;
+    setSending(true);
+    const { error } = await supabase
+      .from("post_comments")
+      .insert({ post_id: post.id, user_id: currentUserId, text: trimmed });
+    setSending(false);
+    if (!error) {
+      setText("");
+      handleClose();
+    }
   };
 
   return (
@@ -863,9 +1399,15 @@ function QuickReplyOverlay({
             <Text style={styles.qrPlusBtnIcon}>+</Text>
           </TouchableOpacity>
 
-          <View style={[styles.qrAvatar, { backgroundColor: "#AB00FF22" }]}>
-            <Text style={[styles.qrAvatarText, { color: "#AB00FF" }]}>Y</Text>
-          </View>
+          {currentUser?.avatarUrl ? (
+            <Image source={{ uri: currentUser.avatarUrl }} style={styles.qrAvatar} />
+          ) : (
+            <View style={[styles.qrAvatar, { backgroundColor: "#AB00FF22" }]}>
+              <Text style={[styles.qrAvatarText, { color: "#AB00FF" }]}>
+                {currentUser?.initials ?? "?"}
+              </Text>
+            </View>
+          )}
           <View style={styles.qrInputInner}>
             <Text style={styles.qrReplyingTo}>Replying to {post.handle}</Text>
             <TextInput
@@ -876,14 +1418,19 @@ function QuickReplyOverlay({
               onChangeText={setText}
               autoFocus
               returnKeyType="send"
+              onSubmitEditing={handleSend}
             />
           </View>
           <TouchableOpacity
-            style={[styles.qrSend, !text && { opacity: 0.35 }]}
-            disabled={!text}
+            style={[styles.qrSend, (!text.trim() || sending) && { opacity: 0.35 }]}
+            disabled={!text.trim() || sending}
             activeOpacity={0.8}
+            onPress={handleSend}
           >
-            <Text style={styles.qrSendIcon}>↑</Text>
+            {sending
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={styles.qrSendIcon}>↑</Text>
+            }
           </TouchableOpacity>
         </Pressable>
       </Animated.View>
@@ -1932,13 +2479,11 @@ function AvatarCircle({ user, size }: { user: string; size: number }) {
   );
 }
 
-function DirectMessagesList({ onSelect }: { onSelect: (conv: ConversationInfo) => void }) {
-  const [conversations, setConversations] = useState<ConversationInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    getConversations().then(c => { setConversations(c); setLoading(false); });
-  }, []);
+function DirectMessagesList({ conversations, loading, onSelect }: {
+  conversations: ConversationInfo[];
+  loading: boolean;
+  onSelect: (conv: ConversationInfo) => void;
+}) {
 
   const fmtTime = (iso: string | null) => {
     if (!iso) return "";
@@ -2134,6 +2679,29 @@ function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationInfo) => 
   const dropdownAnim = useRef(new Animated.Value(0)).current;
   const chevronAnim  = useRef(new Animated.Value(0)).current;
 
+  // Conversations — loaded once and cached; pull-to-refresh clears the cache
+  const [conversations, setConversations] = useState<ConversationInfo[]>(_conversationsCache ?? []);
+  const [convsLoading,  setConvsLoading]  = useState(!_conversationsCache);
+  const [convsRefreshing, setConvsRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (_conversationsCache) return;
+    getConversations().then(c => {
+      _conversationsCache = c;
+      setConversations(c);
+      setConvsLoading(false);
+    });
+  }, []);
+
+  const refreshConversations = async () => {
+    setConvsRefreshing(true);
+    _conversationsCache = null;
+    const c = await getConversations();
+    _conversationsCache = c;
+    setConversations(c);
+    setConvsRefreshing(false);
+  };
+
   const openDropdown = () => {
     setDropdownOpen(true);
     Animated.parallel([
@@ -2249,8 +2817,17 @@ function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationInfo) => 
         showsVerticalScrollIndicator={false}
         scrollEnabled={!dropdownOpen}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          activeTab === "Messages" ? (
+            <RefreshControl
+              refreshing={convsRefreshing}
+              onRefresh={refreshConversations}
+              tintColor="#AB00FF"
+            />
+          ) : undefined
+        }
       >
-        {activeTab === "Messages"    && <DirectMessagesList onSelect={onOpenChat} />}
+        {activeTab === "Messages"    && <DirectMessagesList conversations={conversations} loading={convsLoading} onSelect={onOpenChat} />}
         {activeTab === "Group Chats" && <GroupChatsList />}
         {activeTab === "Community"   && <CommunityList />}
       </ScrollView>
@@ -3009,10 +3586,53 @@ function BottomNav({
 
 function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void }) {
   const slideX = useRef(new Animated.Value(SW)).current;
-  const [replyText, setReplyText] = useState("");
-  const [replyingTo, setReplyingTo] = useState<DummyComment | null>(null);
+  const [replyText,   setReplyText]   = useState("");
+  const [replyingTo,  setReplyingTo]  = useState<Comment | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [comments,    setComments]    = useState<Comment[]>([]);
+  const [sending,     setSending]     = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const replyBarBottom = useRef(new Animated.Value(BOTTOM_INSET + 8)).current;
+  const listRef = useRef<FlatList>(null);
+
+  // Load current user + comments on mount
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) setCurrentUserId(user.id);
+
+      const { data } = await supabase
+        .from("post_comments")
+        .select(COMMENT_SELECT)
+        .eq("post_id", post.id)
+        .order("created_at", { ascending: true });
+      if (data) setComments(data.map(rowToComment));
+    })();
+  }, [post.id]);
+
+  const handleSend = async () => {
+    if (!currentUserId || !replyText.trim() || sending) return;
+    const text = replyText.trim();
+    const parentId = replyingTo?.id ?? null;
+    setReplyText("");
+    setReplyingTo(null);
+    setSending(true);
+    try {
+      const { data, error } = await supabase
+        .from("post_comments")
+        .insert({ post_id: post.id, user_id: currentUserId, text, parent_comment_id: parentId })
+        .select(COMMENT_SELECT)
+        .single();
+      if (error) throw error;
+      setComments((prev) => [...prev, rowToComment(data)]);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+    } catch (e: any) {
+      Alert.alert("Comment failed", e.message ?? "Could not post comment.");
+      setReplyText(text);
+    } finally {
+      setSending(false);
+    }
+  };
 
   // Slide in on mount
   useEffect(() => {
@@ -3072,7 +3692,8 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
 
       {/* Comments list with post as header */}
       <FlatList
-        data={DUMMY_COMMENTS}
+        ref={listRef}
+        data={comments}
         keyExtractor={(c) => c.id}
         contentContainerStyle={styles.detailListContent}
         showsVerticalScrollIndicator={false}
@@ -3081,14 +3702,17 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
           <>
             <PostCard item={post} />
             <View style={styles.detailDivider}>
-              <Text style={styles.detailDividerLabel}>Comments</Text>
+              <Text style={styles.detailDividerLabel}>
+                {comments.length === 0 ? "No comments yet" : `${comments.length} Comment${comments.length === 1 ? "" : "s"}`}
+              </Text>
             </View>
           </>
         }
         renderItem={({ item }) => (
           <CommentRow
             comment={item}
-            onQuickReply={(c) => setReplyingTo(c)}
+            currentUserId={currentUserId}
+            onReply={(c) => setReplyingTo(c)}
           />
         )}
         ItemSeparatorComponent={() => <View style={styles.commentSeparator} />}
@@ -3098,7 +3722,9 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
       <Animated.View style={[styles.detailReplyBarWrap, { bottom: replyBarBottom }]}>
         {replyingTo && (
           <View style={styles.detailReplyContext}>
-            <Text style={styles.detailReplyContextText}>Replying to @{replyingTo.user}</Text>
+            <Text style={styles.detailReplyContextText}>
+              Replying to {replyingTo.displayName ?? `@${replyingTo.username}`}
+            </Text>
             <TouchableOpacity onPress={() => setReplyingTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.detailReplyContextX}>×</Text>
             </TouchableOpacity>
@@ -3110,14 +3736,22 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
           </TouchableOpacity>
           <TextInput
             style={styles.composerInput}
-            placeholder={replyingTo ? `Reply to @${replyingTo.user}…` : "Add a comment…"}
+            placeholder={replyingTo ? `Reply to ${replyingTo.displayName ?? `@${replyingTo.username}`}…` : "Add a comment…"}
             placeholderTextColor="rgba(255,255,255,0.3)"
             value={replyText}
             onChangeText={setReplyText}
             returnKeyType="send"
+            onSubmitEditing={handleSend}
           />
-          <TouchableOpacity style={styles.composerSend} activeOpacity={0.8}>
-            <Text style={styles.composerSendIcon}>↑</Text>
+          <TouchableOpacity
+            style={[styles.composerSend, (!replyText.trim() || sending) && { opacity: 0.4 }]}
+            activeOpacity={0.8}
+            onPress={handleSend}
+            disabled={!replyText.trim() || sending}
+          >
+            {sending
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={styles.composerSendIcon}>↑</Text>}
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -3418,13 +4052,35 @@ function CommunityCard({ co }: { co: DummyCommunity }) {
   );
 }
 
-function ProfileTabs() {
+function ProfileTabs({ userId }: { userId: string | null }) {
   const [active, setActive] = useState<ProfileTab>("Posts");
   const [openPlaylist, setOpenPlaylist] = useState<DummyPlaylist | null>(null);
+  const [myPosts, setMyPosts]           = useState<Post[]>(_myPostsCache ?? []);
+  const [postsLoading, setPostsLoading] = useState(!_myPostsCache);
   const indicatorAnim = useRef(new Animated.Value(0)).current;
   const contentAnim   = useRef(new Animated.Value(1)).current;
   const activeRef     = useRef<ProfileTab>("Posts");
   const tabWidth = (SW - 32) / PROFILE_TABS.length;
+
+  // Fetch this user's posts — skipped if already cached
+  useEffect(() => {
+    if (!userId || _myPostsCache) return;
+    setPostsLoading(true);
+    supabase
+      .from("posts")
+      .select("id, type, text, media_urls, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .then(({ data, error }) => {
+        if (!error && data) {
+          const posts = data.map(dbRowToPost);
+          _myPostsCache = posts;
+          setMyPosts(posts);
+        }
+        setPostsLoading(false);
+      });
+  }, [userId]);
 
   // Stable switcher — safe to call from both tap handlers and the PanResponder closure
   const switchTo = (tab: ProfileTab, index: number) => {
@@ -3463,9 +4119,19 @@ function ProfileTabs() {
 
   const renderContent = () => {
     if (active === "Posts") {
+      if (postsLoading) {
+        return <ActivityIndicator color="#FF6C1A" style={{ marginTop: 48 }} />;
+      }
+      if (myPosts.length === 0) {
+        return (
+          <View style={{ alignItems: "center", paddingTop: 52 }}>
+            <Text style={{ color: "rgba(255,255,255,0.25)", fontSize: 15 }}>No posts yet</Text>
+          </View>
+        );
+      }
       return (
         <View style={{ gap: 12, paddingTop: 12 }}>
-          {PROFILE_POSTS.map((post) => <PostCard key={post.id} item={post} />)}
+          {myPosts.map((post) => <PostCard key={post.id} item={post} />)}
         </View>
       );
     }
@@ -3547,27 +4213,895 @@ const PROFILE_AVATAR_SIZE = 86;
 const PROFILE_AVATAR_OVERLAP = Math.round(PROFILE_AVATAR_SIZE * 0.44);
 
 // Cached once per login session — cleared on pull-to-refresh
-let _profileCache: UserProfile | null = null;
+let _profileCache:      UserProfile    | null = null;
+let _myPostsCache:      Post[]         | null = null;
+let _conversationsCache: ConversationInfo[] | null = null;
+
+// ─── Song Search Overlay ──────────────────────────────────────────────────────
+
+type PinnedSong = { id: string; name: string; artist: string; albumArt: string | null };
+
+function SongSearchOverlay({ visible, onClose, onSelect, accessToken }: {
+  visible: boolean;
+  onClose: () => void;
+  onSelect: (song: PinnedSong) => void;
+  accessToken: string | null;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SpotifyTrackResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const slideAnim = useRef(new Animated.Value(500)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }),
+        Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: 500, duration: 200, useNativeDriver: true }),
+        Animated.timing(backdropAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start();
+      setQuery("");
+      setResults([]);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!query.trim() || !accessToken) { setResults([]); return; }
+    searchTimer.current = setTimeout(async () => {
+      setSearching(true);
+      const res = await searchSpotifyTracks(accessToken, query.trim());
+      setResults(res);
+      setSearching(false);
+    }, 450);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [query, accessToken]);
+
+  return (
+    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <Animated.View style={[StyleSheet.absoluteFill, epOverlayStyles.backdrop, { opacity: backdropAnim }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      </Animated.View>
+      <Animated.View style={[epOverlayStyles.songSheet, { transform: [{ translateY: slideAnim }] }]}>
+        <View style={epOverlayStyles.handle} />
+        <View style={epOverlayStyles.sheetHeader}>
+          <Text style={epOverlayStyles.sheetTitle}>Pin a Song</Text>
+          <TouchableOpacity onPress={onClose} hitSlop={12}>
+            <Text style={epOverlayStyles.closeBtn}>✕</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={epOverlayStyles.searchRow}>
+          <FontAwesome5 name="search" size={14} color="rgba(255,255,255,0.3)" style={{ marginRight: 8 }} />
+          <TextInput
+            style={epOverlayStyles.searchInput}
+            placeholder="Search Spotify…"
+            placeholderTextColor="rgba(255,255,255,0.3)"
+            value={query}
+            onChangeText={setQuery}
+            autoFocus
+          />
+          {searching && <ActivityIndicator size="small" color="#1DB954" />}
+        </View>
+        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {results.map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={epOverlayStyles.resultRow}
+              activeOpacity={0.75}
+              onPress={() => { onSelect({ id: item.id, name: item.name, artist: item.artist, albumArt: item.albumArt }); onClose(); }}
+            >
+              {item.albumArt ? (
+                <Image source={{ uri: item.albumArt }} style={epOverlayStyles.resultArt} />
+              ) : (
+                <View style={[epOverlayStyles.resultArt, epOverlayStyles.resultArtFallback]}>
+                  <FontAwesome5 name="music" size={12} color="rgba(255,255,255,0.3)" />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={epOverlayStyles.resultTrack} numberOfLines={1}>{item.name}</Text>
+                <Text style={epOverlayStyles.resultArtist} numberOfLines={1}>{item.artist}</Text>
+              </View>
+              <FontAwesome5 name="chevron-right" size={11} color="rgba(255,255,255,0.2)" />
+            </TouchableOpacity>
+          ))}
+          {!searching && query.trim() && results.length === 0 && (
+            <Text style={epOverlayStyles.emptyText}>No results for "{query}"</Text>
+          )}
+          {!query.trim() && <Text style={epOverlayStyles.emptyText}>Start typing to search tracks</Text>}
+        </ScrollView>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+// ─── Edit Profile Overlay ─────────────────────────────────────────────────────
+
+type EditFormData = {
+  display_name: string;
+  username: string;
+  bio: string;
+  avatar_url: string | null;
+  pinned_song_id: string | null;
+  pinned_song_name: string | null;
+  pinned_song_artist: string | null;
+  pinned_song_album_art: string | null;
+  profile_links: string[];
+  social_links: Record<string, string>;
+};
+
+function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToken, userId }: {
+  visible: boolean;
+  onClose: () => void;
+  initialData: EditFormData;
+  onSaved: (data: EditFormData) => void;
+  accessToken: string | null;
+  userId: string | null;
+}) {
+  const [form, setForm] = useState<EditFormData>(initialData);
+  const [saving, setSaving] = useState(false);
+  const [songSearchOpen, setSongSearchOpen] = useState(false);
+  const [newLink, setNewLink] = useState("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const slideAnim = useRef(new Animated.Value(800)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setForm(initialData);
+      Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 190 }),
+        Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: 800, duration: 250, useNativeDriver: true }),
+        Animated.timing(backdropAnim, { toValue: 0, duration: 220, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const pickAvatar = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Permission needed", "Allow photo access to set a profile picture."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"] as any,
+      allowsEditing: true,
+      aspect: [1, 1] as [number, number],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0] || !userId) return;
+    setAvatarUploading(true);
+    try {
+      const uri = result.assets[0].uri;
+      const ext = uri.split(".").pop() ?? "jpg";
+      const fileName = `${userId}/avatar.${ext}`;
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(blob);
+      });
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(fileName, arrayBuffer, { contentType: `image/${ext}`, upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(fileName);
+      setForm((f) => ({ ...f, avatar_url: publicUrl }));
+    } catch (e: any) {
+      Alert.alert("Upload failed", e.message ?? "Could not upload image.");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const addLink = () => {
+    const trimmed = newLink.trim();
+    if (!trimmed) return;
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    setForm((f) => ({ ...f, profile_links: [...f.profile_links, withProtocol] }));
+    setNewLink("");
+  };
+
+  const removeLink = (idx: number) =>
+    setForm((f) => ({ ...f, profile_links: f.profile_links.filter((_, i) => i !== idx) }));
+
+  const setSocialLink = (key: string, value: string) => {
+    setForm((f) => {
+      const next = { ...f.social_links };
+      if (value.trim()) {
+        // Ensure the URL has a protocol
+        next[key] = /^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`;
+      } else {
+        delete next[key];
+      }
+      return { ...f, social_links: next };
+    });
+  };
+
+  const save = async () => {
+    if (!userId) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("users").update({
+        display_name: form.display_name.trim() || null,
+        username: form.username.trim() || null,
+        bio: form.bio.trim() || null,
+        avatar_url: form.avatar_url,
+        pinned_song_id: form.pinned_song_id,
+        pinned_song_name: form.pinned_song_name,
+        pinned_song_artist: form.pinned_song_artist,
+        pinned_song_album_art: form.pinned_song_album_art,
+        profile_links: form.profile_links,
+        social_links: form.social_links,
+      }).eq("id", userId);
+      if (error) throw error;
+      onSaved(form);
+      onClose();
+    } catch (e: any) {
+      Alert.alert("Save failed", e.message ?? "Could not save profile.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const initials = form.display_name
+    ? form.display_name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
+    : "?";
+
+  return (
+    <>
+      <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
+        <Animated.View style={[StyleSheet.absoluteFill, epOverlayStyles.backdrop, { opacity: backdropAnim }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        </Animated.View>
+        <Animated.View style={[epOverlayStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+            <View style={epOverlayStyles.sheetHeader}>
+              <TouchableOpacity onPress={onClose} hitSlop={12}>
+                <Text style={epOverlayStyles.cancelBtn}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={epOverlayStyles.sheetTitle}>Edit Profile</Text>
+              <TouchableOpacity onPress={save} disabled={saving} hitSlop={8}>
+                {saving
+                  ? <ActivityIndicator size="small" color="#FF6C1A" />
+                  : <Text style={epOverlayStyles.saveBtn}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={{ flex: 1 }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 40 }}
+            >
+              {/* ── Avatar ── */}
+              <View style={epOverlayStyles.avatarSection}>
+                <TouchableOpacity style={epOverlayStyles.avatarWrap} onPress={pickAvatar} activeOpacity={0.8}>
+                  {avatarUploading ? (
+                    <View style={[epOverlayStyles.avatarCircle, epOverlayStyles.avatarLoading]}>
+                      <ActivityIndicator color="#fff" />
+                    </View>
+                  ) : form.avatar_url ? (
+                    <Image source={{ uri: form.avatar_url }} style={epOverlayStyles.avatarCircle} />
+                  ) : (
+                    <View style={epOverlayStyles.avatarCircle}>
+                      <Text style={epOverlayStyles.avatarInitials}>{initials}</Text>
+                    </View>
+                  )}
+                  <View style={epOverlayStyles.avatarEditBadge}>
+                    <FontAwesome5 name="camera" size={11} color="#fff" />
+                  </View>
+                </TouchableOpacity>
+                <Text style={epOverlayStyles.avatarHint}>Tap to change photo</Text>
+              </View>
+
+              {/* ── Display name ── */}
+              <View style={epOverlayStyles.section}>
+                <Text style={epOverlayStyles.sectionLabel}>DISPLAY NAME</Text>
+                <TextInput
+                  style={epOverlayStyles.input}
+                  value={form.display_name}
+                  onChangeText={(t) => setForm((f) => ({ ...f, display_name: t }))}
+                  placeholder="Your name"
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                />
+              </View>
+
+              {/* ── Username ── */}
+              <View style={epOverlayStyles.section}>
+                <Text style={epOverlayStyles.sectionLabel}>USERNAME</Text>
+                <TextInput
+                  style={epOverlayStyles.input}
+                  value={form.username}
+                  onChangeText={(t) => setForm((f) => ({ ...f, username: t.replace(/\s/g, "").toLowerCase() }))}
+                  placeholder="@handle"
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  autoCapitalize="none"
+                />
+              </View>
+
+              {/* ── Bio ── */}
+              <View style={epOverlayStyles.section}>
+                <Text style={epOverlayStyles.sectionLabel}>BIO</Text>
+                <TextInput
+                  style={[epOverlayStyles.input, epOverlayStyles.inputMulti]}
+                  value={form.bio}
+                  onChangeText={(t) => setForm((f) => ({ ...f, bio: t }))}
+                  placeholder="Tell people about yourself…"
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
+
+              {/* ── Pinned song ── */}
+              <View style={epOverlayStyles.section}>
+                <Text style={epOverlayStyles.sectionLabel}>PINNED SONG</Text>
+                <TouchableOpacity style={epOverlayStyles.songRow} activeOpacity={0.75} onPress={() => setSongSearchOpen(true)}>
+                  {form.pinned_song_album_art ? (
+                    <Image source={{ uri: form.pinned_song_album_art }} style={epOverlayStyles.songArt} />
+                  ) : (
+                    <View style={[epOverlayStyles.songArt, epOverlayStyles.songArtFallback]}>
+                      <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.25)" />
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    {form.pinned_song_name ? (
+                      <>
+                        <Text style={epOverlayStyles.songName} numberOfLines={1}>{form.pinned_song_name}</Text>
+                        <Text style={epOverlayStyles.songArtist} numberOfLines={1}>{form.pinned_song_artist}</Text>
+                      </>
+                    ) : (
+                      <Text style={epOverlayStyles.songPlaceholder}>Choose a song to pin…</Text>
+                    )}
+                  </View>
+                  <FontAwesome5 name="search" size={12} color="rgba(255,255,255,0.35)" />
+                </TouchableOpacity>
+                {form.pinned_song_id && (
+                  <TouchableOpacity
+                    style={epOverlayStyles.clearBtn}
+                    onPress={() => setForm((f) => ({
+                      ...f,
+                      pinned_song_id: null, pinned_song_name: null,
+                      pinned_song_artist: null, pinned_song_album_art: null,
+                    }))}
+                  >
+                    <Text style={epOverlayStyles.clearBtnText}>Remove pinned song</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* ── Social Accounts ── */}
+              <View style={epOverlayStyles.section}>
+                <Text style={epOverlayStyles.sectionLabel}>SOCIAL ACCOUNTS</Text>
+                {SOCIAL_PLATFORMS.map((p) => (
+                  <View key={p.key} style={epOverlayStyles.socialRow}>
+                    <View style={[epOverlayStyles.socialIconWrap, { backgroundColor: p.color + "22" }]}>
+                      <FontAwesome5 name={p.icon} size={16} color={p.color} />
+                    </View>
+                    <TextInput
+                      style={epOverlayStyles.socialInput}
+                      value={form.social_links[p.key]?.replace(/^https?:\/\//, "") ?? ""}
+                      onChangeText={(t) => setSocialLink(p.key, t)}
+                      placeholder={p.placeholder}
+                      placeholderTextColor="rgba(255,255,255,0.2)"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="url"
+                    />
+                    {!!form.social_links[p.key] && (
+                      <TouchableOpacity onPress={() => setSocialLink(p.key, "")} hitSlop={10}>
+                        <FontAwesome5 name="times-circle" size={15} color="rgba(255,100,100,0.6)" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+              </View>
+
+              {/* ── Links ── */}
+              <View style={epOverlayStyles.section}>
+                <Text style={epOverlayStyles.sectionLabel}>LINKS</Text>
+                {form.profile_links.map((link, idx) => (
+                  <View key={idx} style={epOverlayStyles.linkRow}>
+                    <FontAwesome5 name="link" size={12} color="rgba(255,255,255,0.3)" style={{ marginRight: 8 }} />
+                    <Text style={epOverlayStyles.linkText} numberOfLines={1}>{link}</Text>
+                    <TouchableOpacity onPress={() => removeLink(idx)} hitSlop={10}>
+                      <FontAwesome5 name="times" size={13} color="rgba(255,100,100,0.7)" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <View style={epOverlayStyles.linkInputRow}>
+                  <TextInput
+                    style={epOverlayStyles.linkInput}
+                    value={newLink}
+                    onChangeText={setNewLink}
+                    placeholder="Add a link…"
+                    placeholderTextColor="rgba(255,255,255,0.25)"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                    onSubmitEditing={addLink}
+                    returnKeyType="done"
+                  />
+                  <TouchableOpacity
+                    style={[epOverlayStyles.addLinkBtn, !newLink.trim() && { opacity: 0.4 }]}
+                    onPress={addLink}
+                    disabled={!newLink.trim()}
+                  >
+                    <FontAwesome5 name="plus" size={12} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </Animated.View>
+      </Modal>
+
+      <SongSearchOverlay
+        visible={songSearchOpen}
+        onClose={() => setSongSearchOpen(false)}
+        accessToken={accessToken}
+        onSelect={(song) => setForm((f) => ({
+          ...f,
+          pinned_song_id: song.id,
+          pinned_song_name: song.name,
+          pinned_song_artist: song.artist,
+          pinned_song_album_art: song.albumArt,
+        }))}
+      />
+    </>
+  );
+}
+
+// ─── Links sheet (mini overlay listing all profile links) ─────────────────────
+
+// ─── Spotify URL parser + metadata fetcher (used by LinksSheet) ───────────────
+
+function parseSpotifyUrl(url: string): { type: string; id: string } | null {
+  const m = url.match(/open\.spotify\.com\/(track|artist|album|playlist)\/([A-Za-z0-9]+)/);
+  return m ? { type: m[1], id: m[2] } : null;
+}
+
+type SpotifyLinkInfo = {
+  resourceType: string;
+  name: string;
+  subtitle: string | null;
+  imageUrl: string | null;
+};
+
+async function fetchSpotifyLinkInfo(
+  token: string,
+  type: string,
+  id: string,
+): Promise<SpotifyLinkInfo | null> {
+  try {
+    const ep = type === "playlist"
+      ? `https://api.spotify.com/v1/playlists/${id}?fields=name,images,owner`
+      : `https://api.spotify.com/v1/${type}s/${id}`;
+    const res = await fetch(ep, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    const d = await res.json();
+    switch (type) {
+      case "track":    return { resourceType: "track",    name: d.name, subtitle: d.artists?.[0]?.name ?? null, imageUrl: d.album?.images?.[0]?.url ?? null };
+      case "artist":   return { resourceType: "artist",   name: d.name, subtitle: null,                         imageUrl: d.images?.[0]?.url ?? null };
+      case "album":    return { resourceType: "album",    name: d.name, subtitle: d.artists?.[0]?.name ?? null, imageUrl: d.images?.[0]?.url ?? null };
+      case "playlist": return { resourceType: "playlist", name: d.name, subtitle: `by ${d.owner?.display_name ?? "Spotify"}`, imageUrl: d.images?.[0]?.url ?? null };
+      default:         return null;
+    }
+  } catch { return null; }
+}
+
+// ─── Links sheet styles ───────────────────────────────────────────────────────
+
+const linksSheetStyles = StyleSheet.create({
+  sheet: {
+    position: "absolute", bottom: 0, left: 0, right: 0,
+    backgroundColor: "#1A1A1C",
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingBottom: BOTTOM_INSET + 16,
+    borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+  },
+  handle:  { width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.15)", alignSelf: "center", marginTop: 10, marginBottom: 4 },
+  heading: { fontSize: 11, fontWeight: "700", letterSpacing: 1, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
+  row:     { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingVertical: 13, gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.07)" },
+  iconWrap:    { width: 44, height: 44, borderRadius: 10, backgroundColor: "rgba(255,108,26,0.13)", alignItems: "center", justifyContent: "center" },
+  spotifyWrap: { width: 44, height: 44, borderRadius: 10, backgroundColor: "rgba(29,185,84,0.12)", alignItems: "center", justifyContent: "center" },
+  art:         { width: 44, height: 44, borderRadius: 8 },
+  artCircle:   { width: 44, height: 44, borderRadius: 22 },
+  domain: { fontSize: 14, fontWeight: "600", color: "#fff" },
+  path:   { fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 1 },
+});
+
+// ─── Settings overlay ─────────────────────────────────────────────────────────
+
+type SavedAccount = {
+  email: string;
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
+};
+
+const SAVED_ACCOUNTS_KEY = "trackmeet_saved_accounts";
+
+function SettingsOverlay({
+  profile,
+  onClose,
+}: {
+  profile: UserProfile | null;
+  onClose: () => void;
+}) {
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const slideAnim   = useRef(new Animated.Value(400)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+  const router = useRouter();
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(slideAnim,   { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 200 }),
+      Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const close = () => {
+    Animated.parallel([
+      Animated.timing(slideAnim,   { toValue: 400, duration: 200, useNativeDriver: true }),
+      Animated.timing(backdropAnim, { toValue: 0,   duration: 180, useNativeDriver: true }),
+    ]).start(onClose);
+  };
+
+  const doSignOut = async (save: boolean) => {
+    setSigningOut(true);
+    try {
+      if (save && profile) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.email) {
+          const account: SavedAccount = {
+            email: user.email,
+            displayName: profile.display_name ?? profile.username ?? "",
+            username: profile.username ?? "",
+            avatarUrl: profile.avatar_url ?? null,
+          };
+          const raw = await SecureStore.getItemAsync(SAVED_ACCOUNTS_KEY);
+          const existing: SavedAccount[] = raw ? JSON.parse(raw) : [];
+          // De-duplicate by email, new account goes first
+          const merged = [account, ...existing.filter(a => a.email !== account.email)];
+          await SecureStore.setItemAsync(SAVED_ACCOUNTS_KEY, JSON.stringify(merged));
+        }
+      }
+      await supabase.auth.signOut();
+      router.replace("/signup");
+    } catch (e) {
+      console.error("signOut error", e);
+      setSigningOut(false);
+    }
+  };
+
+  return (
+    <Modal transparent animationType="none" statusBarTranslucent onRequestClose={close}>
+      <Animated.View
+        style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)", opacity: backdropAnim }]}
+        pointerEvents="none"
+      />
+      <Pressable style={StyleSheet.absoluteFill} onPress={close} />
+
+      <Animated.View
+        style={[settingsOverlayStyles.sheet, { transform: [{ translateY: slideAnim }] }]}
+        pointerEvents="box-none"
+      >
+        <Pressable onPress={() => {}}>
+          {/* Drag handle */}
+          <View style={settingsOverlayStyles.handle} />
+
+          <Text style={settingsOverlayStyles.title}>Settings</Text>
+
+          {!showConfirm ? (
+            <>
+              <TouchableOpacity
+                style={settingsOverlayStyles.logoutRow}
+                activeOpacity={0.8}
+                onPress={() => setShowConfirm(true)}
+              >
+                <View style={settingsOverlayStyles.logoutIconWrap}>
+                  <Ionicons name="log-out-outline" size={20} color="#ff4d6d" />
+                </View>
+                <Text style={settingsOverlayStyles.logoutLabel}>Log Out</Text>
+                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <View style={settingsOverlayStyles.confirmBlock}>
+              <Text style={settingsOverlayStyles.confirmTitle}>Save account?</Text>
+              <Text style={settingsOverlayStyles.confirmSub}>
+                Keep your account saved for quick sign-in next time.
+              </Text>
+              <TouchableOpacity
+                style={settingsOverlayStyles.saveBtn}
+                activeOpacity={0.85}
+                onPress={() => doSignOut(true)}
+                disabled={signingOut}
+              >
+                {signingOut
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={settingsOverlayStyles.saveBtnText}>Save & Sign Out</Text>
+                }
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={settingsOverlayStyles.skipBtn}
+                activeOpacity={0.8}
+                onPress={() => doSignOut(false)}
+                disabled={signingOut}
+              >
+                <Text style={settingsOverlayStyles.skipBtnText}>Just Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </Pressable>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+const settingsOverlayStyles = StyleSheet.create({
+  sheet: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#1a1a1f",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    paddingBottom: 40,
+  },
+  handle: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#fff",
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  logoutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    marginHorizontal: 12,
+    marginTop: 4,
+    backgroundColor: "rgba(255,77,109,0.08)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,77,109,0.18)",
+  },
+  logoutIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,77,109,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoutLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: "#ff4d6d" },
+  confirmBlock: { paddingHorizontal: 20, paddingTop: 8, gap: 10 },
+  confirmTitle: { fontSize: 19, fontWeight: "800", color: "#fff", letterSpacing: -0.3 },
+  confirmSub: { fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 18, marginBottom: 4 },
+  saveBtn: {
+    backgroundColor: "#AB00FF",
+    borderRadius: 16,
+    paddingVertical: 15,
+    alignItems: "center",
+  },
+  saveBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  skipBtn: {
+    borderRadius: 16,
+    paddingVertical: 13,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  skipBtnText: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.55)" },
+});
+
+// ─── Social links sheet (mini overlay listing all linked social accounts) ──────
+
+function SocialLinksSheet({
+  socialLinks,
+  onClose,
+}: {
+  socialLinks: Record<string, string>;
+  onClose: () => void;
+}) {
+  const slideAnim    = useRef(new Animated.Value(400)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(slideAnim,    { toValue: 0, useNativeDriver: true, damping: 26, stiffness: 220 }),
+      Animated.timing(backdropAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const dismiss = () => {
+    Animated.parallel([
+      Animated.timing(slideAnim,    { toValue: 400, duration: 220, useNativeDriver: true }),
+      Animated.timing(backdropAnim, { toValue: 0,   duration: 180, useNativeDriver: true }),
+    ]).start(onClose);
+  };
+
+  const linked = BANNER_PLATFORM_PRIORITY
+    .map((k) => SOCIAL_PLATFORMS.find((p) => p.key === k)!)
+    .filter((p) => !!socialLinks[p.key]);
+
+  return (
+    <Modal transparent visible animationType="none" onRequestClose={dismiss} statusBarTranslucent>
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)", opacity: backdropAnim }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={dismiss} />
+      </Animated.View>
+      <Animated.View style={[linksSheetStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <View style={linksSheetStyles.handle} />
+        <Text style={linksSheetStyles.heading}>Social Accounts</Text>
+        {linked.map((p) => (
+          <TouchableOpacity
+            key={p.key}
+            style={linksSheetStyles.row}
+            activeOpacity={0.72}
+            onPress={() => { Linking.openURL(socialLinks[p.key]).catch(() => {}); dismiss(); }}
+          >
+            <View style={[linksSheetStyles.iconWrap, { backgroundColor: p.color + "22" }]}>
+              <FontAwesome5 name={p.icon} size={18} color={p.color} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={linksSheetStyles.domain}>{p.label}</Text>
+              <Text style={linksSheetStyles.path} numberOfLines={1}>
+                {socialLinks[p.key].replace(/^https?:\/\//, "")}
+              </Text>
+            </View>
+            <FontAwesome5 name="external-link-alt" size={12} color="rgba(255,255,255,0.25)" />
+          </TouchableOpacity>
+        ))}
+      </Animated.View>
+    </Modal>
+  );
+}
+
+// ─── Links sheet (mini overlay listing all profile links) ─────────────────────
+
+function LinksSheet({
+  links,
+  onClose,
+  accessToken,
+}: {
+  links: string[];
+  onClose: () => void;
+  accessToken: string | null;
+}) {
+  const slideAnim    = useRef(new Animated.Value(400)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+
+  // Per-link Spotify metadata + loading flags
+  const [infos,   setInfos]   = useState<(SpotifyLinkInfo | null)[]>(links.map(() => null));
+  const [loading, setLoading] = useState<boolean[]>(
+    links.map((url) => !!parseSpotifyUrl(url) && !!accessToken)
+  );
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(slideAnim,    { toValue: 0, useNativeDriver: true, damping: 26, stiffness: 220 }),
+      Animated.timing(backdropAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+    ]).start();
+
+    // Kick off Spotify fetches for any spotify URLs
+    if (!accessToken) return;
+    links.forEach((url, i) => {
+      const parsed = parseSpotifyUrl(url);
+      if (!parsed) return;
+      fetchSpotifyLinkInfo(accessToken, parsed.type, parsed.id).then((info) => {
+        setInfos((prev)   => { const n = [...prev];    n[i] = info;  return n; });
+        setLoading((prev) => { const n = [...prev];    n[i] = false; return n; });
+      });
+    });
+  }, []);
+
+  const dismiss = () => {
+    Animated.parallel([
+      Animated.timing(slideAnim,    { toValue: 400, duration: 220, useNativeDriver: true }),
+      Animated.timing(backdropAnim, { toValue: 0,   duration: 180, useNativeDriver: true }),
+    ]).start(onClose);
+  };
+
+  const openLink = (url: string) => { Linking.openURL(url).catch(() => {}); dismiss(); };
+
+  return (
+    <Modal transparent visible animationType="none" onRequestClose={dismiss} statusBarTranslucent>
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)", opacity: backdropAnim }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={dismiss} />
+      </Animated.View>
+      <Animated.View style={[linksSheetStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <View style={linksSheetStyles.handle} />
+        <Text style={linksSheetStyles.heading}>Links</Text>
+
+        {links.map((url, i) => {
+          const meta      = infos[i];
+          const isLoading = loading[i];
+          const isSpotify = !!parseSpotifyUrl(url);
+          const clean     = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+          const domain    = clean.split("/")[0];
+          const rest      = clean.slice(domain.length);
+
+          const thumb = isSpotify
+            ? isLoading
+              ? <View style={linksSheetStyles.spotifyWrap}><ActivityIndicator size="small" color="#1DB954" /></View>
+              : meta?.imageUrl
+                ? <Image source={{ uri: meta.imageUrl }} style={meta.resourceType === "artist" ? linksSheetStyles.artCircle : linksSheetStyles.art} />
+                : <View style={linksSheetStyles.spotifyWrap}><FontAwesome5 name="spotify" size={20} color="#1DB954" /></View>
+            : <View style={linksSheetStyles.iconWrap}><FontAwesome5 name="link" size={14} color="#FF6C1A" /></View>;
+
+          const primaryText   = meta?.name ?? domain;
+          const secondaryText = meta?.subtitle ?? (rest.length > 1 ? rest : null);
+
+          return (
+            <TouchableOpacity key={i} style={linksSheetStyles.row} activeOpacity={0.72} onPress={() => openLink(url)}>
+              {thumb}
+              <View style={{ flex: 1 }}>
+                <Text style={linksSheetStyles.domain} numberOfLines={1}>{primaryText}</Text>
+                {secondaryText ? <Text style={linksSheetStyles.path} numberOfLines={1}>{secondaryText}</Text> : null}
+              </View>
+              <FontAwesome5 name="external-link-alt" size={12} color="rgba(255,255,255,0.25)" />
+            </TouchableOpacity>
+          );
+        })}
+      </Animated.View>
+    </Modal>
+  );
+}
 
 function ProfileView() {
   const { track, liveProgressMs, gradient, needsReconnect, reconnect } = useNowPlayingCtx();
-  const [profile,    setProfile]    = useState<UserProfile | null>(_profileCache);
-  const [refreshing, setRefreshing] = useState(false);
+  const router = useRouter();
+  const [profile,     setProfile]     = useState<UserProfile | null>(_profileCache);
+  const [refreshing,  setRefreshing]  = useState(false);
+  const [editOpen,         setEditOpen]         = useState(false);
+  const [linksSheetOpen,   setLinksSheetOpen]   = useState(false);
+  const [socialLinksSheetOpen, setSocialLinksSheetOpen] = useState(false);
+  const [settingsOpen,     setSettingsOpen]     = useState(false);
+  const [userId,         setUserId]         = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
   const fetchProfile = async (force = false) => {
-    if (_profileCache && !force) { setProfile(_profileCache); return; }
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) throw new Error("Not authenticated");
+      // Always resolve userId so ProfileTabs can load posts
+      setUserId(user.id);
+
+      if (_profileCache && !force) { setProfile(_profileCache); return; }
 
       const { data, error } = await supabase
         .from("users")
-        .select("username, display_name, bio, is_verified, followers_count, following_count")
+        .select("username, display_name, bio, is_verified, followers_count, following_count, avatar_url, pinned_song_id, pinned_song_name, pinned_song_artist, pinned_song_album_art, profile_links, social_links, spotify_access_token")
         .eq("id", user.id)
         .single<UserProfile>();
 
       if (error) throw new Error(error.message);
-
+      setAccessToken(data.spotify_access_token ?? null);
       _profileCache = data;
       setProfile(data);
     } catch (err) {
@@ -3580,6 +5114,7 @@ function ProfileView() {
   const onRefresh = async () => {
     setRefreshing(true);
     _profileCache = null;
+    _myPostsCache = null;
     await fetchProfile(true);
     setRefreshing(false);
   };
@@ -3605,8 +5140,8 @@ function ProfileView() {
           <TouchableOpacity style={profileStyles.topBarIconBtn} activeOpacity={0.7}>
             <Text style={profileStyles.topBarIcon}>🔔</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={profileStyles.topBarIconBtn} activeOpacity={0.7}>
-            <Text style={profileStyles.topBarIcon}>⚙</Text>
+          <TouchableOpacity style={profileStyles.topBarIconBtn} activeOpacity={0.7} onPress={() => setSettingsOpen(true)}>
+            <Ionicons name="settings-outline" size={20} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
           <TouchableOpacity style={profileStyles.proBadge} activeOpacity={0.85}>
             <Text style={profileStyles.proBadgeText}>PRO</Text>
@@ -3636,16 +5171,38 @@ function ProfileView() {
           <View style={profileStyles.bannerGlow} />
 
           <View style={profileStyles.bannerActions}>
-            <TouchableOpacity style={profileStyles.socialBtn} activeOpacity={0.7}>
-              <Text style={profileStyles.socialIcon}>𝕏</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={profileStyles.socialBtn} activeOpacity={0.7}>
-              <Text style={profileStyles.socialIcon}>◎</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={profileStyles.socialBtn} activeOpacity={0.7}>
-              <Text style={profileStyles.socialIcon}>🎙</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={profileStyles.editProfileBtn} activeOpacity={0.85}>
+            {/* Social icons — only linked platforms, up to 3 (2 + overflow badge) */}
+            {(() => {
+              const linked = BANNER_PLATFORM_PRIORITY
+                .map((k) => SOCIAL_PLATFORMS.find((p) => p.key === k)!)
+                .filter((p) => !!(profile?.social_links?.[p.key]));
+              const visible  = linked.slice(0, linked.length > 3 ? 2 : 3);
+              const overflow = linked.length - visible.length;
+              return (
+                <>
+                  {visible.map((p) => (
+                    <TouchableOpacity
+                      key={p.key}
+                      style={profileStyles.socialBtn}
+                      activeOpacity={0.7}
+                      onPress={() => Linking.openURL(profile!.social_links![p.key]).catch(() => {})}
+                    >
+                      <FontAwesome5 name={p.icon} size={15} color={p.color} />
+                    </TouchableOpacity>
+                  ))}
+                  {overflow > 0 && (
+                    <TouchableOpacity
+                      style={[profileStyles.socialBtn, { backgroundColor: "rgba(255,255,255,0.18)" }]}
+                      activeOpacity={0.7}
+                      onPress={() => setSocialLinksSheetOpen(true)}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: "800", color: "#fff" }}>+{overflow}</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              );
+            })()}
+            <TouchableOpacity style={profileStyles.editProfileBtn} activeOpacity={0.85} onPress={() => setEditOpen(true)}>
               <Text style={profileStyles.editProfileBtnText}>Edit Profile</Text>
             </TouchableOpacity>
           </View>
@@ -3653,9 +5210,13 @@ function ProfileView() {
 
         {/* Avatar row — negative margin overlaps banner bottom */}
         <View style={[profileStyles.avatarRow, { marginTop: -PROFILE_AVATAR_OVERLAP }]}>
-          <View style={profileStyles.avatar}>
-            <Text style={profileStyles.avatarInitials}>{getInitials(profile?.display_name)}</Text>
-          </View>
+          {profile?.avatar_url ? (
+            <Image source={{ uri: profile.avatar_url }} style={profileStyles.avatar} />
+          ) : (
+            <View style={profileStyles.avatar}>
+              <Text style={profileStyles.avatarInitials}>{getInitials(profile?.display_name)}</Text>
+            </View>
+          )}
         </View>
 
         {/* Info */}
@@ -3683,14 +5244,52 @@ function ProfileView() {
           </View>
 
           <View style={profileStyles.metaRow}>
-            <View style={profileStyles.metaItem}>
-              <Text style={profileStyles.metaIcon}>⊙</Text>
-              <Text style={profileStyles.metaText}>To Be Determined</Text>
-            </View>
-            <View style={profileStyles.metaItem}>
-              <Text style={profileStyles.metaIcon}>⊘</Text>
-              <Text style={profileStyles.metaText}>To Be Determined</Text>
-            </View>
+            <TouchableOpacity style={profileStyles.metaItem} activeOpacity={0.7} onPress={() => setEditOpen(true)}>
+              <FontAwesome5 name="music" size={11} color={profile?.pinned_song_id ? "#FF6C1A" : "rgba(255,255,255,0.28)"} />
+              <Text
+                style={[profileStyles.metaText, profile?.pinned_song_id && { color: "rgba(255,255,255,0.7)" }]}
+                numberOfLines={1}
+              >
+                {profile?.pinned_song_name
+                  ? `${profile.pinned_song_name} — ${profile.pinned_song_artist}`
+                  : "Pin a song"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={profileStyles.metaItem}
+              activeOpacity={0.7}
+              onPress={() => {
+                const links = profile?.profile_links;
+                if (links?.length) {
+                  if (links.length === 1) {
+                    Linking.openURL(links[0]).catch(() => {});
+                  } else {
+                    setLinksSheetOpen(true);
+                  }
+                } else {
+                  setEditOpen(true);
+                }
+              }}
+            >
+              <FontAwesome5 name="link" size={11} color={profile?.profile_links?.length ? "#FF6C1A" : "rgba(255,255,255,0.28)"} />
+              {profile?.profile_links?.length ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, flex: 1 }}>
+                  <Text
+                    style={[profileStyles.metaText, { color: "rgba(255,255,255,0.7)" }]}
+                    numberOfLines={1}
+                  >
+                    {profile.profile_links[0].replace(/^https?:\/\//, "").slice(0, 13)}
+                  </Text>
+                  {profile.profile_links.length > 1 && (
+                    <View style={profileStyles.linkBadge}>
+                      <Text style={profileStyles.linkBadgeText}>+{profile.profile_links.length}</Text>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Text style={profileStyles.metaText}>Add link</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -3719,58 +5318,118 @@ function ProfileView() {
           return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
         };
         return (
-          <TouchableOpacity
-            activeOpacity={0.88}
-            onPress={() => openSpotifyLink(
-              `spotify:track:${track.id}`,
-              `https://open.spotify.com/track/${track.id}`,
-            )}
+          <LinearGradient
+            colors={gradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={profileStyles.nowPlayingCard}
           >
-            <LinearGradient
-              colors={gradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={profileStyles.nowPlayingCard}
-            >
-              {/* Album art + song info row */}
-              <View style={profileStyles.npTopRow}>
-                {track.albumArt ? (
-                  <Image source={{ uri: track.albumArt }} style={profileStyles.npArt} />
-                ) : (
-                  <View style={[profileStyles.npArt, profileStyles.npArtFallback]}>
-                    <Text style={profileStyles.npArtEmoji}>🎵</Text>
-                  </View>
-                )}
+            {/* Album art + song info row */}
+            <View style={profileStyles.npTopRow}>
+              {track.albumArt ? (
+                <Image source={{ uri: track.albumArt }} style={profileStyles.npArt} />
+              ) : (
+                <View style={[profileStyles.npArt, profileStyles.npArtFallback]}>
+                  <Text style={profileStyles.npArtEmoji}>🎵</Text>
+                </View>
+              )}
 
-                <View style={profileStyles.npInfo}>
-                  <Text style={profileStyles.npTitle} numberOfLines={1}>{track.name}</Text>
-                  <Text style={profileStyles.npArtist} numberOfLines={1}>{track.artist}</Text>
+              <View style={profileStyles.npInfo}>
+                <Text style={profileStyles.npTitle} numberOfLines={1}>{track.name}</Text>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => openSpotifyLink(
+                    `spotify:artist:${track.artistId}`,
+                    `https://open.spotify.com/artist/${track.artistId}`,
+                  )}
+                >
+                  <Text style={[profileStyles.npArtist, { textDecorationLine: "underline" }]} numberOfLines={1}>
+                    {track.artist}
+                  </Text>
+                </TouchableOpacity>
 
-                  {/* Progress bar */}
-                  <View style={profileStyles.npProgressTrack}>
-                    <View style={[profileStyles.npProgressFill, { width: `${progress * 100}%` as any }]}>
-                      <View style={profileStyles.npProgressThumb} />
-                    </View>
-                  </View>
-
-                  {/* Timestamps */}
-                  <View style={profileStyles.npTimestamps}>
-                    <Text style={profileStyles.npTime}>{fmt(liveProgressMs)}</Text>
-                    <Text style={profileStyles.npTime}>{fmt(track.durationMs)}</Text>
+                {/* Progress bar */}
+                <View style={profileStyles.npProgressTrack}>
+                  <View style={[profileStyles.npProgressFill, { width: `${progress * 100}%` as any }]}>
+                    <View style={profileStyles.npProgressThumb} />
                   </View>
                 </View>
-              </View>
 
-              {/* Broadcast row */}
-              <BroadcastRow />
-            </LinearGradient>
-          </TouchableOpacity>
+                {/* Timestamps */}
+                <View style={profileStyles.npTimestamps}>
+                  <Text style={profileStyles.npTime}>{fmt(liveProgressMs)}</Text>
+                  <Text style={profileStyles.npTime}>{fmt(track.durationMs)}</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Broadcast row */}
+            <BroadcastRow />
+          </LinearGradient>
         );
       })()}
 
       {/* ─── Section tabs ────────────────────────────────────────── */}
-      <ProfileTabs />
+      <ProfileTabs userId={userId} />
     </ScrollView>
+
+    {linksSheetOpen && (
+      <LinksSheet
+        links={profile?.profile_links ?? []}
+        onClose={() => setLinksSheetOpen(false)}
+        accessToken={accessToken}
+      />
+    )}
+
+    {socialLinksSheetOpen && (
+      <SocialLinksSheet
+        socialLinks={profile?.social_links ?? {}}
+        onClose={() => setSocialLinksSheetOpen(false)}
+      />
+    )}
+
+    <EditProfileOverlay
+      visible={editOpen}
+      onClose={() => setEditOpen(false)}
+      initialData={{
+        display_name: profile?.display_name ?? "",
+        username: profile?.username ?? "",
+        bio: profile?.bio ?? "",
+        avatar_url: profile?.avatar_url ?? null,
+        pinned_song_id: profile?.pinned_song_id ?? null,
+        pinned_song_name: profile?.pinned_song_name ?? null,
+        pinned_song_artist: profile?.pinned_song_artist ?? null,
+        pinned_song_album_art: profile?.pinned_song_album_art ?? null,
+        profile_links: profile?.profile_links ?? [],
+        social_links: profile?.social_links ?? {},
+      }}
+      userId={userId}
+      accessToken={accessToken}
+      onSaved={(data) => {
+        const updated: UserProfile = {
+          ...(profile ?? {} as UserProfile),
+          display_name: data.display_name || null,
+          username: data.username,
+          bio: data.bio || null,
+          avatar_url: data.avatar_url,
+          pinned_song_id: data.pinned_song_id,
+          pinned_song_name: data.pinned_song_name,
+          pinned_song_artist: data.pinned_song_artist,
+          pinned_song_album_art: data.pinned_song_album_art,
+          profile_links: data.profile_links,
+          social_links: data.social_links,
+        };
+        _profileCache = updated;
+        setProfile(updated);
+      }}
+    />
+
+    {settingsOpen && (
+      <SettingsOverlay
+        profile={profile}
+        onClose={() => setSettingsOpen(false)}
+      />
+    )}
     </View>
   );
 }
@@ -3842,10 +5501,12 @@ const profileStyles = StyleSheet.create({
   statsRow: { flexDirection: "row", alignItems: "baseline", marginBottom: 16 },
   statNum: { fontSize: 15, fontWeight: "800", color: "#ffffff" },
   statLabel: { fontSize: 14, color: "rgba(255,255,255,0.38)" },
-  metaRow: { flexDirection: "row", gap: 20 },
-  metaItem: { flexDirection: "row", alignItems: "center", gap: 5 },
+  metaRow: { flexDirection: "row", gap: 20, flexWrap: "wrap" },
+  metaItem: { flexDirection: "row", alignItems: "center", gap: 5, flex: 1, maxWidth: "55%" },
   metaIcon: { fontSize: 13, color: "rgba(255,255,255,0.28)" },
   metaText: { fontSize: 13, color: "rgba(255,255,255,0.32)" },
+  linkBadge: { backgroundColor: "rgba(255,108,26,0.18)", borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1 },
+  linkBadgeText: { fontSize: 10, fontWeight: "800", color: "#FF6C1A" },
 
   // Spotify reconnect
   reconnectCard: {
@@ -4006,6 +5667,521 @@ const profileStyles = StyleSheet.create({
   },
 });
 
+// ─── Post Composer styles ─────────────────────────────────────────────────────
+
+const csStyles = StyleSheet.create({
+  backdrop: { backgroundColor: "rgba(0,0,0,0.65)" },
+  sheet: {
+    position: "absolute", bottom: 0, left: 0, right: 0, height: "90%",
+    backgroundColor: "#111113",
+    borderTopLeftRadius: 26, borderTopRightRadius: 26,
+    overflow: "hidden",
+    borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+  },
+  header: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 18, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)",
+  },
+  title: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  cancelBtn: { fontSize: 15, color: "rgba(255,255,255,0.5)" },
+  postBtn: {
+    backgroundColor: "#AB00FF", borderRadius: 20,
+    paddingHorizontal: 18, paddingVertical: 7,
+    minWidth: 56, alignItems: "center",
+  },
+  postBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+
+  composeRow: { flexDirection: "row", alignItems: "flex-start", padding: 18, gap: 12 },
+  avatar: {
+    width: 42, height: 42, borderRadius: 12,
+    backgroundColor: "#AB00FF",
+    alignItems: "center", justifyContent: "center", flexShrink: 0,
+    overflow: "hidden",
+  },
+  avatarInitials: { fontSize: 16, fontWeight: "800", color: "#fff" },
+  textInput: {
+    flex: 1, fontSize: 16, color: "#fff",
+    lineHeight: 24, minHeight: 80,
+    textAlignVertical: "top",
+  },
+
+  imageStrip: { paddingHorizontal: 18, paddingBottom: 16, gap: 10, flexDirection: "row", alignItems: "center" },
+  thumbImage: { width: 88, height: 88, borderRadius: 12 },
+  thumbRemove: {
+    position: "absolute", top: 4, right: 4,
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center", justifyContent: "center",
+  },
+  thumbRemoveText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  thumbAdd: {
+    width: 88, height: 88, borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    borderStyle: "dashed",
+    alignItems: "center", justifyContent: "center",
+  },
+
+  pollSection: { paddingHorizontal: 18, paddingBottom: 12, gap: 10 },
+  pollQuestion: {
+    backgroundColor: "#1A1A1C", borderRadius: 14,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
+    color: "#fff", fontSize: 16, fontWeight: "600",
+    paddingHorizontal: 16, paddingVertical: 13,
+  },
+  pollOptionRow: { flexDirection: "row", alignItems: "center" },
+  pollOptionInput: {
+    flex: 1, backgroundColor: "#1A1A1C", borderRadius: 12,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+    color: "#fff", fontSize: 14,
+    paddingHorizontal: 14, paddingVertical: 11,
+  },
+  addOptionBtn: {
+    flexDirection: "row", alignItems: "center",
+    paddingVertical: 10, paddingHorizontal: 4,
+  },
+  addOptionText: { fontSize: 14, color: "#AB00FF", fontWeight: "600" },
+
+  toolbar: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.07)",
+    gap: 4,
+  },
+  toolBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: "center", justifyContent: "center",
+  },
+  toolBtnActive: { backgroundColor: "rgba(171,0,255,0.12)" },
+  audienceChip: {
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
+  },
+  audienceText: { fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: "600" },
+
+  // ─── Media source picker panel ──────────────────────────────────────────────
+  mediaPicker: {
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.12)",
+    paddingVertical: 16, paddingHorizontal: 16,
+  },
+  mediaPickerBtn: { flex: 1, alignItems: "center", gap: 7 },
+  mediaPickerLabel: { color: "#fff", fontSize: 12, fontWeight: "600", opacity: 0.85 },
+  mediaPickerDivider: {
+    width: StyleSheet.hairlineWidth, height: 38,
+    backgroundColor: "rgba(255,255,255,0.15)", marginHorizontal: 6,
+  },
+  mediaPickerClose: { paddingLeft: 14, paddingRight: 2, alignSelf: "center" },
+});
+
+const epOverlayStyles = StyleSheet.create({
+  backdrop: { backgroundColor: "rgba(0,0,0,0.72)" },
+  sheet: {
+    position: "absolute", bottom: 0, left: 0, right: 0, height: "92%",
+    backgroundColor: "#111113",
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    overflow: "hidden",
+    borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+  },
+  songSheet: {
+    position: "absolute", bottom: 0, left: 0, right: 0, height: "75%",
+    backgroundColor: "#111113",
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    overflow: "hidden",
+    borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+    paddingBottom: 20,
+  },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.15)", alignSelf: "center", marginTop: 10, marginBottom: 4 },
+  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)" },
+  sheetTitle: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  closeBtn: { fontSize: 16, color: "rgba(255,255,255,0.45)", fontWeight: "600" },
+  cancelBtn: { fontSize: 15, color: "rgba(255,255,255,0.5)" },
+  saveBtn: { fontSize: 15, fontWeight: "700", color: "#FF6C1A" },
+  searchRow: { flexDirection: "row", alignItems: "center", margin: 16, backgroundColor: "#1A1A1C", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", paddingHorizontal: 14, paddingVertical: 11 },
+  searchInput: { flex: 1, color: "#fff", fontSize: 15 },
+  resultRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, gap: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
+  resultArt: { width: 46, height: 46, borderRadius: 8 },
+  resultArtFallback: { backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center" },
+  resultTrack: { fontSize: 14, fontWeight: "600", color: "#fff" },
+  resultArtist: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 },
+  emptyText: { textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 14, marginTop: 32 },
+  avatarSection: { alignItems: "center", paddingVertical: 24 },
+  avatarWrap: { position: "relative" },
+  avatarCircle: { width: 90, height: 90, borderRadius: 20, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  avatarLoading: { backgroundColor: "rgba(255,255,255,0.1)" },
+  avatarInitials: { fontSize: 30, fontWeight: "800", color: "#fff" },
+  avatarEditBadge: { position: "absolute", bottom: -4, right: -4, width: 26, height: 26, borderRadius: 13, backgroundColor: "#FF6C1A", borderWidth: 2, borderColor: "#111113", alignItems: "center", justifyContent: "center" },
+  avatarHint: { marginTop: 10, fontSize: 12, color: "rgba(255,255,255,0.3)" },
+  section: { paddingHorizontal: 20, marginBottom: 22 },
+  sectionLabel: { fontSize: 11, fontWeight: "700", letterSpacing: 1, color: "rgba(255,255,255,0.3)", marginBottom: 8 },
+  input: { backgroundColor: "#1A1A1C", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 15, paddingHorizontal: 16, paddingVertical: 13 },
+  inputMulti: { minHeight: 80, paddingTop: 13, textAlignVertical: "top" },
+  songRow: { flexDirection: "row", alignItems: "center", backgroundColor: "#1A1A1C", borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", padding: 12, gap: 12 },
+  songArt: { width: 44, height: 44, borderRadius: 8 },
+  songArtFallback: { backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center" },
+  songName: { fontSize: 14, fontWeight: "600", color: "#fff" },
+  songArtist: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 },
+  songPlaceholder: { fontSize: 14, color: "rgba(255,255,255,0.3)" },
+  clearBtn: { marginTop: 8, alignSelf: "flex-start" },
+  clearBtnText: { fontSize: 13, color: "rgba(255,100,80,0.7)" },
+  linkRow: { flexDirection: "row", alignItems: "center", backgroundColor: "#1A1A1C", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 14, paddingVertical: 11, marginBottom: 8, gap: 8 },
+  linkText: { flex: 1, fontSize: 13, color: "rgba(255,255,255,0.65)" },
+  linkInputRow: { flexDirection: "row", gap: 10, marginTop: 4 },
+  linkInput: { flex: 1, backgroundColor: "#1A1A1C", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 14, paddingHorizontal: 14, paddingVertical: 11 },
+  addLinkBtn: { width: 42, height: 42, borderRadius: 12, backgroundColor: "#FF6C1A", alignItems: "center", justifyContent: "center" },
+  socialRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
+  socialIconWrap: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  socialInput: { flex: 1, backgroundColor: "#1A1A1C", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 13, paddingHorizontal: 12, paddingVertical: 10 },
+});
+
+// ─── Post Composer Sheet ──────────────────────────────────────────────────────
+
+type ComposerUser = {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+};
+
+function PostComposerSheet({
+  visible,
+  onClose,
+  currentUser,
+  onPosted,
+  initialText,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  currentUser: ComposerUser | null;
+  onPosted: (post: Post) => void;
+  initialText?: string;
+}) {
+  const [text, setText] = useState("");
+  const [images, setImages] = useState<string[]>([]);
+  const [pollMode, setPollMode] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState(["", ""]);
+  const [posting, setPosting] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const slideAnim = useRef(new Animated.Value(SH)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setText(initialText ?? ""); setImages([]); setPollMode(false); setMediaPickerOpen(false);
+      setPollQuestion(""); setPollOptions(["", ""]);
+      Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 200 }),
+        Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: SH, duration: 260, useNativeDriver: true }),
+        Animated.timing(backdropAnim, { toValue: 0, duration: 220, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const pickFromCamera = async () => {
+    setMediaPickerOpen(false);
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Permission needed", "Allow camera access to take a photo."); return; }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.85, allowsEditing: false });
+    if (!result.canceled) {
+      setImages((prev) => [...prev, ...result.assets.map((a) => a.uri)].slice(0, 4));
+      setPollMode(false);
+    }
+  };
+
+  const pickFromLibrary = async () => {
+    setMediaPickerOpen(false);
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Permission needed", "Allow photo access to attach images."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"] as any,
+      allowsMultipleSelection: true,
+      quality: 0.85,
+      selectionLimit: 4,
+    });
+    if (!result.canceled) {
+      setImages((prev) => [...prev, ...result.assets.map((a) => a.uri)].slice(0, 4));
+      setPollMode(false);
+    }
+  };
+
+  const pickVideo = async () => {
+    setMediaPickerOpen(false);
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Permission needed", "Allow photo access to attach a video."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["videos"] as any,
+      allowsMultipleSelection: false,
+      quality: 0.85,
+    });
+    if (!result.canceled) {
+      setImages((prev) => [...prev, ...result.assets.map((a) => a.uri)].slice(0, 4));
+      setPollMode(false);
+    }
+  };
+
+  const removeImage = (idx: number) => setImages((prev) => prev.filter((_, i) => i !== idx));
+
+  const canPost =
+    text.trim().length > 0 ||
+    images.length > 0 ||
+    (pollMode && pollQuestion.trim().length > 0 && pollOptions.filter((o) => o.trim()).length >= 2);
+
+  const handlePost = async () => {
+    if (!currentUser || !canPost || posting) return;
+    setPosting(true);
+    try {
+      const VIDEO_EXTS = ["mp4", "mov", "m4v", "avi", "webm"];
+      let type: "text" | "image" | "video" | "poll" = "text";
+      let mediaUrls: string[] = [];
+
+      if (images.length > 0) {
+        const firstExt = (images[0].split(".").pop() ?? "").toLowerCase();
+        type = VIDEO_EXTS.includes(firstExt) ? "video" : "image";
+        for (const uri of images) {
+          const ext = (uri.split(".").pop() ?? "jpg").toLowerCase();
+          const isVideo = VIDEO_EXTS.includes(ext);
+          const fileName = `${currentUser.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+          const resp = await fetch(uri);
+          const blob = await resp.blob();
+          const ab = await new Promise<ArrayBuffer>((res, rej) => {
+            const reader = new FileReader();
+            reader.onload = () => res(reader.result as ArrayBuffer);
+            reader.onerror = rej;
+            reader.readAsArrayBuffer(blob);
+          });
+          const contentType = isVideo
+            ? `video/${ext === "mov" ? "quicktime" : ext}`
+            : `image/${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("post-media")
+            .upload(fileName, ab, { contentType, upsert: false });
+          if (upErr) throw upErr;
+          const { data: { publicUrl } } = supabase.storage.from("post-media").getPublicUrl(fileName);
+          mediaUrls.push(publicUrl);
+        }
+      } else if (pollMode) {
+        type = "poll";
+      }
+
+      const opts = pollMode
+        ? pollOptions
+            .filter((o) => o.trim())
+            .map((o, i) => ({ id: `opt_${i}`, label: o.trim(), votes: 0 }))
+        : null;
+
+      const { data: newRow, error } = await supabase
+        .from("posts")
+        .insert({
+          user_id: currentUser.id,
+          type,
+          text: text.trim() || null,
+          media_urls: mediaUrls,
+          poll_question: pollMode ? pollQuestion.trim() || null : null,
+          poll_options: opts,
+        })
+        .select("id, type, text, media_urls, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url)")
+        .single();
+
+      if (error) throw error;
+      onPosted(dbRowToPost(newRow));
+      onClose();
+    } catch (e: any) {
+      Alert.alert("Post failed", e.message ?? "Could not create post.");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const initials = currentUser?.display_name
+    ? currentUser.display_name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
+    : (currentUser?.username ?? "?")[0].toUpperCase();
+
+  return (
+    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <Animated.View style={[StyleSheet.absoluteFill, csStyles.backdrop, { opacity: backdropAnim }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      </Animated.View>
+
+      <Animated.View style={[csStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+          {/* Header */}
+          <View style={csStyles.header}>
+            <TouchableOpacity onPress={onClose} hitSlop={12}>
+              <Text style={csStyles.cancelBtn}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={csStyles.title}>New Post</Text>
+            <TouchableOpacity
+              style={[csStyles.postBtn, !canPost && { opacity: 0.4 }]}
+              disabled={!canPost || posting}
+              onPress={handlePost}
+            >
+              {posting
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={csStyles.postBtnText}>Post</Text>}
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 20 }}
+          >
+            {/* Author + text */}
+            <View style={csStyles.composeRow}>
+              {currentUser?.avatar_url ? (
+                <Image source={{ uri: currentUser.avatar_url }} style={csStyles.avatar} />
+              ) : (
+                <View style={csStyles.avatar}>
+                  <Text style={csStyles.avatarInitials}>{initials}</Text>
+                </View>
+              )}
+              <TextInput
+                style={csStyles.textInput}
+                placeholder="What's on your mind?"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={text}
+                onChangeText={setText}
+                multiline
+                autoFocus
+              />
+            </View>
+
+            {/* Image thumbnails */}
+            {images.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={csStyles.imageStrip}
+              >
+                {images.map((uri, idx) => (
+                  <TouchableOpacity key={idx} onPress={() => removeImage(idx)} activeOpacity={0.8} style={{ position: "relative" }}>
+                    <Image source={{ uri }} style={csStyles.thumbImage} />
+                    <View style={csStyles.thumbRemove}>
+                      <Text style={csStyles.thumbRemoveText}>✕</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+                {images.length < 4 && (
+                  <TouchableOpacity style={csStyles.thumbAdd} onPress={() => setMediaPickerOpen(true)}>
+                    <FontAwesome5 name="plus" size={18} color="rgba(255,255,255,0.4)" />
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            )}
+
+            {/* Poll section */}
+            {pollMode && (
+              <View style={csStyles.pollSection}>
+                <TextInput
+                  style={csStyles.pollQuestion}
+                  placeholder="Ask a question…"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={pollQuestion}
+                  onChangeText={setPollQuestion}
+                />
+                {pollOptions.map((opt, idx) => (
+                  <View key={idx} style={csStyles.pollOptionRow}>
+                    <TextInput
+                      style={csStyles.pollOptionInput}
+                      placeholder={`Option ${idx + 1}${idx < 2 ? "" : " (optional)"}`}
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      value={opt}
+                      onChangeText={(t) =>
+                        setPollOptions((prev) => prev.map((o, i) => (i === idx ? t : o)))
+                      }
+                    />
+                    {idx > 1 && (
+                      <TouchableOpacity
+                        onPress={() => setPollOptions((prev) => prev.filter((_, i) => i !== idx))}
+                        hitSlop={8}
+                        style={{ marginLeft: 8 }}
+                      >
+                        <FontAwesome5 name="times" size={14} color="rgba(255,100,100,0.7)" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+                {pollOptions.length < 4 && (
+                  <TouchableOpacity style={csStyles.addOptionBtn} onPress={() => setPollOptions((p) => [...p, ""])}>
+                    <FontAwesome5 name="plus" size={11} color="#AB00FF" style={{ marginRight: 6 }} />
+                    <Text style={csStyles.addOptionText}>Add option</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Inline media source picker — appears above toolbar */}
+          {mediaPickerOpen && (
+            <View style={csStyles.mediaPicker}>
+              <TouchableOpacity style={csStyles.mediaPickerBtn} onPress={pickFromCamera} activeOpacity={0.75}>
+                <FontAwesome5 name="camera" size={20} color="#fff" />
+                <Text style={csStyles.mediaPickerLabel}>Camera</Text>
+              </TouchableOpacity>
+              <View style={csStyles.mediaPickerDivider} />
+              <TouchableOpacity style={csStyles.mediaPickerBtn} onPress={pickFromLibrary} activeOpacity={0.75}>
+                <FontAwesome5 name="images" size={20} color="#fff" />
+                <Text style={csStyles.mediaPickerLabel}>Photos</Text>
+              </TouchableOpacity>
+              <View style={csStyles.mediaPickerDivider} />
+              <TouchableOpacity style={csStyles.mediaPickerBtn} onPress={pickVideo} activeOpacity={0.75}>
+                <FontAwesome5 name="film" size={20} color="#fff" />
+                <Text style={csStyles.mediaPickerLabel}>Video</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={csStyles.mediaPickerClose}
+                onPress={() => setMediaPickerOpen(false)}
+                hitSlop={12}
+              >
+                <FontAwesome5 name="times" size={16} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Bottom toolbar */}
+          <View style={csStyles.toolbar}>
+            <TouchableOpacity
+              style={[csStyles.toolBtn, (images.length > 0 || mediaPickerOpen) && csStyles.toolBtnActive]}
+              onPress={() => { setMediaPickerOpen((o) => !o); setPollMode(false); }}
+              activeOpacity={0.7}
+            >
+              <FontAwesome5
+                name="images"
+                size={19}
+                color={(images.length > 0 || mediaPickerOpen) ? "#AB00FF" : "rgba(255,255,255,0.45)"}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[csStyles.toolBtn, pollMode && csStyles.toolBtnActive]}
+              onPress={() => { setPollMode((p) => !p); setImages([]); }}
+              disabled={images.length > 0}
+              activeOpacity={0.7}
+            >
+              <FontAwesome5 name="poll-h" size={19} color={pollMode ? "#AB00FF" : "rgba(255,255,255,0.45)"} />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }} />
+            <View style={csStyles.audienceChip}>
+              <FontAwesome5 name="globe" size={11} color="rgba(255,255,255,0.5)" style={{ marginRight: 5 }} />
+              <Text style={csStyles.audienceText}>Public</Text>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Animated.View>
+    </Modal>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function FeedScreen() {
@@ -4042,11 +6218,136 @@ export default function FeedScreen() {
   const [keyboardUp, setKeyboardUp] = useState(false);
   const [feedScrollEnabled, setFeedScrollEnabled] = useState(true);
   const [feedRefreshing, setFeedRefreshing] = useState(false);
+  const [feedPosts, setFeedPosts] = useState<Post[]>([]);
+  const [currentUser, setCurrentUser] = useState<ComposerUser | null>(null);
+  const [quickText, setQuickText] = useState("");
+  const [attachedTrack, setAttachedTrack] = useState<NowPlayingTrack | null>(null);
+  const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set());
+
+  const fetchFeedPosts = async (userId?: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("posts")
+        .select("id, type, text, media_urls, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url)")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      if (data) setFeedPosts(data.map(dbRowToPost));
+
+      // Load which posts the current user has already liked
+      if (userId) {
+        const { data: likesData } = await supabase
+          .from("post_likes")
+          .select("post_id")
+          .eq("user_id", userId);
+        if (likesData) setLikedPostIds(new Set(likesData.map((r: any) => r.post_id)));
+      }
+    } catch (e) {
+      console.error("fetchFeedPosts:", e);
+    }
+  };
+
+  // Toggle like with optimistic UI + DB sync via toggle_post_like RPC
+  const onToggleLike = async (postId: string) => {
+    if (!currentUser) return;
+    // Optimistic toggle
+    setLikedPostIds((prev) => {
+      const next = new Set(prev);
+      next.has(postId) ? next.delete(postId) : next.add(postId);
+      return next;
+    });
+    try {
+      const { data, error } = await supabase.rpc("toggle_post_like", {
+        p_post_id: postId,
+        p_user_id: currentUser.id,
+      });
+      if (error) throw error;
+      if (data) {
+        // Sync actual like count from DB
+        setFeedPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId ? { ...p, likes: (data as any).likes_count } : p
+          )
+        );
+        // Sync liked state from DB (source of truth)
+        setLikedPostIds((prev) => {
+          const next = new Set(prev);
+          (data as any).liked ? next.add(postId) : next.delete(postId);
+          return next;
+        });
+      }
+    } catch (e) {
+      // Revert optimistic toggle on failure
+      setLikedPostIds((prev) => {
+        const next = new Set(prev);
+        next.has(postId) ? next.delete(postId) : next.add(postId);
+        return next;
+      });
+      console.error("toggle_post_like:", e);
+    }
+  };
+
+  // Post directly from the floating quick-field without opening the sheet.
+  // If a track is attached the post type becomes "music" and song_data is stored.
+  const handleQuickPost = async () => {
+    const hasText  = quickText.trim().length > 0;
+    const hasTrack = attachedTrack !== null;
+    if (!currentUser || (!hasText && !hasTrack)) return;
+
+    const textToPost   = quickText.trim();
+    const trackToPost  = attachedTrack;
+    setQuickText("");
+    setAttachedTrack(null);
+    Keyboard.dismiss();
+
+    try {
+      const payload: Record<string, any> = {
+        user_id: currentUser.id,
+        type: hasTrack ? "music" : "text",
+        text: textToPost || null,
+      };
+      if (trackToPost) {
+        payload.song_id        = trackToPost.id;
+        payload.song_name      = trackToPost.name;
+        payload.song_artist    = trackToPost.artist;
+        payload.song_album_art = trackToPost.albumArt ?? null;
+      }
+
+      const { data: newRow, error } = await supabase
+        .from("posts")
+        .insert(payload)
+        .select("id, type, text, media_urls, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url)")
+        .single();
+      if (error) throw error;
+      setFeedPosts((prev) => [dbRowToPost(newRow), ...prev]);
+    } catch (e: any) {
+      Alert.alert("Post failed", e.message ?? "Could not create post.");
+      setQuickText(textToPost);
+      setAttachedTrack(trackToPost);
+    }
+  };
+
+  // Load current user + initial posts on mount
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase
+          .from("users")
+          .select("username, display_name, avatar_url")
+          .eq("id", user.id)
+          .single();
+        if (data) setCurrentUser({ id: user.id, ...data });
+        fetchFeedPosts(user.id);
+      } else {
+        fetchFeedPosts();
+      }
+    })();
+  }, []);
 
   const onFeedRefresh = async () => {
     setFeedRefreshing(true);
-    // When feed data is live, re-fetch posts here
-    await new Promise(r => setTimeout(r, 600));
+    await fetchFeedPosts(currentUser?.id);
     setFeedRefreshing(false);
   };
 
@@ -4078,8 +6379,26 @@ export default function FeedScreen() {
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+useEffect(() => {
+  const showSub = Keyboard.addListener('keyboardDidShow', () => {
+    setKeyboardVisible(true);
+  });
+
+  const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+    setKeyboardVisible(false);
+  });
+
+  return () => {
+    showSub.remove();
+    hideSub.remove();
+  };
+}, []);
+
   return (
     <NowPlayingCtx.Provider value={nowPlaying}>
+    <FeedUserCtx.Provider value={{ currentUserId: currentUser?.id ?? null, likedPostIds, onToggleLike }}>
     <View style={styles.container}>
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         {activeNav === "Profile" ? (
@@ -4092,7 +6411,7 @@ export default function FeedScreen() {
           <MessagesView onOpenChat={setOpenConv} />
         ) : (
           <FlatList
-            data={POSTS}
+            data={feedPosts}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.feedContent}
             showsVerticalScrollIndicator={false}
@@ -4135,6 +6454,35 @@ export default function FeedScreen() {
       {/* Floating composer — only on Feed tab */}
       {activeNav === "Feed" && (
         <Animated.View style={[styles.composerWrap, { bottom: composerBottom }]}>
+
+          {/* Now-playing song card — tap "+" to attach the track to the post */}
+          {keyboardVisible && (
+            <View style={{ paddingHorizontal: 12 }}>
+              <NowPlayingBanner
+                onAttach={(t) => setAttachedTrack((prev) => prev?.id === t.id ? null : t)}
+              />
+
+              {/* Attached track chip — shown after user taps "+" */}
+              {attachedTrack && (
+                <View style={styles.attachedTrackChip}>
+                  {attachedTrack.albumArt ? (
+                    <Image source={{ uri: attachedTrack.albumArt }} style={styles.attachedTrackArt} />
+                  ) : (
+                    <View style={[styles.attachedTrackArt, { backgroundColor: "#1DB95422", alignItems: "center", justifyContent: "center" }]}>
+                      <Ionicons name="musical-note" size={14} color="#1DB954" />
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.attachedTrackName} numberOfLines={1}>{attachedTrack.name}</Text>
+                    <Text style={styles.attachedTrackArtist} numberOfLines={1}>{attachedTrack.artist}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setAttachedTrack(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.35)" />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
           <View style={styles.composerGlass}>
             <TouchableOpacity
               style={styles.composerPlus}
@@ -4148,10 +6496,17 @@ export default function FeedScreen() {
               style={styles.composerInput}
               placeholder="What's on your mind?"
               placeholderTextColor="rgba(255,255,255,0.3)"
-              returnKeyType="done"
+              returnKeyType="send"
+              value={quickText}
+              onChangeText={setQuickText}
+              onSubmitEditing={handleQuickPost}
             />
 
-            <TouchableOpacity style={styles.composerSend} activeOpacity={0.8}>
+            <TouchableOpacity
+              style={styles.composerSend}
+              activeOpacity={0.8}
+              onPress={handleQuickPost}
+            >
               <Text style={styles.composerSendIcon}>↑</Text>
             </TouchableOpacity>
           </View>
@@ -4162,7 +6517,16 @@ export default function FeedScreen() {
       {!keyboardUp && <BottomNav active={activeNav} onPress={setActiveNav} />}
 
       {/* Modals */}
-      <ComposerActionMenu visible={menuVisible} onClose={() => setMenuVisible(false)} />
+      <PostComposerSheet
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        currentUser={currentUser}
+        initialText={quickText}
+        onPosted={(post) => {
+          setFeedPosts((prev) => [post, ...prev]);
+          setQuickText(""); // clear quick field once posted via sheet
+        }}
+      />
       {quickReplyPost && (
         <QuickReplyOverlay
           post={quickReplyPost}
@@ -4185,6 +6549,7 @@ export default function FeedScreen() {
         <ChatDetailView conv={openConv} onClose={() => setOpenConv(null)} />
       )}
     </View>
+    </FeedUserCtx.Provider>
     </NowPlayingCtx.Provider>
   );
 }
@@ -4274,6 +6639,17 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(171,0,255,0.3)",
   },
 
+  // Attached-track chip (shown below the now-playing banner once "+" is tapped)
+  attachedTrackChip: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    backgroundColor: "rgb(0,0,0)",
+    borderRadius: 12, borderWidth: 1, borderColor: "rgba(29,185,84,0.25)",
+    paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8,
+  },
+  attachedTrackArt:    { width: 36, height: 36, borderRadius: 8 },
+  attachedTrackName:   { fontSize: 12, fontWeight: "700", color: "#fff" },
+  attachedTrackArtist: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 1 },
+
   // Card shell
   card: { backgroundColor: "#ffffff0e", borderRadius: 20, marginHorizontal: 13, paddingTop: 16, overflow: "hidden" },
 
@@ -4287,7 +6663,15 @@ const styles = StyleSheet.create({
 
   // Media
   mediaBlock: { width: "100%", height: 220, alignItems: "center", justifyContent: "center" },
+  mediaImageFull: { width: SW - 26, height: 260 },
   mediaPlaceholder: { fontSize: 44, opacity: 0.25 },
+  collageMoreOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  collageMoreText: { color: "#fff", fontSize: 26, fontWeight: "800" },
   videoPlayCircle: { width: 54, height: 54, borderRadius: 27, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
   videoPlayIcon: { fontSize: 20, color: "#fff", marginLeft: 3 },
   durationBadge: { position: "absolute", bottom: 10, right: 12, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
@@ -4302,9 +6686,10 @@ const styles = StyleSheet.create({
   musicTopRight: { position: "absolute", top: 14, right: 14, flexDirection: "row", gap: 8 },
   musicGlassBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(255,255,255,0.18)", borderWidth: 1, borderColor: "rgba(255,255,255,0.25)", alignItems: "center", justifyContent: "center" },
   musicGlassBtnIcon: { fontSize: 16, color: "#fff" },
-  musicBottom: { paddingHorizontal: 18, paddingTop: 6, paddingBottom: 16 },
+  musicInfoOverlay: { position: "absolute", bottom: 0, left: 0, right: 0, height: 100 },
+  musicInfoText: { position: "absolute", bottom: 0, left: 0, right: 0, paddingHorizontal: 14, paddingBottom: 14 },
   musicSongTitle: { fontSize: 20, fontWeight: "700", color: "#ffffff", marginBottom: 2 },
-  musicArtistName: { fontSize: 14, color: "rgba(255,255,255,0.55)", marginBottom: 14 },
+  musicArtistName: { fontSize: 14, color: "rgba(255,255,255,0.65)" },
   musicProgressRow: { marginBottom: 4 },
   musicProgressTrack: { height: 3, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 2 },
   musicProgressFill: { height: 3, borderRadius: 2, position: "relative" },

@@ -2,6 +2,7 @@ import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
+import * as SecureStore from 'expo-secure-store';
 
 // Prevents re-triggering the animation when navigating back from a screen
 let hasLaunched = false;
@@ -17,9 +18,15 @@ export default function SplashScreen() {
 
     // Check for a saved session in parallel with the splash animation.
     // By the time the animation ends (~2s) the session check is always done.
-    let destination: '/feed' | '/onboarding' = '/onboarding';
-    const sessionCheck = supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) destination = '/feed';
+    let destination: '/feed' | '/onboarding' | '/signup' = '/onboarding';
+    const sessionCheck = supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        destination = '/feed';
+      } else {
+        // If the user has signed in before, skip onboarding and go straight to login
+        const hasSignedIn = await SecureStore.getItemAsync('trackmeet_has_signed_in');
+        if (hasSignedIn) destination = '/signup';
+      }
     });
 
     const timer = setTimeout(() => {

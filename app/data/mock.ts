@@ -22,6 +22,14 @@ export type UserProfile = {
   is_verified: boolean;
   followers_count: number | null;
   following_count: number | null;
+  avatar_url: string | null;
+  pinned_song_id: string | null;
+  pinned_song_name: string | null;
+  pinned_song_artist: string | null;
+  pinned_song_album_art: string | null;
+  profile_links: string[] | null;
+  social_links: Record<string, string> | null;
+  spotify_access_token: string | null;
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -32,18 +40,23 @@ export type PollOption = { id: string; label: string; votes: number };
 
 export type Post = {
   id: string;
+  authorId?: string;           // DB user UUID — set for real posts, absent for mock data
   user: string;
   handle: string;
   initials: string;
   avatarColor: string;
+  avatarUrl?: string | null;   // real avatar from DB
   bio: string | null;
   time: string;
   text?: string;
   type: PostType;
+  mediaUrls?: string[];        // real image URLs from storage
   mediaColor?: string;
   duration?: string;
   song?: string;
   artist?: string;
+  songId?: string;
+  albumArt?: string | null;     // real album-art URL from Spotify
   albumColor?: string;
   albumAccent?: string;
   likes: number;

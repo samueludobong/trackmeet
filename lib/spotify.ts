@@ -345,11 +345,15 @@ export const reconnectSpotify = async (userId: string): Promise<
 // Open a Spotify URI in the app if installed, otherwise fall back to the web player in a WebView.
 // uri  — Spotify URI,  e.g. "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
 // webUrl — fallback web URL, e.g. "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"
+//
+// Uses try/catch rather than canOpenURL — canOpenURL('spotify://') requires
+// LSApplicationQueriesSchemes on iOS and returns false even when the app is installed
+// if the scheme isn't declared there, causing it to always fall into the WebView branch.
 export const openSpotifyLink = async (uri: string, webUrl: string) => {
-  const appInstalled = await Linking.canOpenURL('spotify://')
-  if (appInstalled) {
+  try {
     await Linking.openURL(uri)
-  } else {
+  } catch {
+    // Spotify not installed — open in the in-app browser instead.
     await WebBrowser.openBrowserAsync(webUrl)
   }
 }
@@ -406,6 +410,38 @@ export const saveTrackToLiked = async (accessToken: string, trackId: string): Pr
     return res.status === 200
   } catch {
     return false
+  }
+}
+
+export type SpotifyTrackResult = {
+  id: string
+  name: string
+  artist: string
+  albumArt: string | null
+  durationMs: number
+}
+
+export const searchSpotifyTracks = async (
+  accessToken: string,
+  query: string,
+  limit = 10,
+): Promise<SpotifyTrackResult[]> => {
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.tracks?.items ?? []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      artist: item.artists[0]?.name ?? '',
+      albumArt: item.album.images[0]?.url ?? null,
+      durationMs: item.duration_ms,
+    }))
+  } catch {
+    return []
   }
 }
 

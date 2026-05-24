@@ -12,7 +12,9 @@ import {
   Platform,
   KeyboardAvoidingView,
   Modal,
+  Image,
 } from "react-native";
+import * as SecureStore from "expo-secure-store";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Video, ResizeMode } from "expo-av";
 import { useEffect, useRef, useState } from "react";
@@ -31,7 +33,16 @@ import ReAnimated, {
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
-type Mode = "idle" | "signup" | "login";
+type Mode = "idle" | "signup" | "login" | "accounts";
+
+type SavedAccount = {
+  email: string;
+  displayName: string;
+  username: string;
+  avatarUrl: string | null;
+};
+
+const SAVED_ACCOUNTS_KEY = "trackmeet_saved_accounts";
 
 const TOTAL_STEPS = 6;
 const DRUM_H = 58;
@@ -641,6 +652,8 @@ export default function SignupScreen() {
   const [followed, setFollowed] = useState<Set<string>>(new Set(["a1", "a5"]));
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
+
   const [spotifyTokens, setSpotifyTokens] = useState<{
     spotifyId: string;
     accessToken: string;
@@ -767,6 +780,21 @@ export default function SignupScreen() {
 
   useEffect(() => {
     resetStates();
+    // Check for saved accounts to show quick-login screen
+    (async () => {
+      const raw = await SecureStore.getItemAsync(SAVED_ACCOUNTS_KEY);
+      if (raw) {
+        try {
+          const accs: SavedAccount[] = JSON.parse(raw);
+          if (accs.length > 0) {
+            setSavedAccounts(accs);
+            setMode("accounts");
+            // Animate the expanded card in after the initial mount animation
+            setTimeout(() => openExpanded(() => {}), 150);
+          }
+        } catch {}
+      }
+    })();
   }, []);
 
   const switchMode = (next: Mode) =>
@@ -838,7 +866,24 @@ export default function SignupScreen() {
     setLoading(false);
   };
 
-  const expanded = mode === "signup" && step > 1;
+  const expanded = (mode === "signup" && step > 1) || mode === "accounts";
+
+  const handleSelectSavedAccount = (account: SavedAccount) => {
+    setEmail(account.email);
+    setPassword("");
+    setError("");
+    closeExpanded(() => {
+      setMode("login");
+      setStep(1);
+    });
+  };
+
+  const handleUseAnotherAccount = () => {
+    closeExpanded(() => {
+      setMode("idle");
+      setStep(1);
+    });
+  };
 
   // ── Derive primary streaming service for DB ───────────────────────────────
   const getSelectedService = () => {
@@ -883,6 +928,9 @@ export default function SignupScreen() {
       });
       if (profileError) throw profileError;
 
+      // Mark that the user has signed in — future cold launches skip onboarding
+      await SecureStore.setItemAsync('trackmeet_has_signed_in', '1');
+
       // 3. Navigate to app
       switchMode("login");
     } catch (err: any) {
@@ -923,6 +971,9 @@ export default function SignupScreen() {
       });
 
       if (error) throw error;
+
+      // Mark that the user has signed in — future cold launches skip onboarding
+      await SecureStore.setItemAsync('trackmeet_has_signed_in', '1');
 
       loginBtnRef.current?.measure((_, __, w, h, pageX, pageY) => {
         setLoginExpandLayout({ x: pageX, y: pageY, w, h });
@@ -999,8 +1050,14 @@ export default function SignupScreen() {
           )}
         </Animated.View>
 
-        {!expanded && (
-          <Animated.View style={{ transform: [{ translateY: slideAnim }] }}>
+        {/* Always mounted — hidden via opacity when expanded card is active */}
+        <Animated.View
+          pointerEvents={expanded ? "none" : "box-none"}
+          style={[
+            { transform: [{ translateY: slideAnim }] },
+            expanded && styles.bottomCardHidden,
+          ]}
+        >
             <ReAnimated.View
               layout={LinearTransition.duration(360).easing(
                 REasing.out(REasing.cubic),
@@ -1143,7 +1200,6 @@ export default function SignupScreen() {
               </Animated.View>
             </ReAnimated.View>
           </Animated.View>
-        )}
       </SafeAreaView>
 
       {/* ── Expanded full-height card (steps 2–6) ── */}
@@ -1167,10 +1223,61 @@ export default function SignupScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
+              {/* ── Saved accounts screen ───────────────────────────────── */}
+              {mode === "accounts" && (
+                <>
+                  <Text style={styles.expandedTitle}>Welcome back</Text>
+                  <Text style={[styles.expandedSub, { marginBottom: 8 }]}>
+                    Sign in to continue
+                  </Text>
+
+                  {savedAccounts.map((account) => (
+                    <TouchableOpacity
+                      key={account.email}
+                      style={styles.savedAccountCard}
+                      activeOpacity={0.82}
+                      onPress={() => handleSelectSavedAccount(account)}
+                    >
+                      {account.avatarUrl ? (
+                        <Image
+                          source={{ uri: account.avatarUrl }}
+                          style={styles.savedAccountAvatar}
+                        />
+                      ) : (
+                        <View style={[styles.savedAccountAvatar, styles.savedAccountAvatarFallback]}>
+                          <Text style={styles.savedAccountInitials}>
+                            {(account.displayName || account.username || "?").slice(0, 1).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.savedAccountName} numberOfLines={1}>
+                          {account.displayName || account.username}
+                        </Text>
+                        <Text style={styles.savedAccountHandle} numberOfLines={1}>
+                          @{account.username}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+                    </TouchableOpacity>
+                  ))}
+
+                  <TouchableOpacity
+                    style={styles.anotherAccountBtn}
+                    activeOpacity={0.75}
+                    onPress={handleUseAnotherAccount}
+                  >
+                    <Ionicons name="person-add-outline" size={16} color="rgba(255,255,255,0.55)" />
+                    <Text style={styles.anotherAccountText}>Use another account</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
               {/* Step dots */}
-              <StepDots step={step} total={TOTAL_STEPS} />
+              {mode === "signup" && <StepDots step={step} total={TOTAL_STEPS} />}
 
               {/* Back + step title */}
+              {mode === "signup" && (
               <View style={styles.expandedTitleRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.expandedTitle}>
@@ -1179,12 +1286,13 @@ export default function SignupScreen() {
                   <Text style={styles.expandedSub}>{STEP_SUBS[step - 1]}</Text>
                 </View>
               </View>
+              )}
 
               {/* Step-specific content */}
-              {step === 2 && (
+              {mode === "signup" && step === 2 && (
                 <PasswordField value={password} onChange={setPassword} />
               )}
-              {step === 3 && (
+              {mode === "signup" && step === 3 && (
                 <>
                   <UsernameField value={username} onChange={setUsername} />
                   <Text style={styles.usernameHint}>
@@ -1192,8 +1300,8 @@ export default function SignupScreen() {
                   </Text>
                 </>
               )}
-              {step === 4 && <BirthdayDrumPicker onChange={setBirthday} />}
-              {step === 5 && (
+              {mode === "signup" && step === 4 && <BirthdayDrumPicker onChange={setBirthday} />}
+              {mode === "signup" && step === 5 && (
                 <StreamingGrid
                   connected={streaming}
                   onToggle={toggleStreaming}
@@ -1201,12 +1309,12 @@ export default function SignupScreen() {
                   spotifyConnecting={loading}
                 />
               )}
-              {step === 6 && (
+              {mode === "signup" && step === 6 && (
                 <ArtistsGrid followed={followed} onToggle={toggleFollowed} />
               )}
 
-              {/* Error message */}
-              {!!error && (
+              {/* Error message (signup steps only) */}
+              {mode === "signup" && !!error && (
                 <View style={styles.errorBox}>
                   <Ionicons
                     name="alert-circle-outline"
@@ -1217,36 +1325,40 @@ export default function SignupScreen() {
                 </View>
               )}
 
-              {/* Next / finish button */}
-              <TouchableOpacity
-                style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
-                activeOpacity={0.88}
-                onPress={onNext}
-                disabled={loading}
-              >
-                <Text style={styles.primaryBtnText}>
-                  {loading
-                    ? "Creating account…"
-                    : step === TOTAL_STEPS
-                      ? "Let's Go 🎵"
-                      : "Next  →"}
-                </Text>
-              </TouchableOpacity>
-              {step === 5 && (
-                <TouchableOpacity
-                  onPress={() => goToStep(6)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.switchText}>Skip for now</Text>
-                </TouchableOpacity>
+              {/* Next / finish button (signup steps only) */}
+              {mode === "signup" && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
+                    activeOpacity={0.88}
+                    onPress={onNext}
+                    disabled={loading}
+                  >
+                    <Text style={styles.primaryBtnText}>
+                      {loading
+                        ? "Creating account…"
+                        : step === TOTAL_STEPS
+                          ? "Let's Go 🎵"
+                          : "Next  →"}
+                    </Text>
+                  </TouchableOpacity>
+                  {step === 5 && (
+                    <TouchableOpacity
+                      onPress={() => goToStep(6)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.switchText}>Skip for now</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => goToStep(step - 1)}
+                    style={styles.socialBtn}
+                    activeOpacity={0.88}
+                  >
+                    <Ionicons name="arrow-back" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </>
               )}
-              <TouchableOpacity
-                onPress={() => goToStep(step - 1)}
-                style={styles.socialBtn}
-                activeOpacity={0.88}
-              >
-                <Ionicons name="arrow-back" size={18} color="#fff" />
-              </TouchableOpacity>
             </ScrollView>
           </Animated.View>
         </ReAnimated.View>
@@ -1305,6 +1417,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.15)",
   },
   modeBlock: { gap: 12 },
+  bottomCardHidden: { opacity: 0 },
 
   // ── Expanded card container ──
   // Floats with 40px margin on every side — completely detached from bottom sheet
@@ -1352,6 +1465,62 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
     gap: 20,
+  },
+
+  // Saved accounts
+  savedAccountCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  savedAccountAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
+    borderColor: "rgba(171,0,255,0.5)",
+  },
+  savedAccountAvatarFallback: {
+    backgroundColor: "rgba(171,0,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  savedAccountInitials: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#AB00FF",
+  },
+  savedAccountName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+    letterSpacing: -0.2,
+  },
+  savedAccountHandle: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.45)",
+    marginTop: 2,
+  },
+  anotherAccountBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  anotherAccountText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.55)",
   },
 
   // Step dots

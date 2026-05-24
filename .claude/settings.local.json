@@ -3,7 +3,10 @@
     "allow": [
       "Bash(npm install *)",
       "Bash(npx expo *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(powershell -Command \"Get-ChildItem -Path app,components,lib -Recurse -Include *.tsx,*.ts | Select-Object FullName\")",
+      "Bash(cd \"/c/Users/samue/Track Meet/trackmeet\" && ls -la app/)",
+      "Bash(npx supabase *)"
     ]
   }
 }
