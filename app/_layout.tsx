@@ -34,8 +34,8 @@ export default function RootLayout() {
         <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="signup" options={{ headerShown: false, animation: 'none' }} />
         <Stack.Screen name="feed" options={{ headerShown: false, animation: 'fade' }} />
-        <Stack.Screen name="profile" options={{ headerShown: false, animation: 'slide_from_right' }} />
-        <Stack.Screen name="user-profile" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="user-profile"    options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="artist-profile" options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />

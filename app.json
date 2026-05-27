@@ -13,8 +13,17 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.spacegrey.trackmeet",
       "infoPlist": {
-        "LSApplicationQueriesSchemes": ["spotify"],
-        "UIBackgroundModes": ["fetch", "remote-notification"]
+        "LSApplicationQueriesSchemes": [
+          "spotify",
+          "spotify"
+        ],
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification",
+          "fetch",
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -58,6 +67,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f390c4e2-5e2f-499f-9432-563459b70f53"
+      }
     }
   }
 }

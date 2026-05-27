@@ -7,6 +7,7 @@ import {
   Image,
   ActivityIndicator,
   Animated,
+  Linking,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -16,12 +17,63 @@ import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { followUser, unfollowUser, checkIsFollowing } from "../lib/follows";
 import { getOrCreateConversation } from "../lib/messages";
-import { openSpotifyLink, saveTrackToLiked } from "../lib/spotify";
+import { openSpotifyLink, saveTrackToLiked, getValidSpotifyToken } from "../lib/spotify";
+import { SongPreviewSheet } from "../components/SongPreviewSheet";
 
 const BANNER_H = 172;
 const AVATAR_SIZE = 86;
 const AVATAR_OVERLAP = Math.round(AVATAR_SIZE * 0.44);
 
+// ─── Social platforms (matches feed.tsx) ──────────────────────────────────────
+const SOCIAL_PLATFORMS = [
+  { key: "instagram",  icon: "instagram",  color: "#E1306C" },
+  { key: "twitter",    icon: "twitter",    color: "#1DA1F2" },
+  { key: "tiktok",     icon: "tiktok",     color: "#fff"    },
+  { key: "youtube",    icon: "youtube",    color: "#FF0000" },
+  { key: "soundcloud", icon: "soundcloud", color: "#FF5500" },
+  { key: "spotify",    icon: "spotify",    color: "#1DB954" },
+  { key: "facebook",   icon: "facebook",   color: "#1877F2" },
+  { key: "discord",    icon: "discord",    color: "#5865F2" },
+  { key: "twitch",     icon: "twitch",     color: "#9146FF" },
+  { key: "apple",      icon: "apple",      color: "#fff"    },
+];
+const BANNER_PLATFORM_PRIORITY = ["instagram", "twitter", "tiktok", "youtube", "soundcloud", "spotify"];
+
+// ─── BannerShape ──────────────────────────────────────────────────────────────
+function BannerShape({ shape, color, size }: { shape: string; color: string; size: number }) {
+  const s = size;
+  switch (shape) {
+    case "circle":
+      return <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: color }} />;
+    case "ring":
+      return <View style={{ width: s, height: s, borderRadius: s / 2, borderWidth: Math.max(3, Math.round(s / 6)), borderColor: color, backgroundColor: "transparent" }} />;
+    case "square":
+      return <View style={{ width: s, height: s, borderRadius: Math.round(s / 8), backgroundColor: color }} />;
+    case "diamond":
+      return <View style={{ width: s * 0.72, height: s * 0.72, backgroundColor: color, transform: [{ rotate: "45deg" }] }} />;
+    case "triangle":
+      return <View style={{ width: 0, height: 0, borderLeftWidth: s / 2, borderRightWidth: s / 2, borderBottomWidth: Math.round(s * 0.87), borderStyle: "solid", borderLeftColor: "transparent", borderRightColor: "transparent", borderBottomColor: color }} />;
+    case "oval":
+      return <View style={{ width: s, height: Math.round(s * 0.6), borderRadius: s, backgroundColor: color }} />;
+    case "plus":
+      return (
+        <View style={{ width: s, height: s, alignItems: "center", justifyContent: "center" }}>
+          <View style={{ position: "absolute", width: s, height: Math.round(s / 3.2), backgroundColor: color, borderRadius: 4 }} />
+          <View style={{ position: "absolute", width: Math.round(s / 3.2), height: s, backgroundColor: color, borderRadius: 4 }} />
+        </View>
+      );
+    case "arc":
+      return (
+        <View style={{ width: s, height: Math.round(s / 2), overflow: "hidden" }}>
+          <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: color }} />
+        </View>
+      );
+    default:
+      return null;
+  }
+}
+
+// ─── Profile type ─────────────────────────────────────────────────────────────
 type OtherUserProfile = {
   id: string;
   username: string;
@@ -31,7 +83,10 @@ type OtherUserProfile = {
   followers_count: number;
   following_count: number;
   avatar_url: string | null;
-  banner_url: string | null;
+  banner_color: string | null;
+  banner_image_url: string | null;
+  banner_shape: string | null;
+  banner_shape_color: string | null;
   current_song_name: string | null;
   current_song_artist: string | null;
   current_song_id: string | null;
@@ -41,10 +96,14 @@ type OtherUserProfile = {
   current_song_updated_at: string | null;
   top_genres: string[] | null;
   account_type: string | null;
+  pinned_song_id: string | null;
+  pinned_song_name: string | null;
+  pinned_song_artist: string | null;
+  pinned_song_album_art: string | null;
+  social_links: Record<string, string> | null;
 };
 
-// ─── Now Listening card (matches profile.tsx's NowPlayingCard) ─────────────────
-
+// ─── Now Listening card ───────────────────────────────────────────────────────
 function NowListeningCard({
   song,
   viewerToken,
@@ -65,7 +124,6 @@ function NowListeningCard({
   const [saved, setSaved]   = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Pulsing green dot
   useEffect(() => {
     const anim = Animated.loop(
       Animated.sequence([
@@ -77,7 +135,6 @@ function NowListeningCard({
     return () => anim.stop();
   }, []);
 
-  // Live progress ticker — uses captured progress + elapsed since broadcast
   useEffect(() => {
     if (!song.durationMs || !song.updatedAt) { setLiveProgress(0); return; }
     const updatedAtMs  = new Date(song.updatedAt).getTime();
@@ -89,10 +146,12 @@ function NowListeningCard({
   }, [song.id, song.updatedAt]);
 
   const fmt = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    const sec = Math.floor(ms / 1000);
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
   };
-  const progress = song.durationMs && song.durationMs > 0 ? Math.min(liveProgress / song.durationMs, 1) : 0;
+  const progress = song.durationMs && song.durationMs > 0
+    ? Math.min(liveProgress / song.durationMs, 1)
+    : 0;
 
   const handleOpen = () => {
     if (!song.id) return;
@@ -112,16 +171,8 @@ function NowListeningCard({
       colors={["#3D1A0C", "#1E0D08", "#0E0907"]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={s.npCard}
+      style={s.nowPlayingCard}
     >
-      {/* Header */}
-      <View style={s.npHeader}>
-        <Animated.View style={[s.npDot, { opacity: pulse }]} />
-        <Text style={s.npHeaderLabel}>LISTENING NOW</Text>
-        <FontAwesome5 name="spotify" size={13} color="#1DB954" />
-      </View>
-
-      {/* Body */}
       <View style={s.npBody}>
         {song.albumArt ? (
           <Image source={{ uri: song.albumArt }} style={s.npAlbumArt} />
@@ -132,10 +183,14 @@ function NowListeningCard({
         )}
 
         <View style={s.npInfo}>
-          <Text style={s.npTrack} numberOfLines={1}>{song.name}</Text>
-          <Text style={s.npArtist} numberOfLines={1}>{song.artist ?? ""}</Text>
+          <View style={{ flex: 1, alignItems: "center", gap: 6, flexDirection: "row", justifyContent: "space-between" }}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.npTrack} numberOfLines={1}>{song.name}</Text>
+              <Text style={s.npArtist} numberOfLines={1}>{song.artist ?? ""}</Text>
+            </View>
+            <FontAwesome5 name="spotify" size={13} color="#1DB954" />
+          </View>
 
-          {/* Progress bar */}
           {!!song.durationMs && (
             <>
               <View style={s.npProgressTrack}>
@@ -148,7 +203,6 @@ function NowListeningCard({
             </>
           )}
 
-          {/* Open / Save buttons */}
           <View style={s.npBtnRow}>
             {!!song.id && (
               <TouchableOpacity style={s.npOpenBtn} activeOpacity={0.8} onPress={handleOpen}>
@@ -180,64 +234,53 @@ function NowListeningCard({
   );
 }
 
+// ─── Main screen ──────────────────────────────────────────────────────────────
 export default function UserProfileScreen() {
   const router = useRouter();
   const { userId } = useLocalSearchParams<{ userId: string }>();
 
   const [profile,        setProfile]        = useState<OtherUserProfile | null>(null);
   const [loading,        setLoading]        = useState(true);
-  const [isFollowing,    setIsFollowing]    = useState(false);
-  const [followLoading,  setFollowLoading]  = useState(false);
-  const [followersCount, setFollowersCount] = useState(0);
-  const [currentUserId,  setCurrentUserId]  = useState<string | null>(null);
-  const [viewerToken,    setViewerToken]    = useState<string | null>(null);
+  const [isFollowing,       setIsFollowing]       = useState(false);
+  const [followLoading,     setFollowLoading]     = useState(false);
+  const [followersCount,    setFollowersCount]    = useState(0);
+  const [currentUserId,     setCurrentUserId]     = useState<string | null>(null);
+  const [viewerToken,       setViewerToken]       = useState<string | null>(null);
+  const [pinnedPreviewOpen, setPinnedPreviewOpen] = useState(false);
 
   useEffect(() => { loadProfile(); }, [userId]);
 
-  // Fetch viewer's own Spotify token so they can Open/Save tracks
+  // Viewer's own Spotify token for Open/Save
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from('users').select('spotify_access_token').eq('id', user.id).single();
-      if (data?.spotify_access_token) setViewerToken(data.spotify_access_token);
+      const token = await getValidSpotifyToken(user.id);
+      if (token) setViewerToken(token);
     })();
   }, []);
 
-  // Live song sync — realtime fast path + 5-second polling fallback.
-  // postgres_changes only fires if the users table is in the supabase_realtime
-  // publication; the poll makes it work regardless.
+  // Live song sync — realtime + 5-second polling fallback
   useEffect(() => {
     if (!userId) return;
-
-    const SONG_COLS = 'current_song_name, current_song_artist, current_song_id, current_song_album_art, current_song_duration_ms, current_song_progress_ms, current_song_updated_at';
+    const SONG_COLS = "current_song_name, current_song_artist, current_song_id, current_song_album_art, current_song_duration_ms, current_song_progress_ms, current_song_updated_at";
 
     const syncSong = async () => {
-      const { data } = await supabase
-        .from('users')
-        .select(SONG_COLS)
-        .eq('id', userId)
-        .single();
+      const { data } = await supabase.from("users").select(SONG_COLS).eq("id", userId).single();
       if (data) setProfile(prev => prev ? { ...prev, ...data } : null);
     };
 
-    // Fast path: instant update if realtime is configured for the users table
     const ch = supabase
       .channel(`profile-song:${userId}`)
-      .on('postgres_changes', {
-        event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${userId}`,
+      .on("postgres_changes", {
+        event: "UPDATE", schema: "public", table: "users", filter: `id=eq.${userId}`,
       }, (payload) => {
         setProfile(prev => prev ? { ...prev, ...(payload.new as Partial<OtherUserProfile>) } : null);
       })
       .subscribe();
 
-    // Fallback: poll every 5 seconds so it's always live
     const pollId = setInterval(syncSong, 5_000);
-
-    return () => {
-      supabase.removeChannel(ch);
-      clearInterval(pollId);
-    };
+    return () => { supabase.removeChannel(ch); clearInterval(pollId); };
   }, [userId]);
 
   const loadProfile = async () => {
@@ -248,7 +291,13 @@ export default function UserProfileScreen() {
 
       const { data, error } = await supabase
         .from("users")
-        .select("id, username, display_name, bio, is_verified, followers_count, following_count, avatar_url, banner_url, current_song_name, current_song_artist, current_song_id, current_song_album_art, current_song_duration_ms, current_song_progress_ms, current_song_updated_at, top_genres, account_type")
+        .select(
+          "id, username, display_name, bio, is_verified, followers_count, following_count, " +
+          "avatar_url, banner_color, banner_image_url, banner_shape, banner_shape_color, " +
+          "current_song_name, current_song_artist, current_song_id, current_song_album_art, " +
+          "current_song_duration_ms, current_song_progress_ms, current_song_updated_at, " +
+          "top_genres, account_type, pinned_song_id, pinned_song_name, pinned_song_artist, pinned_song_album_art, social_links"
+        )
         .eq("id", userId)
         .single<OtherUserProfile>();
 
@@ -322,6 +371,13 @@ export default function UserProfileScreen() {
     );
   }
 
+  // Social links visible in banner (priority order, up to 3 or 2+overflow)
+  const linkedPlatforms = BANNER_PLATFORM_PRIORITY
+    .map(k => SOCIAL_PLATFORMS.find(p => p.key === k)!)
+    .filter(p => !!(profile.social_links?.[p.key]));
+  const visibleSocial  = linkedPlatforms.slice(0, linkedPlatforms.length > 3 ? 2 : 3);
+  const socialOverflow = linkedPlatforms.length - visibleSocial.length;
+
   return (
     <View style={s.screen}>
       <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
@@ -332,32 +388,62 @@ export default function UserProfileScreen() {
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent}>
 
-          {/* ── Profile card ─────────────────────────────────── */}
+          {/* ── Profile card ──────────────────────────────────── */}
           <View style={s.card}>
 
             {/* Banner */}
             <View style={s.bannerWrap}>
-              <LinearGradient
-                colors={["#3D0C00", "#CC4200", "#FF6C1A", "#CC4200", "#3D0C00"]}
-                locations={[0, 0.25, 0.5, 0.75, 1]}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={StyleSheet.absoluteFill}
-              />
+              {profile.banner_image_url ? (
+                <Image source={{ uri: profile.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              ) : profile.banner_color ? (
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: profile.banner_color }]} />
+              ) : (
+                <LinearGradient
+                  colors={["#3D0C00", "#CC4200", "#FF6C1A", "#CC4200", "#3D0C00"]}
+                  locations={[0, 0.25, 0.5, 0.75, 1]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              )}
+
+              {profile.banner_shape && !profile.banner_image_url && (
+                <View style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]} pointerEvents="none">
+                  <BannerShape shape={profile.banner_shape} color={profile.banner_shape_color ?? "#ffffff"} size={72} />
+                </View>
+              )}
+
               <LinearGradient
                 colors={["transparent", "rgba(22,22,24,0.55)"]}
                 style={StyleSheet.absoluteFill}
+                pointerEvents="none"
               />
-              <View style={s.bannerGlow} />
 
-              {/* Action buttons — only for other users */}
-              {!isOwnProfile && (
+              {/* Banner actions */}
+              {!isOwnProfile ? (
                 <View style={s.bannerActions}>
+                  {visibleSocial.map(p => (
+                    <TouchableOpacity
+                      key={p.key}
+                      style={s.socialBtn}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        const url = profile.social_links?.[p.key];
+                        if (url) Linking.openURL(url).catch(() => {});
+                      }}
+                    >
+                      <FontAwesome5 name={p.icon} size={15} color={p.color} />
+                    </TouchableOpacity>
+                  ))}
+                  {socialOverflow > 0 && (
+                    <View style={[s.socialBtn, { backgroundColor: "rgba(255,255,255,0.18)" }]}>
+                      <Text style={{ fontSize: 11, fontWeight: "800", color: "#fff" }}>+{socialOverflow}</Text>
+                    </View>
+                  )}
                   <TouchableOpacity style={s.dmBtn} activeOpacity={0.85} onPress={handleDM}>
                     <Ionicons name="chatbubble-outline" size={13} color="#fff" />
                     <Text style={s.dmBtnText}>Message</Text>
                   </TouchableOpacity>
-
                   <TouchableOpacity
                     style={[s.followBtn, isFollowing && s.followingBtn]}
                     activeOpacity={0.85}
@@ -369,10 +455,7 @@ export default function UserProfileScreen() {
                     </Text>
                   </TouchableOpacity>
                 </View>
-              )}
-
-              {/* Own profile — show edit button */}
-              {isOwnProfile && (
+              ) : (
                 <View style={s.bannerActions}>
                   <TouchableOpacity style={s.editBtn} activeOpacity={0.85}>
                     <Text style={s.editBtnText}>Edit Profile</Text>
@@ -381,7 +464,7 @@ export default function UserProfileScreen() {
               )}
             </View>
 
-            {/* Avatar */}
+            {/* Avatar — overlaps banner bottom */}
             <View style={[s.avatarRow, { marginTop: -AVATAR_OVERLAP }]}>
               {profile.avatar_url ? (
                 <Image source={{ uri: profile.avatar_url }} style={s.avatarImg} />
@@ -410,9 +493,7 @@ export default function UserProfileScreen() {
 
               <Text style={s.handle}>@{profile.username}</Text>
 
-              {!!profile.bio && (
-                <Text style={s.bio}>{profile.bio}</Text>
-              )}
+              {!!profile.bio && <Text style={s.bio}>{profile.bio}</Text>}
 
               <View style={s.statsRow}>
                 <TouchableOpacity style={s.statBtn}>
@@ -425,6 +506,31 @@ export default function UserProfileScreen() {
                   <Text style={s.statLabel}> Followers</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* Pinned song — tap to preview */}
+              {!!profile.pinned_song_name && (
+                <TouchableOpacity
+                  style={s.pinnedRow}
+                  activeOpacity={0.8}
+                  onPress={() => profile.pinned_song_id && setPinnedPreviewOpen(true)}
+                >
+                  {profile.pinned_song_album_art ? (
+                    <Image source={{ uri: profile.pinned_song_album_art }} style={s.pinnedArt} />
+                  ) : (
+                    <View style={[s.pinnedArt, s.pinnedArtFallback]}>
+                      <FontAwesome5 name="music" size={12} color="rgba(255,255,255,0.3)" />
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.pinnedLabel}>PINNED</Text>
+                    <Text style={s.pinnedTrack} numberOfLines={1}>{profile.pinned_song_name}</Text>
+                    {!!profile.pinned_song_artist && (
+                      <Text style={s.pinnedArtist} numberOfLines={1}>{profile.pinned_song_artist}</Text>
+                    )}
+                  </View>
+                  <FontAwesome5 name="thumbtack" size={12} color="#FF6C1A" />
+                </TouchableOpacity>
+              )}
 
               {/* Top genres */}
               {(profile.top_genres?.length ?? 0) > 0 && (
@@ -439,7 +545,7 @@ export default function UserProfileScreen() {
             </View>
           </View>
 
-          {/* ── Now Playing card ─────────────────────────────── */}
+          {/* ── Now Playing card ──────────────────────────────── */}
           {!!profile.current_song_name && (
             <NowListeningCard
               song={{
@@ -455,17 +561,37 @@ export default function UserProfileScreen() {
             />
           )}
 
+
         </ScrollView>
       </SafeAreaView>
+
+      {/* Pinned song preview sheet */}
+      <SongPreviewSheet
+        visible={pinnedPreviewOpen}
+        onClose={() => setPinnedPreviewOpen(false)}
+        song={
+          profile.pinned_song_id
+            ? {
+                id:       profile.pinned_song_id,
+                name:     profile.pinned_song_name ?? "",
+                artist:   profile.pinned_song_artist ?? "",
+                albumArt: profile.pinned_song_album_art ?? null,
+              }
+            : null
+        }
+        accessToken={viewerToken}
+      />
+
     </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#0D0D0D" },
+  screen:        { flex: 1, backgroundColor: "#0D0D0D" },
   scrollContent: { paddingHorizontal: 16, paddingTop: 1, paddingBottom: 40 },
 
-  backBtn: { paddingHorizontal: 18, paddingVertical: 10 },
+  backBtn:  { paddingHorizontal: 18, paddingVertical: 10 },
   backIcon: { fontSize: 32, color: "#fff", fontWeight: "300", lineHeight: 36 },
 
   // ── Card ──────────────────────────────────────────────────
@@ -478,88 +604,58 @@ const s = StyleSheet.create({
   },
 
   // ── Banner ────────────────────────────────────────────────
-  bannerWrap: { height: BANNER_H, overflow: "hidden", position: "relative" },
-  bannerGlow: {
-    position: "absolute",
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    backgroundColor: "#FF7030",
-    opacity: 0.38,
-    alignSelf: "center",
-    top: -100,
-  },
+  bannerWrap:    { height: BANNER_H, overflow: "hidden" },
   bannerActions: {
-    position: "absolute",
-    bottom: 14,
-    right: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    position: "absolute", bottom: 14, right: 16,
+    flexDirection: "row", alignItems: "center", gap: 8,
   },
 
-  // DM button
+  socialBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: "rgba(0,0,0,0.38)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.2)",
+    alignItems: "center", justifyContent: "center",
+  },
+
   dmBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    height: 34,
-    borderRadius: 17,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 14, height: 34, borderRadius: 17,
     backgroundColor: "rgba(0,0,0,0.4)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.22)",
   },
   dmBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
 
-  // Follow button
   followBtn: {
-    paddingHorizontal: 20,
-    height: 34,
-    borderRadius: 17,
+    paddingHorizontal: 20, height: 34, borderRadius: 17,
     backgroundColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: "center", justifyContent: "center",
   },
   followingBtn: {
     backgroundColor: "rgba(255,255,255,0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.22)",
   },
-  followBtnText: { fontSize: 14, fontWeight: "700", color: "#111" },
+  followBtnText:    { fontSize: 14, fontWeight: "700", color: "#111" },
   followingBtnText: { color: "#fff" },
 
-  // Edit Profile button (own profile)
   editBtn: {
-    paddingHorizontal: 16,
-    height: 34,
-    borderRadius: 17,
+    paddingHorizontal: 16, height: 34, borderRadius: 17,
     backgroundColor: "rgba(255,255,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    alignItems: "center",
-    justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.22)",
+    alignItems: "center", justifyContent: "center",
   },
   editBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 
   // ── Avatar ────────────────────────────────────────────────
   avatarRow: { paddingHorizontal: 18, paddingBottom: 12 },
   avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: 18,
+    width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: 18,
     backgroundColor: "#FF6B35",
-    borderWidth: 3,
-    borderColor: "#161618",
-    alignItems: "center",
-    justifyContent: "center",
+    borderWidth: 3, borderColor: "#161618",
+    alignItems: "center", justifyContent: "center",
   },
   avatarImg: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: 18,
-    borderWidth: 3,
-    borderColor: "#161618",
+    width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: 18,
+    borderWidth: 3, borderColor: "#161618",
   },
   avatarInitials: { fontSize: 28, fontWeight: "800", color: "#fff" },
 
@@ -576,50 +672,61 @@ const s = StyleSheet.create({
   artistBadge: {
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
     backgroundColor: "rgba(171,0,255,0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(171,0,255,0.4)",
+    borderWidth: 1, borderColor: "rgba(171,0,255,0.4)",
   },
   artistBadgeText: { fontSize: 10, fontWeight: "800", color: "#AB00FF" },
   handle: { fontSize: 14, color: "rgba(255,255,255,0.4)", marginBottom: 14 },
-  bio: { fontSize: 14, color: "rgba(255,255,255,0.8)", lineHeight: 22, marginBottom: 16 },
+  bio:    { fontSize: 14, color: "rgba(255,255,255,0.8)", lineHeight: 22, marginBottom: 16 },
 
   statsRow: { flexDirection: "row", alignItems: "baseline", marginBottom: 16 },
-  statBtn: { flexDirection: "row", alignItems: "baseline" },
-  statNum: { fontSize: 15, fontWeight: "800", color: "#fff" },
-  statLabel: { fontSize: 14, color: "rgba(255,255,255,0.38)" },
+  statBtn:  { flexDirection: "row", alignItems: "baseline" },
+  statNum:  { fontSize: 15, fontWeight: "800", color: "#fff" },
+  statLabel:{ fontSize: 14, color: "rgba(255,255,255,0.38)" },
 
+  // ── Pinned song ───────────────────────────────────────────
+  pinnedRow: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: "rgba(255,108,26,0.09)",
+    borderRadius: 14, padding: 12,
+    borderWidth: 1, borderColor: "rgba(255,108,26,0.18)",
+    marginBottom: 16,
+  },
+  pinnedArt: { width: 44, height: 44, borderRadius: 10 },
+  pinnedArtFallback: {
+    width: 44, height: 44, borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center", justifyContent: "center",
+  },
+  pinnedLabel:  { fontSize: 10, fontWeight: "700", color: "#FF6C1A", letterSpacing: 0.8, marginBottom: 2 },
+  pinnedTrack:  { fontSize: 14, fontWeight: "700", color: "#fff" },
+  pinnedArtist: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 1 },
+
+  // ── Genres ────────────────────────────────────────────────
   genreRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   genreChip: {
     paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20,
     backgroundColor: "rgba(171,0,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(171,0,255,0.28)",
+    borderWidth: 1, borderColor: "rgba(171,0,255,0.28)",
   },
   genreText: { fontSize: 12, fontWeight: "600", color: "#AB00FF" },
 
-  // ── Now Playing card (matches profile.tsx NowPlayingCard) ─────────────────
-  npCard: {
-    marginTop: 12,
-    borderRadius: 20,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(29,185,84,0.2)",
-    padding: 16,
+  // ── Now Listening card ────────────────────────────────────
+  nowPlayingCard: {
+    marginTop: 12, borderRadius: 20, overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
+    padding: 16, gap: 14,
   },
-  npHeader:      { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
-  npDot:         { width: 7, height: 7, borderRadius: 4, backgroundColor: "#1DB954" },
-  npHeaderLabel: { flex: 1, fontSize: 10, fontWeight: "800", letterSpacing: 1.1, color: "rgba(255,255,255,0.35)" },
-  npBody:        { flexDirection: "row", gap: 14, alignItems: "center" },
+  npBody:            { flexDirection: "row", gap: 14, alignItems: "center" },
   npAlbumArt:        { width: 58, height: 58, borderRadius: 10 },
   npAlbumArtFallback:{ backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center" },
-  npInfo:        { flex: 1, gap: 2 },
-  npTrack:       { fontSize: 15, fontWeight: "700", color: "#fff", letterSpacing: -0.2 },
-  npArtist:      { fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 8 },
-  npProgressTrack: { height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.1)", overflow: "hidden" },
-  npProgressFill:  { height: "100%" as any, backgroundColor: "#1DB954", borderRadius: 2 },
-  npProgressTimes: { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
-  npTimeText:      { fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: "600" },
-  npBtnRow:        { flexDirection: "row", gap: 8, marginTop: 10 },
+  npInfo:            { flex: 1, gap: 3 },
+  npTrack:           { fontSize: 15, fontWeight: "700", color: "#fff", letterSpacing: -0.2 },
+  npArtist:          { fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 10 },
+  npProgressTrack:   { height: 3, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 2, marginBottom: 5 },
+  npProgressFill:    { height: 3, backgroundColor: "#ffffff", borderRadius: 2 },
+  npProgressTimes:   { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
+  npTimeText:        { fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: "600" },
+  npBtnRow:          { flexDirection: "row", gap: 8, marginTop: 10 },
   npOpenBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
     paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10,

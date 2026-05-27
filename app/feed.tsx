@@ -22,6 +22,7 @@ import {
   Linking,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { Audio } from "expo-av";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRef, useState, useEffect, createContext, useContext } from "react";
 import { LinearGradient } from "expo-linear-gradient";
@@ -45,9 +46,10 @@ import {
   type GroupChat, type CommunityItem, type UserProfile,
 } from "./data/mock";
 
-import { openSpotifyLink, saveTrackToLiked, searchSpotifyTracks, type SpotifyTrackResult } from '../lib/spotify'
+import { openSpotifyLink, saveTrackToLiked, searchSpotifyTracks, getCurrentlyPlaying, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, type SpotifyTrackResult, type SpotifyPlaylist } from '../lib/spotify'
 import { useNowPlaying, type NowPlayingTrack } from '../lib/useNowPlaying'
 import { useLocalSearchParams, useRouter } from 'expo-router'
+import { SongPreviewSheet } from '../components/SongPreviewSheet'
 import {
   type ConversationInfo, type DbMessage,
   getConversations, getMessages,
@@ -85,11 +87,12 @@ const SOCIAL_PLATFORMS: SocialPlatform[] = [
   { key: "tiktok",     label: "TikTok",      icon: "tiktok",      color: "#ffffff", placeholder: "tiktok.com/@yourname" },
   { key: "youtube",    label: "YouTube",     icon: "youtube",     color: "#ffffff", placeholder: "youtube.com/@channel" },
   { key: "soundcloud", label: "SoundCloud",  icon: "soundcloud",  color: "#ffffff", placeholder: "soundcloud.com/yourname" },
+  { key: "snapchat",   label: "Snapchat",    icon: "snapchat",    color: "#ffffff", placeholder: "snapchat.com/yourname" },
   { key: "facebook",   label: "Facebook",    icon: "facebook",    color: "#ffffff", placeholder: "facebook.com/yourname" },
 ];
 
 // Order in which platforms are shown on the profile banner (most relevant first)
-const BANNER_PLATFORM_PRIORITY = ["instagram", "x", "youtube", "tiktok", "soundcloud", "facebook"];
+const BANNER_PLATFORM_PRIORITY = ["instagram", "x", "youtube", "tiktok", "snapchat", "soundcloud", "facebook"];
 
 // Lets any component inside a post card open the detail view without prop-drilling through card types
 const OpenDetailCtx = createContext<(() => void) | undefined>(undefined);
@@ -1034,6 +1037,11 @@ type Comment = {
   likesCount: number;
   parentCommentId: string | null;
   time: string;
+  // Optional song attachment
+  songId: string | null;
+  songName: string | null;
+  songArtist: string | null;
+  songAlbumArt: string | null;
 };
 
 function rowToComment(row: any): Comment {
@@ -1047,15 +1055,19 @@ function rowToComment(row: any): Comment {
     username:        author?.username   ?? "user",
     displayName:     author?.display_name ?? null,
     avatarUrl:       author?.avatar_url   ?? null,
-    text:            row.text,
+    text:            row.text ?? "",
     likesCount:      row.likes_count    ?? 0,
     parentCommentId: row.parent_comment_id ?? null,
     time,
+    songId:      row.song_id        ?? null,
+    songName:    row.song_name      ?? null,
+    songArtist:  row.song_artist    ?? null,
+    songAlbumArt:row.song_album_art ?? null,
   };
 }
 
 const COMMENT_SELECT =
-  "id, post_id, user_id, parent_comment_id, text, likes_count, created_at, users!user_id(id, username, display_name, avatar_url)";
+  "id, post_id, user_id, parent_comment_id, text, likes_count, created_at, song_id, song_name, song_artist, song_album_art, users!user_id(id, username, display_name, avatar_url)";
 
 // ─── Comment row (swipeable, double-tap to like) ───────────────────────────────
 
@@ -1145,10 +1157,31 @@ function CommentRow({
             <Text style={styles.commentHandle}>{comment.displayName ?? `@${comment.username}`}</Text>
             <Text style={styles.commentTime}>{comment.time}</Text>
           </View>
-          {comment.parentCommentId && (
-            <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 2 }}>↩ reply</Text>
+          {!!comment.text && <Text style={styles.commentText}>{comment.text}</Text>}
+          {/* Song attachment */}
+          {comment.songName && (
+            <TouchableOpacity
+              style={styles.commentSongCard}
+              activeOpacity={0.8}
+              onPress={() => comment.songId
+                ? openSpotifyLink(`spotify:track:${comment.songId}`, `https://open.spotify.com/track/${comment.songId}`)
+                : undefined
+              }
+            >
+              {comment.songAlbumArt ? (
+                <Image source={{ uri: comment.songAlbumArt }} style={styles.commentSongArt} />
+              ) : (
+                <View style={[styles.commentSongArt, styles.commentSongArtFallback]}>
+                  <FontAwesome5 name="music" size={9} color="rgba(255,255,255,0.3)" />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.commentSongName} numberOfLines={1}>{comment.songName}</Text>
+                {comment.songArtist ? <Text style={styles.commentSongArtist} numberOfLines={1}>{comment.songArtist}</Text> : null}
+              </View>
+              <FontAwesome5 name="spotify" size={11} color="#1DB954" />
+            </TouchableOpacity>
           )}
-          <Text style={styles.commentText}>{comment.text}</Text>
         </TouchableOpacity>
 
         {/* Like button */}
@@ -1165,6 +1198,57 @@ function CommentRow({
           </TouchableOpacity>
         </Animated.View>
       </Animated.View>
+    </View>
+  );
+}
+
+// ─── Threaded comment (parent + its replies) ─────────────────────────────────
+
+const REPLIES_COLLAPSED_MAX = 3;
+
+function ThreadedCommentRow({
+  comment,
+  replies,
+  currentUserId,
+  onReply,
+}: {
+  comment: Comment;
+  replies: Comment[];
+  currentUserId: string | null;
+  onReply: (c: Comment) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const visible   = showAll ? replies : replies.slice(0, REPLIES_COLLAPSED_MAX);
+  const hiddenCnt = replies.length - REPLIES_COLLAPSED_MAX;
+
+  return (
+    <View>
+      <CommentRow comment={comment} currentUserId={currentUserId} onReply={onReply} />
+      {visible.length > 0 && (
+        <View style={styles.repliesBlock}>
+          {/* Vertical connector line */}
+          <View style={styles.threadLine} />
+          <View style={{ flex: 1 }}>
+            {visible.map((reply, idx) => (
+              <View key={reply.id} style={[styles.replyRow, idx > 0 && { marginTop: 6 }]}>
+                <CommentRow comment={reply} currentUserId={currentUserId} onReply={onReply} />
+              </View>
+            ))}
+            {!showAll && hiddenCnt > 0 && (
+              <TouchableOpacity style={styles.showMoreReplies} onPress={() => setShowAll(true)} activeOpacity={0.7}>
+                <View style={styles.showMoreDots}>
+                  <View style={styles.showMoreDot} />
+                  <View style={styles.showMoreDot} />
+                  <View style={styles.showMoreDot} />
+                </View>
+                <Text style={styles.showMoreRepliesText}>
+                  Show {hiddenCnt} more {hiddenCnt === 1 ? "reply" : "replies"}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -1279,25 +1363,28 @@ function QuickReplyOverlay({
   onOpenDetail: () => void;
 }) {
   const [text, setText] = useState("");
-  const [menuVisible, setMenuVisible] = useState(false);
   const [sending, setSending] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<{ initials: string; avatarUrl: string | null } | null>(null);
+  const [selectedSong, setSelectedSong] = useState<PinnedSong | null>(null);
+  const [songPickerVisible, setSongPickerVisible] = useState(false);
+  const [spotifyToken, setSpotifyToken] = useState<string | null>(null);
   const backdropAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
   const inputBottomAnim = useRef(new Animated.Value(BOTTOM_INSET + 16)).current;
 
   useEffect(() => {
-    // Fetch current user profile for avatar
+    // Fetch current user profile for avatar + Spotify token
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setCurrentUserId(user.id);
-      const { data } = await supabase
-        .from("users")
-        .select("username, display_name, avatar_url")
-        .eq("id", user.id)
-        .single();
+      const [tok, profileRes] = await Promise.all([
+        getValidSpotifyToken(user.id),
+        supabase.from("users").select("username, display_name, avatar_url").eq("id", user.id).single(),
+      ]);
+      setSpotifyToken(tok);
+      const data = profileRes.data;
       if (data) {
         const name: string = data.display_name ?? data.username ?? "?";
         setCurrentUser({
@@ -1345,14 +1432,26 @@ function QuickReplyOverlay({
 
   const handleSend = async () => {
     const trimmed = text.trim();
-    if (!trimmed || !currentUserId || sending) return;
+    if ((!trimmed && !selectedSong) || !currentUserId || sending) return;
     setSending(true);
+    const song = selectedSong;
     const { error } = await supabase
       .from("post_comments")
-      .insert({ post_id: post.id, user_id: currentUserId, text: trimmed });
+      .insert({
+        post_id: post.id,
+        user_id: currentUserId,
+        text: trimmed,
+        ...(song && {
+          song_id:        song.id,
+          song_name:      song.name,
+          song_artist:    song.artist,
+          song_album_art: song.albumArt,
+        }),
+      });
     setSending(false);
     if (!error) {
       setText("");
+      setSelectedSong(null);
       handleClose();
     }
   };
@@ -1389,12 +1488,33 @@ function QuickReplyOverlay({
 
       {/* Reply input — floats above keyboard */}
       <Animated.View style={[styles.qrInputRow, { bottom: inputBottomAnim }]} pointerEvents="box-none">
+        {/* Attached song card */}
+        {selectedSong && (
+          <View style={styles.qrSongCard}>
+            {selectedSong.albumArt ? (
+              <Image source={{ uri: selectedSong.albumArt }} style={styles.qrSongArt} />
+            ) : (
+              <View style={[styles.qrSongArt, styles.qrSongArtFallback]}>
+                <FontAwesome5 name="music" size={9} color="rgba(255,255,255,0.3)" />
+              </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.qrSongName} numberOfLines={1}>{selectedSong.name}</Text>
+              {selectedSong.artist ? <Text style={styles.qrSongArtist} numberOfLines={1}>{selectedSong.artist}</Text> : null}
+            </View>
+            <FontAwesome5 name="spotify" size={11} color="#1DB954" style={{ marginRight: 4 }} />
+            <TouchableOpacity onPress={() => setSelectedSong(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <FontAwesome5 name="times" size={12} color="rgba(255,255,255,0.45)" />
+            </TouchableOpacity>
+          </View>
+        )}
+
         <Pressable style={styles.qrInputGlass} onPress={() => {}}>
-          {/* + button — opens the same "Add to post" sheet */}
+          {/* + button — opens song picker */}
           <TouchableOpacity
             style={styles.qrPlusBtn}
             activeOpacity={0.8}
-            onPress={() => setMenuVisible(true)}
+            onPress={() => setSongPickerVisible(true)}
           >
             <Text style={styles.qrPlusBtnIcon}>+</Text>
           </TouchableOpacity>
@@ -1422,8 +1542,8 @@ function QuickReplyOverlay({
             />
           </View>
           <TouchableOpacity
-            style={[styles.qrSend, (!text.trim() || sending) && { opacity: 0.35 }]}
-            disabled={!text.trim() || sending}
+            style={[styles.qrSend, ((!text.trim() && !selectedSong) || sending) && { opacity: 0.35 }]}
+            disabled={(!text.trim() && !selectedSong) || sending}
             activeOpacity={0.8}
             onPress={handleSend}
           >
@@ -1435,8 +1555,15 @@ function QuickReplyOverlay({
         </Pressable>
       </Animated.View>
 
-      {/* Action sheet — opens on top of this overlay */}
-      <ComposerActionMenu visible={menuVisible} onClose={() => setMenuVisible(false)} />
+      {/* Song picker — absoluteFill overlay inside this Modal */}
+      <PinnedSongOverlay
+        visible={songPickerVisible}
+        onClose={() => setSongPickerVisible(false)}
+        onSelect={(song) => { setSelectedSong(song); setSongPickerVisible(false); }}
+        accessToken={spotifyToken}
+        ctaLabel="Attach to Reply"
+        ctaIcon="music"
+      />
     </Modal>
   );
 }
@@ -1725,6 +1852,32 @@ type DiscoverUser = {
   display_name: string | null;
   avatar_url: string | null;
   followers_count: number;
+  following_count: number | null;
+  is_verified: boolean | null;
+  bio: string | null;
+  banner_color: string | null;
+  banner_image_url: string | null;
+  banner_shape: string | null;
+  banner_shape_color: string | null;
+  pinned_song_name: string | null;
+  pinned_song_artist: string | null;
+  pinned_song_album_art: string | null;
+  top_genres: string[] | null;
+  account_type: string | null;
+};
+
+type ArtistResult = {
+  id: string;
+  name: string;
+  slug: string;
+  bio: string | null;
+  is_verified: boolean;
+  avatar_url: string | null;
+  banner_image_url: string | null;
+  banner_color: string | null;
+  genres: string[];
+  monthly_listeners: number | null;
+  label: string | null;
 };
 
 function DiscoverView() {
@@ -1736,29 +1889,49 @@ function DiscoverView() {
   const [likedRecs, setLikedRecs]             = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing]           = useState(false);
 
-  // ── People search ──────────────────────────────────────────────────────────
-  const [userResults, setUserResults]   = useState<DiscoverUser[]>([]);
-  const [userFollowing, setUserFollowing] = useState<Set<string>>(new Set());
-  const [userLoading, setUserLoading]   = useState(false);
+  // ── People + Artist search ─────────────────────────────────────────────────
+  const [userResults,    setUserResults]    = useState<DiscoverUser[]>([]);
+  const [userFollowing,  setUserFollowing]  = useState<Set<string>>(new Set());
+  const [userLoading,    setUserLoading]    = useState(false);
+  const [artistResults,  setArtistResults]  = useState<ArtistResult[]>([]);
+  const [artistLoading,  setArtistLoading]  = useState(false);
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (searchDebounce.current) clearTimeout(searchDebounce.current);
     const q = searchText.trim();
-    if (q.length < 2) { setUserResults([]); setUserLoading(false); return; }
+    if (q.length < 2) {
+      setUserResults([]); setUserLoading(false);
+      setArtistResults([]); setArtistLoading(false);
+      return;
+    }
     setUserLoading(true);
+    setArtistLoading(true);
     searchDebounce.current = setTimeout(async () => {
       const { data: { user: me } } = await supabase.auth.getUser();
-      const { data } = await supabase
-        .from('users')
-        .select('id, username, display_name, avatar_url, followers_count')
-        .or(`username.ilike.%${q}%,display_name.ilike.%${q}%`)
-        .neq('id', me?.id ?? '')          // don't show yourself
-        .order('followers_count', { ascending: false })
-        .limit(20);
-      const results = (data ?? []) as DiscoverUser[];
+
+      // Run both queries in parallel
+      const [usersRes, artistsRes] = await Promise.all([
+        supabase
+          .from('users')
+          .select('id, username, display_name, avatar_url, followers_count, following_count, is_verified, bio, banner_color, banner_image_url, banner_shape, banner_shape_color, pinned_song_name, pinned_song_artist, pinned_song_album_art, top_genres, account_type')
+          .or(`username.ilike.%${q}%,display_name.ilike.%${q}%`)
+          .neq('id', me?.id ?? '')
+          .order('followers_count', { ascending: false })
+          .limit(20),
+        supabase
+          .from('artists')
+          .select('id, name, slug, bio, is_verified, avatar_url, banner_image_url, banner_color, genres, monthly_listeners, label')
+          .ilike('name', `%${q}%`)
+          .order('monthly_listeners', { ascending: false })
+          .limit(10),
+      ]);
+
+      const results = (usersRes.data ?? []) as DiscoverUser[];
       setUserResults(results);
-      // Batch-check which results are already followed
+      setArtistResults((artistsRes.data ?? []) as ArtistResult[]);
+
+      // Batch-check which user results are already followed
       if (results.length > 0 && me) {
         const ids = results.map(u => u.id);
         const { data: fData } = await supabase
@@ -1768,7 +1941,9 @@ function DiscoverView() {
           .in('following_id', ids);
         setUserFollowing(new Set((fData ?? []).map((f: { following_id: string }) => f.following_id)));
       }
+
       setUserLoading(false);
+      setArtistLoading(false);
     }, 350);
     return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
   }, [searchText]);
@@ -1799,6 +1974,7 @@ function DiscoverView() {
   const noResults       = q && !userLoading && userResults.length === 0 && filteredArtists.length === 0 && filteredMeets.length === 0 && filteredRecs.length === 0;
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <ScrollView
       style={{ flex: 1 }}
       contentContainerStyle={ds.scrollContent}
@@ -1843,6 +2019,100 @@ function DiscoverView() {
         })}
       </ScrollView>
 
+      {/* ── Artist search results ─────────────────────────────── */}
+      {showPeople && (
+        <View style={{ marginBottom: 24, marginHorizontal: 16 }}>
+          <View style={ds.sectionHeader}>
+            <Text style={ds.sectionTitle}>Artists</Text>
+          </View>
+          {artistLoading ? (
+            <ActivityIndicator color="#AB00FF" style={{ marginTop: 18 }} />
+          ) : artistResults.length === 0 ? (
+            <Text style={{ color: "rgba(255,255,255,0.28)", fontSize: 14, marginTop: 10, paddingHorizontal: 4 }}>
+              No artists found for "{searchText.trim()}"
+            </Text>
+          ) : (
+            artistResults.map(a => {
+              const fmtListeners = (n: number | null) => {
+                if (!n) return null;
+                if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M listeners`;
+                if (n >= 1_000)     return `${(n / 1_000).toFixed(0)}K listeners`;
+                return `${n} listeners`;
+              };
+              return (
+                <TouchableOpacity
+                  key={a.id}
+                  style={pplStyles.artistCard}
+                  activeOpacity={0.88}
+                  onPress={() => router.push({ pathname: '/artist-profile', params: { artistId: a.id } })}
+                >
+                  {/* Banner / avatar strip */}
+                  <View style={pplStyles.artistBanner}>
+                    {a.banner_image_url ? (
+                      <Image source={{ uri: a.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    ) : a.banner_color ? (
+                      <View style={[StyleSheet.absoluteFill, { backgroundColor: a.banner_color }]} />
+                    ) : (
+                      <LinearGradient
+                        colors={["#3D0C00", "#CC4200", "#FF6C1A", "#CC4200", "#3D0C00"]}
+                        locations={[0, 0.25, 0.5, 0.75, 1]}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                    )}
+                    <LinearGradient
+                      colors={["transparent", "rgba(22,22,24,0.6)"]}
+                      style={StyleSheet.absoluteFill}
+                      pointerEvents="none"
+                    />
+                  </View>
+
+                  {/* Avatar */}
+                  <View style={pplStyles.artistAvatarRow}>
+                    {a.avatar_url ? (
+                      <Image source={{ uri: a.avatar_url }} style={pplStyles.artistAvatar} />
+                    ) : (
+                      <View style={[pplStyles.artistAvatar, pplStyles.artistAvatarFallback]}>
+                        <FontAwesome5 name="microphone" size={18} color="rgba(255,255,255,0.3)" />
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Info */}
+                  <View style={pplStyles.artistInfo}>
+                    <View style={pplStyles.nameRow}>
+                      <Text style={pplStyles.name} numberOfLines={1}>{a.name}</Text>
+                      {a.is_verified && (
+                        <View style={pplStyles.verifiedBadge}>
+                          <Text style={pplStyles.verifiedText}>✓</Text>
+                        </View>
+                      )}
+                      <View style={pplStyles.artistBadge}>
+                        <Text style={pplStyles.artistBadgeText}>Artist</Text>
+                      </View>
+                    </View>
+                    {!!fmtListeners(a.monthly_listeners) && (
+                      <Text style={pplStyles.username} numberOfLines={1}>{fmtListeners(a.monthly_listeners)}</Text>
+                    )}
+                    {!!a.bio && <Text style={pplStyles.bio} numberOfLines={2}>{a.bio}</Text>}
+                    {a.genres.length > 0 && (
+                      <View style={pplStyles.genreRow}>
+                        {a.genres.slice(0, 3).map(g => (
+                          <View key={g} style={pplStyles.genreChip}>
+                            <Text style={pplStyles.genreText} numberOfLines={1}>{g}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </View>
+      )}
+
       {/* ── People search results ─────────────────────────────── */}
       {showPeople && (
         <View style={{ marginBottom: 28, marginHorizontal: 16 }}>
@@ -1861,38 +2131,110 @@ function DiscoverView() {
               const initials = name.trim().split(/\s+/).map((p: string) => p[0]?.toUpperCase() ?? '').slice(0, 2).join('');
               const following = userFollowing.has(u.id);
               return (
-                <View key={u.id} style={pplStyles.row}>
-                  <TouchableOpacity activeOpacity={0.85} onPress={() => router.push({ pathname: '/user-profile', params: { userId: u.id } })}>
-                    {u.avatar_url ? (
-                      <Image source={{ uri: u.avatar_url }} style={pplStyles.avatar} />
+                <TouchableOpacity
+                  key={u.id}
+                  style={pplStyles.card}
+                  activeOpacity={0.92}
+                  onPress={() => router.push({
+                    pathname: '/user-profile',
+                    params: { userId: u.id },
+                  })}
+                >
+                  {/* Banner */}
+                  <View style={pplStyles.bannerWrap}>
+                    {u.banner_image_url ? (
+                      <Image source={{ uri: u.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    ) : u.banner_color ? (
+                      <View style={[StyleSheet.absoluteFill, { backgroundColor: u.banner_color }]} />
                     ) : (
-                      <View style={[pplStyles.avatar, pplStyles.avatarFallback]}>
+                      <LinearGradient
+                        colors={["#3D0C00", "#CC4200", "#FF6C1A", "#CC4200", "#3D0C00"]}
+                        locations={[0, 0.25, 0.5, 0.75, 1]}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                    )}
+                    {u.banner_shape && !u.banner_image_url && (
+                      <View style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]}>
+                        <BannerShape shape={u.banner_shape} color={u.banner_shape_color ?? "#ffffff"} size={36} />
+                      </View>
+                    )}
+                    <View style={pplStyles.bannerFollowWrap}>
+                      <TouchableOpacity
+                        style={[pplStyles.followBtn, following && pplStyles.followingBtn]}
+                        activeOpacity={0.8}
+                        onPress={async () => {
+                          if (following) {
+                            setUserFollowing(prev => { const s = new Set(prev); s.delete(u.id); return s; });
+                            await unfollowUser(u.id);
+                          } else {
+                            setUserFollowing(prev => new Set([...prev, u.id]));
+                            await followUser(u.id);
+                          }
+                        }}
+                      >
+                        <Text style={[pplStyles.followBtnText, following && pplStyles.followingBtnText]}>
+                          {following ? "Following" : "Follow"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Avatar */}
+                  <View style={pplStyles.avatarRow}>
+                    {u.avatar_url ? (
+                      <Image source={{ uri: u.avatar_url }} style={pplStyles.avatarImg} />
+                    ) : (
+                      <View style={pplStyles.avatarFallback}>
                         <Text style={pplStyles.avatarInitials}>{initials}</Text>
                       </View>
                     )}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={{ flex: 1, minWidth: 0 }} activeOpacity={0.85} onPress={() => router.push({ pathname: '/user-profile', params: { userId: u.id } })}>
-                    <Text style={pplStyles.name} numberOfLines={1}>{name}</Text>
+                  </View>
+
+                  {/* Info */}
+                  <View style={pplStyles.info}>
+                    <View style={pplStyles.nameRow}>
+                      <Text style={pplStyles.name} numberOfLines={1}>{name}</Text>
+                      {!!u.is_verified && (
+                        <View style={pplStyles.verifiedBadge}>
+                          <Text style={pplStyles.verifiedText}>✓</Text>
+                        </View>
+                      )}
+                    </View>
                     <Text style={pplStyles.username} numberOfLines={1}>@{u.username}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[pplStyles.followBtn, following && pplStyles.followingBtn]}
-                    activeOpacity={0.8}
-                    onPress={async () => {
-                      if (following) {
-                        setUserFollowing(prev => { const s = new Set(prev); s.delete(u.id); return s; });
-                        await unfollowUser(u.id);
-                      } else {
-                        setUserFollowing(prev => new Set([...prev, u.id]));
-                        await followUser(u.id);
-                      }
-                    }}
-                  >
-                    <Text style={[pplStyles.followBtnText, following && pplStyles.followingBtnText]}>
-                      {following ? "Following" : "Follow"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                    {!!u.bio && <Text style={pplStyles.bio} numberOfLines={2}>{u.bio}</Text>}
+                    <View style={pplStyles.statsRow}>
+                      <Text style={pplStyles.statNum}>{(u.following_count ?? 0).toLocaleString()}</Text>
+                      <Text style={pplStyles.statLabel}> Following  </Text>
+                      <Text style={pplStyles.statNum}>{(u.followers_count ?? 0).toLocaleString()}</Text>
+                      <Text style={pplStyles.statLabel}> Followers</Text>
+                    </View>
+                    {!!u.pinned_song_name && (
+                      <View style={pplStyles.pinnedRow}>
+                        {u.pinned_song_album_art ? (
+                          <Image source={{ uri: u.pinned_song_album_art }} style={pplStyles.pinnedArt} />
+                        ) : (
+                          <View style={pplStyles.pinnedArtFallback}>
+                            <FontAwesome5 name="music" size={9} color="rgba(255,255,255,0.3)" />
+                          </View>
+                        )}
+                        <Text style={pplStyles.pinnedText} numberOfLines={1}>
+                          {u.pinned_song_name}{u.pinned_song_artist ? ` — ${u.pinned_song_artist}` : ""}
+                        </Text>
+                      </View>
+                    )}
+                    {(u.top_genres?.length ?? 0) > 0 && (
+                      <View style={pplStyles.genreRow}>
+                        {u.top_genres!.slice(0, 3).map(g => (
+                          <View key={g} style={pplStyles.genreChip}>
+                            <Text style={pplStyles.genreText} numberOfLines={1}>{g}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
               );
             })
           )}
@@ -2126,6 +2468,7 @@ function DiscoverView() {
         </View>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -2329,6 +2672,7 @@ function MeetsView() {
   const rightCol = filtered.filter((_, i) => i % 2 === 1);
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
     <ScrollView
       style={{ flex: 1 }}
       contentContainerStyle={ms.scrollContent}
@@ -2395,6 +2739,7 @@ function MeetsView() {
         </View>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -2435,31 +2780,119 @@ const ms = StyleSheet.create({
 });
 
 // ─── People search styles (Discover) ─────────────────────────────────────────
+const CARD_AVATAR_SIZE = 52;
+const CARD_AVATAR_OVERLAP = 18;
+const CARD_BANNER_H = 86;
+
 const pplStyles = StyleSheet.create({
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
+  card: {
+    backgroundColor: "#111113",
+    borderRadius: 18,
+    overflow: "hidden",
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
   },
-  avatar: { width: 46, height: 46, borderRadius: 23 },
-  avatarFallback: { backgroundColor: "#AB00FF33", alignItems: "center", justifyContent: "center" },
-  avatarInitials: { fontSize: 16, fontWeight: "800", color: "#AB00FF" },
-  name: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  bannerWrap: { height: CARD_BANNER_H, overflow: "hidden" },
+  bannerFollowWrap: { position: "absolute", bottom: 10, right: 10 },
+  avatarRow: {
+    paddingHorizontal: 14,
+    marginTop: -CARD_AVATAR_OVERLAP,
+    flexDirection: "row",
+    alignItems: "flex-end",
+  },
+  avatarImg: {
+    width: CARD_AVATAR_SIZE, height: CARD_AVATAR_SIZE,
+    borderRadius: 14,
+    borderWidth: 2.5, borderColor: "#111113",
+    backgroundColor: "#1A1A1C",
+  },
+  avatarFallback: {
+    width: CARD_AVATAR_SIZE, height: CARD_AVATAR_SIZE,
+    borderRadius: 14,
+    borderWidth: 2.5, borderColor: "#111113",
+    backgroundColor: "#AB00FF33",
+    alignItems: "center" as const, justifyContent: "center" as const,
+  },
+  avatarInitials: { fontSize: 18, fontWeight: "800" as const, color: "#AB00FF" },
+  info: { paddingHorizontal: 14, paddingBottom: 14, paddingTop: 8 },
+  nameRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6, flexShrink: 1 },
+  name: { fontSize: 15, fontWeight: "700" as const, color: "#fff", flexShrink: 1 },
+  verifiedBadge: {
+    backgroundColor: "#FF6C1A", borderRadius: 8,
+    paddingHorizontal: 5, paddingVertical: 1,
+  },
+  verifiedText: { fontSize: 10, fontWeight: "800" as const, color: "#fff" },
   username: { fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 2 },
+  bio: { fontSize: 13, color: "rgba(255,255,255,0.52)", marginTop: 6, lineHeight: 18 },
+  statsRow: { flexDirection: "row" as const, alignItems: "center" as const, marginTop: 10 },
+  statNum: { fontSize: 13, fontWeight: "700" as const, color: "#fff" },
+  statLabel: { fontSize: 12, color: "rgba(255,255,255,0.38)" },
+  pinnedRow: {
+    flexDirection: "row" as const, alignItems: "center" as const, gap: 7,
+    marginTop: 10,
+    backgroundColor: "rgba(255,108,26,0.08)",
+    borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7,
+  },
+  pinnedArt: { width: 26, height: 26, borderRadius: 5 },
+  pinnedArtFallback: {
+    width: 26, height: 26, borderRadius: 5,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    alignItems: "center" as const, justifyContent: "center" as const,
+  },
+  pinnedText: { flex: 1, fontSize: 12, color: "rgba(255,255,255,0.6)", fontWeight: "500" as const },
+  genreRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6, marginTop: 10 },
+  genreChip: {
+    backgroundColor: "rgba(171,0,255,0.12)",
+    borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4,
+    borderWidth: 1, borderColor: "rgba(171,0,255,0.2)",
+  },
+  genreText: { fontSize: 11, fontWeight: "600" as const, color: "#AB00FF" },
   followBtn: {
-    paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
     backgroundColor: "#fff",
   },
   followingBtn: {
     backgroundColor: "transparent",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderColor: "rgba(255,255,255,0.25)",
   },
-  followBtnText: { fontSize: 13, fontWeight: "700", color: "#111" },
+  followBtnText: { fontSize: 13, fontWeight: "700" as const, color: "#111" },
   followingBtnText: { color: "#fff" },
+
+  // ── Artist card (standalone artists table) ────────────────────────────────
+  artistCard: {
+    backgroundColor: "#111113",
+    borderRadius: 18,
+    overflow: "hidden",
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
+  },
+  artistBanner: { height: CARD_BANNER_H, overflow: "hidden" },
+  artistAvatarRow: {
+    paddingHorizontal: 14,
+    marginTop: -CARD_AVATAR_OVERLAP,
+    flexDirection: "row" as const,
+    alignItems: "flex-end" as const,
+  },
+  artistAvatar: {
+    width: CARD_AVATAR_SIZE, height: CARD_AVATAR_SIZE,
+    borderRadius: 14,
+    borderWidth: 2.5, borderColor: "#111113",
+    backgroundColor: "#1A1A1C",
+  },
+  artistAvatarFallback: {
+    alignItems: "center" as const, justifyContent: "center" as const,
+    backgroundColor: "rgba(255,108,26,0.18)",
+  },
+  artistInfo: { paddingHorizontal: 14, paddingBottom: 14, paddingTop: 8 },
+  artistBadge: {
+    paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8,
+    backgroundColor: "rgba(171,0,255,0.2)",
+    borderWidth: 1, borderColor: "rgba(171,0,255,0.35)",
+  },
+  artistBadgeText: { fontSize: 10, fontWeight: "800" as const, color: "#AB00FF" },
 });
 
 // ─── Messages page ────────────────────────────────────────────────────────────
@@ -3588,18 +4021,24 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
   const slideX = useRef(new Animated.Value(SW)).current;
   const [replyText,   setReplyText]   = useState("");
   const [replyingTo,  setReplyingTo]  = useState<Comment | null>(null);
-  const [menuVisible, setMenuVisible] = useState(false);
   const [comments,    setComments]    = useState<Comment[]>([]);
   const [sending,     setSending]     = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [selectedSong, setSelectedSong] = useState<PinnedSong | null>(null);
+  const [songPickerVisible, setSongPickerVisible] = useState(false);
+  const [spotifyToken, setSpotifyToken] = useState<string | null>(null);
   const replyBarBottom = useRef(new Animated.Value(BOTTOM_INSET + 8)).current;
   const listRef = useRef<FlatList>(null);
 
-  // Load current user + comments on mount
+  // Load current user + Spotify token + comments on mount
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) setCurrentUserId(user.id);
+      if (user) {
+        setCurrentUserId(user.id);
+        const tok = await getValidSpotifyToken(user.id);
+        setSpotifyToken(tok);
+      }
 
       const { data } = await supabase
         .from("post_comments")
@@ -3611,16 +4050,29 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
   }, [post.id]);
 
   const handleSend = async () => {
-    if (!currentUserId || !replyText.trim() || sending) return;
+    if (!currentUserId || (!replyText.trim() && !selectedSong) || sending) return;
     const text = replyText.trim();
     const parentId = replyingTo?.id ?? null;
+    const song = selectedSong;
     setReplyText("");
     setReplyingTo(null);
+    setSelectedSong(null);
     setSending(true);
     try {
       const { data, error } = await supabase
         .from("post_comments")
-        .insert({ post_id: post.id, user_id: currentUserId, text, parent_comment_id: parentId })
+        .insert({
+          post_id: post.id,
+          user_id: currentUserId,
+          text,
+          parent_comment_id: parentId,
+          ...(song && {
+            song_id:        song.id,
+            song_name:      song.name,
+            song_artist:    song.artist,
+            song_album_art: song.albumArt,
+          }),
+        })
         .select(COMMENT_SELECT)
         .single();
       if (error) throw error;
@@ -3629,6 +4081,7 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
     } catch (e: any) {
       Alert.alert("Comment failed", e.message ?? "Could not post comment.");
       setReplyText(text);
+      setSelectedSong(song);
     } finally {
       setSending(false);
     }
@@ -3691,32 +4144,49 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
       </View>
 
       {/* Comments list with post as header */}
-      <FlatList
-        ref={listRef}
-        data={comments}
-        keyExtractor={(c) => c.id}
-        contentContainerStyle={styles.detailListContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={
-          <>
-            <PostCard item={post} />
-            <View style={styles.detailDivider}>
-              <Text style={styles.detailDividerLabel}>
-                {comments.length === 0 ? "No comments yet" : `${comments.length} Comment${comments.length === 1 ? "" : "s"}`}
-              </Text>
-            </View>
-          </>
+      {(() => {
+        // Build parent → replies map; top-level = no parentCommentId
+        const topLevel: Comment[] = [];
+        const repliesMap = new Map<string, Comment[]>();
+        for (const c of comments) {
+          if (!c.parentCommentId) {
+            topLevel.push(c);
+          } else {
+            const arr = repliesMap.get(c.parentCommentId) ?? [];
+            arr.push(c);
+            repliesMap.set(c.parentCommentId, arr);
+          }
         }
-        renderItem={({ item }) => (
-          <CommentRow
-            comment={item}
-            currentUserId={currentUserId}
-            onReply={(c) => setReplyingTo(c)}
+        return (
+          <FlatList
+            ref={listRef}
+            data={topLevel}
+            keyExtractor={(c) => c.id}
+            contentContainerStyle={styles.detailListContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            ListHeaderComponent={
+              <>
+                <PostCard item={post} />
+                <View style={styles.detailDivider}>
+                  <Text style={styles.detailDividerLabel}>
+                    {topLevel.length === 0 ? "No comments yet" : `${topLevel.length} Comment${topLevel.length === 1 ? "" : "s"}`}
+                  </Text>
+                </View>
+              </>
+            }
+            renderItem={({ item }) => (
+              <ThreadedCommentRow
+                comment={item}
+                replies={repliesMap.get(item.id) ?? []}
+                currentUserId={currentUserId}
+                onReply={(c) => setReplyingTo(c)}
+              />
+            )}
+            ItemSeparatorComponent={() => <View style={styles.commentSeparator} />}
           />
-        )}
-        ItemSeparatorComponent={() => <View style={styles.commentSeparator} />}
-      />
+        );
+      })()}
 
       {/* Sticky reply bar */}
       <Animated.View style={[styles.detailReplyBarWrap, { bottom: replyBarBottom }]}>
@@ -3730,8 +4200,28 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
             </TouchableOpacity>
           </View>
         )}
+        {/* Attached song card */}
+        {selectedSong && (
+          <View style={styles.detailSongCard}>
+            {selectedSong.albumArt ? (
+              <Image source={{ uri: selectedSong.albumArt }} style={styles.detailSongArt} />
+            ) : (
+              <View style={[styles.detailSongArt, styles.detailSongArtFallback]}>
+                <FontAwesome5 name="music" size={9} color="rgba(255,255,255,0.3)" />
+              </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailSongName} numberOfLines={1}>{selectedSong.name}</Text>
+              {selectedSong.artist ? <Text style={styles.detailSongArtist} numberOfLines={1}>{selectedSong.artist}</Text> : null}
+            </View>
+            <FontAwesome5 name="spotify" size={11} color="#1DB954" style={{ marginRight: 6 }} />
+            <TouchableOpacity onPress={() => setSelectedSong(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <FontAwesome5 name="times" size={12} color="rgba(255,255,255,0.45)" />
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={styles.composerGlass}>
-          <TouchableOpacity style={styles.composerPlus} activeOpacity={0.8} onPress={() => setMenuVisible(true)}>
+          <TouchableOpacity style={styles.composerPlus} activeOpacity={0.8} onPress={() => setSongPickerVisible(true)}>
             <Text style={styles.composerPlusIcon}>+</Text>
           </TouchableOpacity>
           <TextInput
@@ -3744,10 +4234,10 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
             onSubmitEditing={handleSend}
           />
           <TouchableOpacity
-            style={[styles.composerSend, (!replyText.trim() || sending) && { opacity: 0.4 }]}
+            style={[styles.composerSend, ((!replyText.trim() && !selectedSong) || sending) && { opacity: 0.4 }]}
             activeOpacity={0.8}
             onPress={handleSend}
-            disabled={!replyText.trim() || sending}
+            disabled={(!replyText.trim() && !selectedSong) || sending}
           >
             {sending
               ? <ActivityIndicator size="small" color="#fff" />
@@ -3756,7 +4246,15 @@ function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void 
         </View>
       </Animated.View>
 
-      <ComposerActionMenu visible={menuVisible} onClose={() => setMenuVisible(false)} />
+      {/* Song picker overlay */}
+      <PinnedSongOverlay
+        visible={songPickerVisible}
+        onClose={() => setSongPickerVisible(false)}
+        onSelect={(song) => { setSelectedSong(song); setSongPickerVisible(false); }}
+        accessToken={spotifyToken}
+        ctaLabel="Attach to Reply"
+        ctaIcon="music"
+      />
     </Animated.View>
   );
 }
@@ -4217,22 +4715,561 @@ let _profileCache:      UserProfile    | null = null;
 let _myPostsCache:      Post[]         | null = null;
 let _conversationsCache: ConversationInfo[] | null = null;
 
+const BANNER_PALETTE = [
+  "#FF3B30", "#FF6C1A", "#FF9500", "#FFCC00",
+  "#A3D977", "#30D158", "#00C7BE", "#0A84FF",
+  "#6E6AE8", "#BF5AF2", "#FF375F", "#FF2D55",
+  "#8E8E93", "#3A3A3C", "#1C1C1E", "#0D0D0D",
+];
+// 4 swatches per row, 10px gap between them, 20px padding on each side
+const SWATCH_SIZE = Math.floor((SW - 40 - 30) / 4);
+const PALETTE_ROWS: string[][] = [];
+for (let i = 0; i < BANNER_PALETTE.length; i += 4) {
+  PALETTE_ROWS.push(BANNER_PALETTE.slice(i, i + 4));
+}
+
+const BANNER_SHAPES = [
+  { key: "none",     label: "None"     },
+  { key: "circle",   label: "Circle"   },
+  { key: "ring",     label: "Ring"     },
+  { key: "square",   label: "Square"   },
+  { key: "diamond",  label: "Diamond"  },
+  { key: "triangle", label: "Triangle" },
+  { key: "oval",     label: "Oval"     },
+  { key: "plus",     label: "Plus"     },
+  { key: "arc",      label: "Arc"      },
+];
+const SHAPE_ROWS: { key: string; label: string }[][] = [];
+for (let i = 0; i < BANNER_SHAPES.length; i += 4) {
+  SHAPE_ROWS.push(BANNER_SHAPES.slice(i, i + 4));
+}
+
+function BannerShape({ shape, color, size }: { shape: string; color: string; size: number }) {
+  const s = size;
+  switch (shape) {
+    case "circle":
+      return <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: color }} />;
+    case "ring":
+      return <View style={{ width: s, height: s, borderRadius: s / 2, borderWidth: Math.max(3, Math.round(s / 6)), borderColor: color, backgroundColor: "transparent" }} />;
+    case "square":
+      return <View style={{ width: s, height: s, borderRadius: Math.round(s / 8), backgroundColor: color }} />;
+    case "diamond":
+      return <View style={{ width: s * 0.72, height: s * 0.72, backgroundColor: color, transform: [{ rotate: "45deg" }] }} />;
+    case "triangle":
+      return <View style={{ width: 0, height: 0, borderLeftWidth: s / 2, borderRightWidth: s / 2, borderBottomWidth: Math.round(s * 0.87), borderStyle: "solid", borderLeftColor: "transparent", borderRightColor: "transparent", borderBottomColor: color }} />;
+    case "oval":
+      return <View style={{ width: s, height: Math.round(s * 0.6), borderRadius: s, backgroundColor: color }} />;
+    case "plus":
+      return (
+        <View style={{ width: s, height: s, alignItems: "center", justifyContent: "center" }}>
+          <View style={{ position: "absolute", width: s, height: Math.round(s / 3.2), backgroundColor: color, borderRadius: 4 }} />
+          <View style={{ position: "absolute", width: Math.round(s / 3.2), height: s, backgroundColor: color, borderRadius: 4 }} />
+        </View>
+      );
+    case "arc":
+      return (
+        <View style={{ width: s, height: Math.round(s / 2), overflow: "hidden" }}>
+          <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: color }} />
+        </View>
+      );
+    default:
+      return null;
+  }
+}
+
+function isLightColor(hex: string) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+}
+
+function daysRemaining(fromIso: string, totalDays: number): number {
+  const elapsed = Math.floor((Date.now() - new Date(fromIso).getTime()) / 86_400_000);
+  return Math.max(0, totalDays - elapsed);
+}
+
 // ─── Song Search Overlay ──────────────────────────────────────────────────────
 
-type PinnedSong = { id: string; name: string; artist: string; albumArt: string | null };
+type PinnedSong = { id: string; name: string; artist: string; albumArt: string | null; previewUrl: string | null };
 
-function SongSearchOverlay({ visible, onClose, onSelect, accessToken }: {
+type BaseStep = "home" | "search" | "playlists" | { type: "playlistTracks"; id: string; name: string };
+type PinStep = BaseStep | { type: "preview"; song: PinnedSong; from: BaseStep };
+
+type NowPlayingSnap = { id: string; name: string; artist: string; albumArt: string | null; previewUrl: string | null } | null;
+
+function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, ctaLabel = "Pin to Profile", ctaIcon = "thumbtack" }: {
   visible: boolean;
   onClose: () => void;
   onSelect: (song: PinnedSong) => void;
   accessToken: string | null;
+  ctaLabel?: string;
+  ctaIcon?: string;
 }) {
+  const [step, setStep] = useState<PinStep>("home");
+  const [nowPlaying, setNowPlaying] = useState<NowPlayingSnap>(null);
+  const [loadingNow, setLoadingNow] = useState(false);
+  const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [playlistTracks, setPlaylistTracks] = useState<SpotifyTrackResult[]>([]);
+  const [loadingTracks, setLoadingTracks] = useState(false);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SpotifyTrackResult[]>([]);
+  const [searchResults, setSearchResults] = useState<SpotifyTrackResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const slideAnim = useRef(new Animated.Value(500)).current;
+  // Preview audio state
+  const [previewPositionMs, setPreviewPositionMs] = useState(0);
+  const [previewDurationMs, setPreviewDurationMs] = useState(30_000);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewSaved, setPreviewSaved] = useState(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const slideAnim = useRef(new Animated.Value(600)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      setStep("home");
+      setQuery("");
+      setSearchResults([]);
+      setPlaylists([]);
+      setPlaylistTracks([]);
+      Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }),
+        Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+      ]).start();
+      if (accessToken) {
+        setLoadingNow(true);
+        getCurrentlyPlaying(accessToken).then((res) => {
+          if (res && !("unauthorized" in res) && res.id) {
+            setNowPlaying({ id: res.id, name: res.name, artist: res.artist, albumArt: res.albumArt ?? null, previewUrl: res.previewUrl ?? null });
+          } else {
+            setNowPlaying(null);
+          }
+          setLoadingNow(false);
+        });
+      }
+    } else {
+      Animated.parallel([
+        Animated.timing(slideAnim, { toValue: 600, duration: 200, useNativeDriver: true }),
+        Animated.timing(backdropAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (step === "playlists" && accessToken && playlists.length === 0 && !loadingPlaylists) {
+      setLoadingPlaylists(true);
+      getUserPlaylists(accessToken).then((pls) => { setPlaylists(pls); setLoadingPlaylists(false); });
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (typeof step === "object" && step.type === "playlistTracks" && accessToken) {
+      setLoadingTracks(true);
+      setPlaylistTracks([]);
+      getPlaylistTracks(accessToken, step.id).then((tracks) => { setPlaylistTracks(tracks); setLoadingTracks(false); });
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!query.trim() || !accessToken) { setSearchResults([]); return; }
+    searchTimer.current = setTimeout(async () => {
+      setSearching(true);
+      const res = await searchSpotifyTracks(accessToken, query.trim());
+      setSearchResults(res);
+      setSearching(false);
+    }, 450);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [query]);
+
+  // Load & play preview audio whenever the preview step is active
+  const previewSongId  = typeof step === "object" && step.type === "preview" ? step.song.id       : undefined;
+  const previewSongUrl = typeof step === "object" && step.type === "preview" ? step.song.previewUrl : undefined;
+
+  useEffect(() => {
+    let active = true;
+    let localSound: Audio.Sound | null = null;
+
+    const cleanup = () => {
+      active = false;
+      const s = localSound ?? soundRef.current;
+      if (s) { s.stopAsync().catch(() => {}); s.unloadAsync().catch(() => {}); }
+      soundRef.current = null;
+      setPreviewPlaying(false);
+      setPreviewPositionMs(0);
+    };
+
+    if (!previewSongUrl) { cleanup(); return cleanup; }
+
+    setPreviewLoading(true);
+    setPreviewPositionMs(0);
+    setPreviewDurationMs(30_000);
+    setPreviewSaved(false);
+
+    Audio.setAudioModeAsync({ playsInSilentModeIOS: true, shouldDuckAndroid: true }).then(() =>
+      Audio.Sound.createAsync(
+        { uri: previewSongUrl },
+        { shouldPlay: true },
+        (status) => {
+          if (!active || !status.isLoaded) return;
+          setPreviewPositionMs(status.positionMillis);
+          if (status.durationMillis) setPreviewDurationMs(status.durationMillis);
+          setPreviewPlaying(status.isPlaying);
+        },
+      )
+    ).then(({ sound: s }) => {
+      if (!active) { s.stopAsync().catch(() => {}); s.unloadAsync().catch(() => {}); return; }
+      localSound = s;
+      soundRef.current = s;
+      setPreviewLoading(false);
+    }).catch(() => { if (active) setPreviewLoading(false); });
+
+    return cleanup;
+  }, [previewSongId]);
+
+  // Stop audio when overlay closes
+  useEffect(() => {
+    if (!visible && soundRef.current) {
+      soundRef.current.stopAsync().catch(() => {});
+      soundRef.current.unloadAsync().catch(() => {});
+      soundRef.current = null;
+    }
+  }, [visible]);
+
+  const pin = (song: PinnedSong) => { onSelect(song); onClose(); };
+
+  const goBack = () => {
+    if (typeof step === "object" && step.type === "preview") setStep(step.from);
+    else if (typeof step === "object" && step.type === "playlistTracks") setStep("playlists");
+    else setStep("home");
+  };
+
+  const togglePreviewPlayback = async () => {
+    if (!soundRef.current) return;
+    if (previewPlaying) await soundRef.current.pauseAsync();
+    else await soundRef.current.playAsync();
+  };
+
+  const savePreviewToLiked = async () => {
+    if (typeof step !== "object" || step.type !== "preview" || !accessToken) return;
+    const ok = await saveTrackToLiked(accessToken, step.song.id);
+    if (ok) setPreviewSaved(true);
+  };
+
+  const fmtMs = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+
+  const title = step === "home" ? "Pin a Song"
+    : step === "search" ? "Search Spotify"
+    : step === "playlists" ? "Playlists"
+    : typeof step === "object" && step.type === "playlistTracks" ? step.name
+    : typeof step === "object" && step.type === "preview" ? "Preview"
+    : "Pin a Song";
+
+  const isSubStep = step !== "home";
+
+  const TrackRow = ({ item }: { item: SpotifyTrackResult }) => (
+    <TouchableOpacity
+      style={epOverlayStyles.resultRow}
+      activeOpacity={0.75}
+      onPress={() => setStep({ type: "preview", song: { id: item.id, name: item.name, artist: item.artist, albumArt: item.albumArt, previewUrl: item.previewUrl }, from: step as BaseStep })}
+    >
+      {item.albumArt ? (
+        <Image source={{ uri: item.albumArt }} style={epOverlayStyles.resultArt} />
+      ) : (
+        <View style={[epOverlayStyles.resultArt, epOverlayStyles.resultArtFallback]}>
+          <FontAwesome5 name="music" size={12} color="rgba(255,255,255,0.3)" />
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text style={epOverlayStyles.resultTrack} numberOfLines={1}>{item.name}</Text>
+        <Text style={epOverlayStyles.resultArtist} numberOfLines={1}>{item.artist}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  // Rendered inside EditProfileOverlay's Modal as an Animated.View overlay (no nested Modal)
+  return (
+    <Animated.View
+      style={[StyleSheet.absoluteFill, { zIndex: 100, opacity: backdropAnim }]}
+      pointerEvents={visible ? "auto" : "none"}
+    >
+      <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.70)" }]} onPress={onClose} />
+      <Animated.View style={[psStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <View style={epOverlayStyles.handle} />
+        <View style={epOverlayStyles.sheetHeader}>
+          <TouchableOpacity onPress={isSubStep ? goBack : onClose} hitSlop={12} style={psStyles.navBtn}>
+            <FontAwesome5
+              name={isSubStep ? "chevron-left" : "times"}
+              size={isSubStep ? 14 : 16}
+              color="rgba(255,255,255,0.55)"
+            />
+          </TouchableOpacity>
+          <Text style={epOverlayStyles.sheetTitle}>{title}</Text>
+          {isSubStep ? (
+            <TouchableOpacity onPress={onClose} hitSlop={12} style={psStyles.navBtn}>
+              <FontAwesome5 name="times" size={16} color="rgba(255,255,255,0.55)" />
+            </TouchableOpacity>
+          ) : (
+            <View style={psStyles.navBtn} />
+          )}
+        </View>
+
+        {/* ── HOME ── */}
+        {step === "home" && (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={psStyles.homeContent} showsVerticalScrollIndicator={false}>
+            <Text style={psStyles.sectionLabel}>NOW PLAYING</Text>
+            {loadingNow ? (
+              <ActivityIndicator color="#1DB954" style={{ marginVertical: 24 }} />
+            ) : nowPlaying ? (
+              <TouchableOpacity
+                style={psStyles.nowPlayingCard}
+                activeOpacity={0.82}
+                onPress={() => setStep({ type: "preview", song: nowPlaying, from: "home" })}
+              >
+                {nowPlaying.albumArt ? (
+                  <Image source={{ uri: nowPlaying.albumArt }} style={psStyles.npArt} />
+                ) : (
+                  <View style={[psStyles.npArt, psStyles.npArtFallback]}>
+                    <FontAwesome5 name="music" size={18} color="rgba(255,255,255,0.25)" />
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={psStyles.npTrack} numberOfLines={1}>{nowPlaying.name}</Text>
+                  <Text style={psStyles.npArtist} numberOfLines={1}>{nowPlaying.artist}</Text>
+                </View>
+                <FontAwesome5 name="chevron-right" size={12} color="rgba(255,255,255,0.25)" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={psStyles.addSongBtn} onPress={() => setStep("search")} activeOpacity={0.8}>
+                <FontAwesome5 name="plus" size={14} color="#fff" />
+                <Text style={psStyles.addSongText}>Add Song</Text>
+              </TouchableOpacity>
+            )}
+
+            <View style={psStyles.divider} />
+
+            <TouchableOpacity style={psStyles.menuRow} onPress={() => setStep("search")} activeOpacity={0.75}>
+              <View style={[psStyles.menuIcon, { backgroundColor: "rgba(255,108,26,0.15)" }]}>
+                <FontAwesome5 name="search" size={14} color="#FF6C1A" />
+              </View>
+              <Text style={psStyles.menuLabel}>Search Spotify</Text>
+              <FontAwesome5 name="chevron-right" size={12} color="rgba(255,255,255,0.2)" />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={psStyles.menuRow} onPress={() => setStep("playlists")} activeOpacity={0.75}>
+              <View style={[psStyles.menuIcon, { backgroundColor: "rgba(29,185,84,0.12)" }]}>
+                <FontAwesome5 name="list-ul" size={13} color="#1DB954" />
+              </View>
+              <Text style={psStyles.menuLabel}>Browse Playlists</Text>
+              <FontAwesome5 name="chevron-right" size={12} color="rgba(255,255,255,0.2)" />
+            </TouchableOpacity>
+          </ScrollView>
+        )}
+
+        {/* ── SEARCH ── */}
+        {step === "search" && (
+          <>
+            <View style={epOverlayStyles.searchRow}>
+              <FontAwesome5 name="search" size={14} color="rgba(255,255,255,0.3)" style={{ marginRight: 8 }} />
+              <TextInput
+                style={epOverlayStyles.searchInput}
+                placeholder="Search Spotify…"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={query}
+                onChangeText={setQuery}
+                autoFocus
+              />
+              {searching && <ActivityIndicator size="small" color="#1DB954" />}
+            </View>
+            <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {searchResults.map((item) => <TrackRow key={item.id} item={item} />)}
+              {!searching && query.trim() && searchResults.length === 0 && (
+                <Text style={epOverlayStyles.emptyText}>No results for "{query}"</Text>
+              )}
+              {!query.trim() && <Text style={epOverlayStyles.emptyText}>Type to search Spotify</Text>}
+            </ScrollView>
+          </>
+        )}
+
+        {/* ── PLAYLISTS ── */}
+        {step === "playlists" && (
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            {loadingPlaylists ? (
+              <ActivityIndicator color="#1DB954" style={{ marginTop: 48 }} />
+            ) : playlists.length === 0 ? (
+              <Text style={epOverlayStyles.emptyText}>No playlists found</Text>
+            ) : playlists.map((pl) => (
+              <TouchableOpacity
+                key={pl.id}
+                style={epOverlayStyles.resultRow}
+                activeOpacity={0.75}
+                onPress={() => setStep({ type: "playlistTracks", id: pl.id, name: pl.name })}
+              >
+                {pl.isLiked ? (
+                  <View style={[psStyles.plArt, psStyles.likedArt]}>
+                    <FontAwesome5 name="heart" size={18} color="#1DB954" />
+                  </View>
+                ) : pl.imageUrl ? (
+                  <Image source={{ uri: pl.imageUrl }} style={psStyles.plArt} />
+                ) : (
+                  <View style={[psStyles.plArt, psStyles.plArtFallback]}>
+                    <FontAwesome5 name="music" size={16} color="rgba(255,255,255,0.2)" />
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={epOverlayStyles.resultTrack} numberOfLines={1}>{pl.name}</Text>
+                  <Text style={epOverlayStyles.resultArtist}>{pl.trackCount} songs</Text>
+                </View>
+                <FontAwesome5 name="chevron-right" size={11} color="rgba(255,255,255,0.2)" />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* ── PLAYLIST TRACKS ── */}
+        {typeof step === "object" && step.type === "playlistTracks" && (
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            {loadingTracks ? (
+              <ActivityIndicator color="#1DB954" style={{ marginTop: 48 }} />
+            ) : playlistTracks.length === 0 ? (
+              <Text style={epOverlayStyles.emptyText}>No tracks in this playlist</Text>
+            ) : playlistTracks.map((item) => <TrackRow key={item.id} item={item} />)}
+          </ScrollView>
+        )}
+
+        {/* ── PREVIEW ── */}
+        {typeof step === "object" && step.type === "preview" && (() => {
+          const song = step.song;
+          const capMs = Math.min(previewDurationMs, 30_000);
+          const progress = capMs > 0 ? Math.min(previewPositionMs / capMs, 1) : 0;
+          return (
+            <View style={psStyles.previewWrap}>
+              {/* Album art */}
+              {song.albumArt ? (
+                <Image source={{ uri: song.albumArt }} style={psStyles.previewArt} />
+              ) : (
+                <View style={[psStyles.previewArt, psStyles.previewArtFallback]}>
+                  <FontAwesome5 name="music" size={40} color="rgba(255,255,255,0.15)" />
+                </View>
+              )}
+
+              {/* Track info */}
+              <Text style={psStyles.previewTrack} numberOfLines={2}>{song.name}</Text>
+              <Text style={psStyles.previewArtist} numberOfLines={1}>{song.artist}</Text>
+
+              {/* Progress + times */}
+              {song.previewUrl ? (
+                <>
+                  <View style={psStyles.previewProgressTrack}>
+                    <View style={[psStyles.previewProgressFill, { width: `${progress * 100}%` as any }]} />
+                  </View>
+                  <View style={psStyles.previewTimes}>
+                    <Text style={psStyles.previewTime}>{fmtMs(previewPositionMs)}</Text>
+                    <Text style={psStyles.previewTime}>{fmtMs(capMs)}</Text>
+                  </View>
+                  {/* Play / Pause */}
+                  <TouchableOpacity
+                    style={psStyles.playPauseBtn}
+                    onPress={togglePreviewPlayback}
+                    activeOpacity={0.8}
+                    disabled={previewLoading}
+                  >
+                    {previewLoading
+                      ? <ActivityIndicator color="#fff" />
+                      : <FontAwesome5 name={previewPlaying ? "pause" : "play"} size={22} color="#fff" />
+                    }
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <Text style={psStyles.noPreviewText}>No preview available</Text>
+              )}
+
+              {/* Actions row */}
+              <View style={psStyles.previewActions}>
+                <TouchableOpacity
+                  style={psStyles.openBtn}
+                  activeOpacity={0.8}
+                  onPress={() => openSpotifyLink(`spotify:track:${song.id}`, `https://open.spotify.com/track/${song.id}`)}
+                >
+                  <FontAwesome5 name="spotify" size={14} color="#1DB954" />
+                  <Text style={psStyles.openBtnText}>Open</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[psStyles.saveBtn, previewSaved && psStyles.saveBtnSaved]}
+                  activeOpacity={0.8}
+                  onPress={savePreviewToLiked}
+                  disabled={previewSaved}
+                >
+                  <FontAwesome5
+                    name={previewSaved ? "heart" : "heart"}
+                    size={13}
+                    color={previewSaved ? "#1DB954" : "rgba(255,255,255,0.7)"}
+                  />
+                  <Text style={[psStyles.saveBtnText, previewSaved && psStyles.saveBtnTextSaved]}>
+                    {previewSaved ? "Saved" : "Save to Playlist"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Action CTA */}
+              <TouchableOpacity style={psStyles.pinCTA} onPress={() => pin(song)} activeOpacity={0.85}>
+                <FontAwesome5 name={ctaIcon} size={13} color="#000" />
+                <Text style={psStyles.pinCTAText}>{ctaLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })()}
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+// ─── Edit Profile Overlay ─────────────────────────────────────────────────────
+
+type EditFormData = {
+  display_name: string;
+  username: string;
+  bio: string;
+  avatar_url: string | null;
+  banner_color: string | null;
+  banner_image_url: string | null;
+  banner_shape: string | null;
+  banner_shape_color: string | null;
+  username_changed_at: string | null;
+  display_name_change_count: number;
+  display_name_window_start: string | null;
+  pinned_song_id: string | null;
+  pinned_song_name: string | null;
+  pinned_song_artist: string | null;
+  pinned_song_album_art: string | null;
+  profile_links: string[];
+  social_links: Record<string, string>;
+};
+
+// ─── Banner Color Overlay ─────────────────────────────────────────────────────
+
+function BannerColorOverlay({ visible, onClose, selectedColor, bannerImageUrl, onSelectColor, onSelectImage, userId, selectedShape, selectedShapeColor, onSelectShape, onSelectShapeColor }: {
+  visible: boolean;
+  onClose: () => void;
+  selectedColor: string | null;
+  bannerImageUrl: string | null;
+  onSelectColor: (color: string) => void;
+  onSelectImage: (uri: string) => void;
+  userId: string | null;
+  selectedShape: string | null;
+  selectedShapeColor: string | null;
+  onSelectShape: (shape: string) => void;
+  onSelectShapeColor: (color: string) => void;
+}) {
+  const slideAnim = useRef(new Animated.Value(500)).current;
+  const backdropAnim = useRef(new Animated.Value(0)).current;
+  const [imageUploading, setImageUploading] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -4245,94 +5282,188 @@ function SongSearchOverlay({ visible, onClose, onSelect, accessToken }: {
         Animated.timing(slideAnim, { toValue: 500, duration: 200, useNativeDriver: true }),
         Animated.timing(backdropAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
       ]).start();
-      setQuery("");
-      setResults([]);
     }
   }, [visible]);
 
-  useEffect(() => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (!query.trim() || !accessToken) { setResults([]); return; }
-    searchTimer.current = setTimeout(async () => {
-      setSearching(true);
-      const res = await searchSpotifyTracks(accessToken, query.trim());
-      setResults(res);
-      setSearching(false);
-    }, 450);
-    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
-  }, [query, accessToken]);
+  const pickBannerImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Permission needed", "Allow photo access to set a banner image."); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"] as any,
+      allowsEditing: true,
+      aspect: [16, 9] as [number, number],
+      quality: 0.85,
+    });
+    if (result.canceled || !result.assets[0] || !userId) return;
+    setImageUploading(true);
+    try {
+      const uri = result.assets[0].uri;
+      const mimeType = result.assets[0].mimeType ?? "image/jpeg";
+      const fileName = `${userId}/banner`;
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(blob);
+      });
+      // delete first so upsert doesn't get blocked by same-key caching
+      await supabase.storage.from("banners").remove([fileName]);
+      const { error: uploadError } = await supabase.storage
+        .from("banners")
+        .upload(fileName, arrayBuffer, { contentType: mimeType, upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from("banners").getPublicUrl(fileName);
+      onSelectImage(`${publicUrl}?t=${Date.now()}`);
+      onClose();
+    } catch (e: any) {
+      Alert.alert("Upload failed", e.message ?? "Could not upload image.");
+    } finally {
+      setImageUploading(false);
+    }
+  };
 
+  // Rendered inside the edit sheet's Animated.View — no nested Modal needed
   return (
-    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
-      <Animated.View style={[StyleSheet.absoluteFill, epOverlayStyles.backdrop, { opacity: backdropAnim }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      </Animated.View>
-      <Animated.View style={[epOverlayStyles.songSheet, { transform: [{ translateY: slideAnim }] }]}>
-        <View style={epOverlayStyles.handle} />
-        <View style={epOverlayStyles.sheetHeader}>
-          <Text style={epOverlayStyles.sheetTitle}>Pin a Song</Text>
+    <Animated.View
+      style={[StyleSheet.absoluteFill, { zIndex: 50, opacity: backdropAnim }]}
+      pointerEvents={visible ? "auto" : "none"}
+    >
+      <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)" }]} onPress={onClose} />
+      <Animated.View style={[bcOverlayStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <View style={bcOverlayStyles.handle} />
+        <View style={bcOverlayStyles.header}>
+          <Text style={bcOverlayStyles.title}>Banner</Text>
           <TouchableOpacity onPress={onClose} hitSlop={12}>
-            <Text style={epOverlayStyles.closeBtn}>✕</Text>
+            <Text style={bcOverlayStyles.closeBtn}>✕</Text>
           </TouchableOpacity>
         </View>
-        <View style={epOverlayStyles.searchRow}>
-          <FontAwesome5 name="search" size={14} color="rgba(255,255,255,0.3)" style={{ marginRight: 8 }} />
-          <TextInput
-            style={epOverlayStyles.searchInput}
-            placeholder="Search Spotify…"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            value={query}
-            onChangeText={setQuery}
-            autoFocus
-          />
-          {searching && <ActivityIndicator size="small" color="#1DB954" />}
-        </View>
-        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          {results.map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={epOverlayStyles.resultRow}
-              activeOpacity={0.75}
-              onPress={() => { onSelect({ id: item.id, name: item.name, artist: item.artist, albumArt: item.albumArt }); onClose(); }}
-            >
-              {item.albumArt ? (
-                <Image source={{ uri: item.albumArt }} style={epOverlayStyles.resultArt} />
-              ) : (
-                <View style={[epOverlayStyles.resultArt, epOverlayStyles.resultArtFallback]}>
-                  <FontAwesome5 name="music" size={12} color="rgba(255,255,255,0.3)" />
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={bcOverlayStyles.content} showsVerticalScrollIndicator={false}>
+          {/* Add Image */}
+          <TouchableOpacity
+            style={bcOverlayStyles.imageBox}
+            onPress={pickBannerImage}
+            activeOpacity={0.75}
+            disabled={imageUploading}
+          >
+            {imageUploading ? (
+              <ActivityIndicator color="#FF6C1A" />
+            ) : bannerImageUrl ? (
+              <>
+                <Image source={{ uri: bannerImageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                <View style={bcOverlayStyles.imageOverlay}>
+                  <FontAwesome5 name="camera" size={18} color="#fff" />
+                  <Text style={bcOverlayStyles.imageBoxText}>Change Image</Text>
                 </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={epOverlayStyles.resultTrack} numberOfLines={1}>{item.name}</Text>
-                <Text style={epOverlayStyles.resultArtist} numberOfLines={1}>{item.artist}</Text>
-              </View>
-              <FontAwesome5 name="chevron-right" size={11} color="rgba(255,255,255,0.2)" />
-            </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <FontAwesome5 name="image" size={24} color="rgba(255,255,255,0.28)" />
+                <Text style={bcOverlayStyles.imageBoxText}>Add Banner Image</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Divider */}
+          <View style={bcOverlayStyles.dividerRow}>
+            <View style={bcOverlayStyles.dividerLine} />
+            <Text style={bcOverlayStyles.dividerText}>or choose a color</Text>
+            <View style={bcOverlayStyles.dividerLine} />
+          </View>
+
+          {/* Color grid */}
+          {PALETTE_ROWS.map((row, rowIdx) => (
+            <View key={rowIdx} style={bcOverlayStyles.colorRow}>
+              {row.map((color) => (
+                <TouchableOpacity
+                  key={color}
+                  style={[
+                    bcOverlayStyles.colorSwatch,
+                    { backgroundColor: color, width: SWATCH_SIZE, height: SWATCH_SIZE },
+                    selectedColor === color && !bannerImageUrl && bcOverlayStyles.colorSwatchSelected,
+                  ]}
+                  onPress={() => { onSelectColor(color); onClose(); }}
+                  activeOpacity={0.8}
+                >
+                  {selectedColor === color && !bannerImageUrl && (
+                    <FontAwesome5 name="check" size={14} color={isLightColor(color) ? "#000" : "#fff"} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
           ))}
-          {!searching && query.trim() && results.length === 0 && (
-            <Text style={epOverlayStyles.emptyText}>No results for "{query}"</Text>
-          )}
-          {!query.trim() && <Text style={epOverlayStyles.emptyText}>Start typing to search tracks</Text>}
+
+          {/* Shape section */}
+          <View style={[bcOverlayStyles.dividerRow, { marginTop: 8 }]}>
+            <View style={bcOverlayStyles.dividerLine} />
+            <Text style={bcOverlayStyles.dividerText}>shape</Text>
+            <View style={bcOverlayStyles.dividerLine} />
+          </View>
+          <View style={{ opacity: bannerImageUrl ? 0.3 : 1 }} pointerEvents={bannerImageUrl ? "none" : "auto"}>
+            {bannerImageUrl ? (
+              <Text style={bsOverlayStyles.disabledHint}>Remove the image to use a shape</Text>
+            ) : null}
+            {SHAPE_ROWS.map((row, rowIdx) => (
+              <View key={rowIdx} style={bcOverlayStyles.colorRow}>
+                {row.map(({ key, label }) => {
+                  const isNone = key === "none";
+                  const isSelected = isNone ? !selectedShape : selectedShape === key;
+                  const previewColor = isSelected ? (selectedShapeColor ?? "#fff") : "rgba(255,255,255,0.55)";
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[bsOverlayStyles.shapeCell, { width: SWATCH_SIZE }, isSelected && bsOverlayStyles.shapeCellSelected]}
+                      onPress={() => onSelectShape(key)}
+                      activeOpacity={0.75}
+                    >
+                      <View style={bsOverlayStyles.shapeIconWrap}>
+                        {isNone ? (
+                          <FontAwesome5 name="ban" size={22} color={isSelected ? "#FF6C1A" : "rgba(255,255,255,0.4)"} />
+                        ) : (
+                          <BannerShape shape={key} color={previewColor} size={30} />
+                        )}
+                      </View>
+                      <Text style={[bsOverlayStyles.shapeLabel, isSelected && bsOverlayStyles.shapeLabelSelected]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+
+            <View style={[bcOverlayStyles.dividerRow, { marginTop: 8 }]}>
+              <View style={bcOverlayStyles.dividerLine} />
+              <Text style={bcOverlayStyles.dividerText}>shape color</Text>
+              <View style={bcOverlayStyles.dividerLine} />
+            </View>
+            {PALETTE_ROWS.map((row, rowIdx) => (
+              <View key={rowIdx} style={bcOverlayStyles.colorRow}>
+                {row.map((color) => (
+                  <TouchableOpacity
+                    key={color}
+                    style={[
+                      bcOverlayStyles.colorSwatch,
+                      { backgroundColor: color, width: SWATCH_SIZE, height: SWATCH_SIZE },
+                      selectedShapeColor === color && bcOverlayStyles.colorSwatchSelected,
+                    ]}
+                    onPress={() => onSelectShapeColor(color)}
+                    activeOpacity={0.8}
+                  >
+                    {selectedShapeColor === color && (
+                      <FontAwesome5 name="check" size={14} color={isLightColor(color) ? "#000" : "#fff"} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
+          </View>
         </ScrollView>
       </Animated.View>
-    </Modal>
+    </Animated.View>
   );
 }
 
-// ─── Edit Profile Overlay ─────────────────────────────────────────────────────
 
-type EditFormData = {
-  display_name: string;
-  username: string;
-  bio: string;
-  avatar_url: string | null;
-  pinned_song_id: string | null;
-  pinned_song_name: string | null;
-  pinned_song_artist: string | null;
-  pinned_song_album_art: string | null;
-  profile_links: string[];
-  social_links: Record<string, string>;
-};
 
 function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToken, userId }: {
   visible: boolean;
@@ -4345,6 +5476,7 @@ function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToke
   const [form, setForm] = useState<EditFormData>(initialData);
   const [saving, setSaving] = useState(false);
   const [songSearchOpen, setSongSearchOpen] = useState(false);
+  const [bannerColorOpen, setBannerColorOpen] = useState(false);
   const [newLink, setNewLink] = useState("");
   const [avatarUploading, setAvatarUploading] = useState(false);
   const slideAnim = useRef(new Animated.Value(800)).current;
@@ -4425,15 +5557,67 @@ function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToke
     });
   };
 
+  // ── Cooldown state ──────────────────────────────────────────────────────────
+  const usernameDaysLeft = form.username_changed_at
+    ? daysRemaining(form.username_changed_at, 14)
+    : 0;
+  const isUsernameLocked = usernameDaysLeft > 0;
+
+  const dnWindowExpired =
+    !form.display_name_window_start ||
+    daysRemaining(form.display_name_window_start, 30) === 0;
+  const dnChangesUsed = dnWindowExpired ? 0 : (form.display_name_change_count ?? 0);
+  const dnChangesLeft = Math.max(0, 2 - dnChangesUsed);
+  const isDNLocked = dnChangesLeft === 0;
+  const dnDaysLeft = isDNLocked && form.display_name_window_start
+    ? daysRemaining(form.display_name_window_start, 30)
+    : 0;
+
+  const usernameLabelSuffix = isUsernameLocked
+    ? ` [${usernameDaysLeft} day${usernameDaysLeft !== 1 ? "s" : ""}]`
+    : "";
+  const dnLabelSuffix = isDNLocked
+    ? ` [${dnDaysLeft} day${dnDaysLeft !== 1 ? "s" : ""}]`
+    : dnChangesLeft < 2
+    ? ` [${dnChangesLeft} left]`
+    : "";
+
   const save = async () => {
     if (!userId) return;
     setSaving(true);
     try {
+      const usernameChanged = form.username.trim() !== (initialData.username ?? "");
+      const displayNameChanged = form.display_name.trim() !== (initialData.display_name ?? "");
+
+      let newUsernameChangedAt = form.username_changed_at;
+      let newDNCount = form.display_name_change_count ?? 0;
+      let newDNWindowStart = form.display_name_window_start;
+
+      if (usernameChanged && !isUsernameLocked) {
+        newUsernameChangedAt = new Date().toISOString();
+      }
+
+      if (displayNameChanged && !isDNLocked) {
+        if (dnWindowExpired) {
+          newDNWindowStart = new Date().toISOString();
+          newDNCount = 1;
+        } else {
+          newDNCount = (form.display_name_change_count ?? 0) + 1;
+        }
+      }
+
       const { error } = await supabase.from("users").update({
-        display_name: form.display_name.trim() || null,
-        username: form.username.trim() || null,
+        display_name: (isDNLocked ? initialData.display_name : form.display_name.trim()) || null,
+        username: (isUsernameLocked ? initialData.username : form.username.trim()) || null,
         bio: form.bio.trim() || null,
         avatar_url: form.avatar_url,
+        banner_color: form.banner_color,
+        banner_image_url: form.banner_image_url,
+        banner_shape: form.banner_shape,
+        banner_shape_color: form.banner_shape_color,
+        username_changed_at: newUsernameChangedAt,
+        display_name_change_count: newDNCount,
+        display_name_window_start: newDNWindowStart,
         pinned_song_id: form.pinned_song_id,
         pinned_song_name: form.pinned_song_name,
         pinned_song_artist: form.pinned_song_artist,
@@ -4442,7 +5626,12 @@ function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToke
         social_links: form.social_links,
       }).eq("id", userId);
       if (error) throw error;
-      onSaved(form);
+      onSaved({
+        ...form,
+        username_changed_at: newUsernameChangedAt,
+        display_name_change_count: newDNCount,
+        display_name_window_start: newDNWindowStart,
+      });
       onClose();
     } catch (e: any) {
       Alert.alert("Save failed", e.message ?? "Could not save profile.");
@@ -4456,13 +5645,13 @@ function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToke
     : "?";
 
   return (
-    <>
-      <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
-        <Animated.View style={[StyleSheet.absoluteFill, epOverlayStyles.backdrop, { opacity: backdropAnim }]}>
+    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <Animated.View style={[StyleSheet.absoluteFill, epOverlayStyles.backdrop, { opacity: backdropAnim }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         </Animated.View>
         <Animated.View style={[epOverlayStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+
             <View style={epOverlayStyles.sheetHeader}>
               <TouchableOpacity onPress={onClose} hitSlop={12}>
                 <Text style={epOverlayStyles.cancelBtn}>Cancel</Text>
@@ -4481,6 +5670,44 @@ function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToke
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 40 }}
             >
+              {/* ── Banner ── */}
+              <View style={epOverlayStyles.section}>
+                <Text style={epOverlayStyles.sectionLabel}>BANNER</Text>
+                <View style={epOverlayStyles.bannerPreview}>
+                  {form.banner_image_url ? (
+                    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                      <Image source={{ uri: form.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    </View>
+                  ) : form.banner_color ? (
+                    <View style={[StyleSheet.absoluteFill, { backgroundColor: form.banner_color }]} pointerEvents="none" />
+                  ) : (
+                    <LinearGradient
+                      colors={["#3D0C00", "#CC4200", "#FF6C1A", "#CC4200", "#3D0C00"]}
+                      locations={[0, 0.25, 0.5, 0.75, 1]}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={StyleSheet.absoluteFill}
+                      pointerEvents="none"
+                    />
+                  )}
+                  {form.banner_shape && !form.banner_image_url ? (
+                    <View style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]} pointerEvents="none">
+                      <BannerShape shape={form.banner_shape} color={form.banner_shape_color ?? "#ffffff"} size={56} />
+                    </View>
+                  ) : null}
+                  <TouchableOpacity
+                    style={[StyleSheet.absoluteFill, { alignItems: "flex-end", justifyContent: "flex-end", padding: 10 }]}
+                    activeOpacity={0.8}
+                    onPress={() => setBannerColorOpen(true)}
+                  >
+                    <View style={epOverlayStyles.bannerEditBtn}>
+                      <FontAwesome5 name="pen" size={10} color="#fff" />
+                      <Text style={epOverlayStyles.bannerEditText}>Edit Banner</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               {/* ── Avatar ── */}
               <View style={epOverlayStyles.avatarSection}>
                 <TouchableOpacity style={epOverlayStyles.avatarWrap} onPress={pickAvatar} activeOpacity={0.8}>
@@ -4504,26 +5731,40 @@ function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToke
 
               {/* ── Display name ── */}
               <View style={epOverlayStyles.section}>
-                <Text style={epOverlayStyles.sectionLabel}>DISPLAY NAME</Text>
+                <Text style={epOverlayStyles.sectionLabel}>
+                  {"DISPLAY NAME"}
+                  {dnLabelSuffix ? (
+                    <Text style={isDNLocked ? epOverlayStyles.cooldownBadgeLocked : epOverlayStyles.cooldownBadge}>
+                      {dnLabelSuffix}
+                    </Text>
+                  ) : null}
+                </Text>
                 <TextInput
-                  style={epOverlayStyles.input}
+                  style={[epOverlayStyles.input, isDNLocked && epOverlayStyles.inputLocked]}
                   value={form.display_name}
-                  onChangeText={(t) => setForm((f) => ({ ...f, display_name: t }))}
+                  onChangeText={(t) => !isDNLocked && setForm((f) => ({ ...f, display_name: t }))}
                   placeholder="Your name"
                   placeholderTextColor="rgba(255,255,255,0.25)"
+                  editable={!isDNLocked}
                 />
               </View>
 
               {/* ── Username ── */}
               <View style={epOverlayStyles.section}>
-                <Text style={epOverlayStyles.sectionLabel}>USERNAME</Text>
+                <Text style={epOverlayStyles.sectionLabel}>
+                  {"USERNAME"}
+                  {usernameLabelSuffix ? (
+                    <Text style={epOverlayStyles.cooldownBadgeLocked}>{usernameLabelSuffix}</Text>
+                  ) : null}
+                </Text>
                 <TextInput
-                  style={epOverlayStyles.input}
+                  style={[epOverlayStyles.input, isUsernameLocked && epOverlayStyles.inputLocked]}
                   value={form.username}
-                  onChangeText={(t) => setForm((f) => ({ ...f, username: t.replace(/\s/g, "").toLowerCase() }))}
+                  onChangeText={(t) => !isUsernameLocked && setForm((f) => ({ ...f, username: t.replace(/\s/g, "").toLowerCase() }))}
                   placeholder="@handle"
                   placeholderTextColor="rgba(255,255,255,0.25)"
                   autoCapitalize="none"
+                  editable={!isUsernameLocked}
                 />
               </View>
 
@@ -4641,22 +5882,34 @@ function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToke
               </View>
             </ScrollView>
           </KeyboardAvoidingView>
+
+          <BannerColorOverlay
+            visible={bannerColorOpen}
+            onClose={() => setBannerColorOpen(false)}
+            selectedColor={form.banner_color}
+            bannerImageUrl={form.banner_image_url}
+            userId={userId}
+            onSelectColor={(color) => setForm((f) => ({ ...f, banner_color: color, banner_image_url: null }))}
+            onSelectImage={(uri) => setForm((f) => ({ ...f, banner_image_url: uri, banner_color: null }))}
+            selectedShape={form.banner_shape}
+            selectedShapeColor={form.banner_shape_color}
+            onSelectShape={(shape) => setForm((f) => ({ ...f, banner_shape: shape === "none" ? null : shape }))}
+            onSelectShapeColor={(color) => setForm((f) => ({ ...f, banner_shape_color: color }))}
+          />
+          <PinnedSongOverlay
+            visible={songSearchOpen}
+            onClose={() => setSongSearchOpen(false)}
+            accessToken={accessToken}
+            onSelect={(song) => setForm((f) => ({
+              ...f,
+              pinned_song_id: song.id,
+              pinned_song_name: song.name,
+              pinned_song_artist: song.artist,
+              pinned_song_album_art: song.albumArt,
+            }))}
+          />
         </Animated.View>
       </Modal>
-
-      <SongSearchOverlay
-        visible={songSearchOpen}
-        onClose={() => setSongSearchOpen(false)}
-        accessToken={accessToken}
-        onSelect={(song) => setForm((f) => ({
-          ...f,
-          pinned_song_id: song.id,
-          pinned_song_name: song.name,
-          pinned_song_artist: song.artist,
-          pinned_song_album_art: song.albumArt,
-        }))}
-      />
-    </>
   );
 }
 
@@ -5073,17 +6326,341 @@ function LinksSheet({
   );
 }
 
+// ─── Start Meet Overlay ──────────────────────────────────────────────────────
+
+function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boolean; onClose: () => void; onStarted: (name: string) => void }) {
+  const slideY    = useRef(new Animated.Value(SH)).current;
+  const backdropO = useRef(new Animated.Value(0)).current;
+  // kbPad grows to keyboard height so scroll content is never hidden behind it
+  const kbPad     = useRef(new Animated.Value(0)).current;
+
+  const [meetName,        setMeetName]        = useState("");
+  const [meetDescription, setMeetDescription] = useState("");
+  const [allowComments,   setAllowComments]   = useState(true);
+  const [allowReactions,  setAllowReactions]  = useState(true);
+  const [tagInput,        setTagInput]        = useState("");
+  const [tags,            setTags]            = useState<string[]>([]);
+  const [starting,        setStarting]        = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.spring(slideY,    { toValue: 0, useNativeDriver: true, tension: 70, friction: 14 }),
+        Animated.timing(backdropO, { toValue: 1, useNativeDriver: true, duration: 220 }),
+      ]).start();
+
+      const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+      const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+      const showSub = Keyboard.addListener(showEvt, (e) => {
+        Animated.timing(kbPad, {
+          toValue: e.endCoordinates.height,
+          duration: Platform.OS === "ios" ? (e.duration ?? 260) : 260,
+          useNativeDriver: false,
+        }).start();
+      });
+      const hideSub = Keyboard.addListener(hideEvt, (e) => {
+        Animated.timing(kbPad, {
+          toValue: 0,
+          duration: Platform.OS === "ios" ? (e.duration ?? 260) : 260,
+          useNativeDriver: false,
+        }).start();
+      });
+      return () => { showSub.remove(); hideSub.remove(); };
+    } else {
+      Keyboard.dismiss();
+      kbPad.setValue(0);
+      Animated.parallel([
+        Animated.timing(slideY,    { toValue: SH,  useNativeDriver: true, duration: 260 }),
+        Animated.timing(backdropO, { toValue: 0,   useNativeDriver: true, duration: 220 }),
+      ]).start(() => {
+        setMeetName(""); setMeetDescription("");
+        setAllowComments(true); setAllowReactions(true);
+        setTagInput(""); setTags([]); setStarting(false);
+      });
+    }
+  }, [visible]);
+
+  const addTag = () => {
+    const cleaned = tagInput.trim().replace(/^#+/, "");
+    if (!cleaned) return;
+    if (tags.length >= 5) return;
+    if (!tags.includes(cleaned)) setTags(prev => [...prev, cleaned]);
+    setTagInput("");
+  };
+
+  const removeTag = (t: string) => setTags(prev => prev.filter(x => x !== t));
+
+  const handleStart = async () => {
+    if (!meetName.trim()) return;
+    setStarting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { error } = await supabase.from("meets").insert({
+        host_id:         user.id,
+        name:            meetName.trim(),
+        description:     meetDescription.trim() || null,
+        tags,
+        allow_comments:  allowComments,
+        allow_reactions: allowReactions,
+        is_live:         true,
+      });
+      if (error) throw error;
+      onClose();
+      onStarted(meetName.trim());
+    } catch (err) {
+      console.error("Start Meet error:", err);
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  if (!visible) return null;
+
+  return (
+    <Modal transparent animationType="none" visible={visible} onRequestClose={onClose}>
+      {/* Dimmed backdrop */}
+      <Animated.View
+        style={[StyleSheet.absoluteFill, mmStyles.backdrop, { opacity: backdropO }]}
+        pointerEvents="none"
+      />
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+
+      {/* Sheet — fixed position, top anchored. Keyboard scrolls content inside, never moves the sheet. */}
+      <Animated.View style={[mmStyles.sheet, { transform: [{ translateY: slideY }] }]}>
+        <View style={mmStyles.handle} />
+
+        <View style={mmStyles.header}>
+          <Text style={mmStyles.headerTitle}>Start a Meet</Text>
+          <TouchableOpacity onPress={onClose} activeOpacity={0.7}>
+            <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={mmStyles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={mmStyles.label}>Meet Name *</Text>
+          <TextInput
+            style={mmStyles.input}
+            placeholder="Give your meet a name…"
+            placeholderTextColor="rgba(255,255,255,0.28)"
+            value={meetName}
+            onChangeText={setMeetName}
+            maxLength={60}
+          />
+
+          <Text style={mmStyles.label}>Description</Text>
+          <TextInput
+            style={[mmStyles.input, mmStyles.inputMultiline]}
+            placeholder="What are you listening to? What's the vibe?"
+            placeholderTextColor="rgba(255,255,255,0.28)"
+            value={meetDescription}
+            onChangeText={setMeetDescription}
+            multiline
+            maxLength={280}
+          />
+
+          <View style={mmStyles.toggleRow}>
+            <Text style={mmStyles.toggleLabel}>Allow Comments</Text>
+            <Switch value={allowComments} onValueChange={setAllowComments}
+              trackColor={{ false: "rgba(255,255,255,0.12)", true: "#AB00FF" }} thumbColor="#fff" />
+          </View>
+          <View style={mmStyles.toggleRow}>
+            <Text style={mmStyles.toggleLabel}>Allow Reactions</Text>
+            <Switch value={allowReactions} onValueChange={setAllowReactions}
+              trackColor={{ false: "rgba(255,255,255,0.12)", true: "#AB00FF" }} thumbColor="#fff" />
+          </View>
+
+          <Text style={mmStyles.label}>Tags <Text style={mmStyles.labelMuted}>(up to 5)</Text></Text>
+          <View style={mmStyles.tagInputRow}>
+            <TextInput
+              style={mmStyles.tagInput}
+              placeholder="Add a tag…"
+              placeholderTextColor="rgba(255,255,255,0.28)"
+              value={tagInput}
+              onChangeText={setTagInput}
+              onSubmitEditing={addTag}
+              returnKeyType="done"
+              maxLength={30}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity style={mmStyles.tagAddBtn} onPress={addTag} activeOpacity={0.75}>
+              <Ionicons name="add" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          {tags.length > 0 && (
+            <View style={mmStyles.tagChips}>
+              {tags.map(t => (
+                <TouchableOpacity key={t} style={mmStyles.tagChip} onPress={() => removeTag(t)} activeOpacity={0.7}>
+                  <Text style={mmStyles.tagChipText}>#{t}</Text>
+                  <Ionicons name="close" size={12} color="rgba(255,255,255,0.55)" style={{ marginLeft: 4 }} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[mmStyles.startBtn, (!meetName.trim() || starting) && mmStyles.startBtnDisabled]}
+            activeOpacity={0.85}
+            onPress={handleStart}
+            disabled={!meetName.trim() || starting}
+          >
+            <FontAwesome5 name="broadcast-tower" size={15} color="#fff" />
+            <Text style={mmStyles.startBtnText}>{starting ? "Starting…" : "Start Meet"}</Text>
+          </TouchableOpacity>
+
+          {/* Spacer that grows with keyboard height so the Start button is always reachable */}
+          <Animated.View style={{ height: kbPad }} />
+        </ScrollView>
+      </Animated.View>
+    </Modal>
+  );
+}
+// ─── Meet Live Screen ─────────────────────────────────────────────────────────
+
+const LIVE_DUMMY_CHAT = [
+  { id: "1", initials: "MJ", color: "#AB00FF", name: "Maria John",  text: "this is so 🔥🔥🔥" },
+  { id: "2", initials: "CJ", color: "#FF6C1A", name: "Chris J",     text: "bro what song is this" },
+  { id: "3", initials: "SK", color: "#1DB954", name: "sarakay",      text: "the vibes are immaculate rn" },
+  { id: "4", initials: "MJ", color: "#AB00FF", name: "Maria John",  text: "can you play that again??" },
+  { id: "5", initials: "NR", color: "#FF3CAC", name: "n_ramos",     text: "joined the meet ✨" },
+];
+
+function MeetLiveScreen({ visible, onClose, meetName }: { visible: boolean; onClose: () => void; meetName?: string }) {
+  const slideAnim = useRef(new Animated.Value(SH)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 180 }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: SH, useNativeDriver: true, duration: 280 }).start();
+    }
+  }, [visible]);
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} animationType="none" transparent statusBarTranslucent onRequestClose={onClose}>
+      <Animated.View style={[mlStyles.container, { transform: [{ translateY: slideAnim }] }]}>
+
+        {/* ── Background gradient ── */}
+        <LinearGradient
+          colors={["#0e001f", "#1c0040", "#12003a", "#060011"]}
+          locations={[0, 0.3, 0.65, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+        {/* Subtle radial-style highlight in the middle */}
+        <View style={mlStyles.bgGlow} pointerEvents="none" />
+
+        {/* ── Top bar ── */}
+        <View style={mlStyles.topBar}>
+          {/* Host info */}
+          <View style={mlStyles.topLeft}>
+            <LinearGradient colors={["#AB00FF", "#FF6C1A"]} style={mlStyles.hostRing}>
+              <View style={mlStyles.hostAvatarInner}>
+                <Text style={mlStyles.hostInitials}>ME</Text>
+              </View>
+            </LinearGradient>
+            <View>
+              <Text style={mlStyles.hostName}>{meetName ?? "My Meet"}</Text>
+              <View style={mlStyles.liveRow}>
+                <View style={mlStyles.liveDot} />
+                <Text style={mlStyles.liveLabel}>LIVE</Text>
+                <Text style={mlStyles.viewerCount}>  ·  124 watching</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Action buttons */}
+          <View style={mlStyles.topRight}>
+            <TouchableOpacity style={mlStyles.topBtn} activeOpacity={0.75}>
+              <Ionicons name="share-outline" size={18} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={[mlStyles.topBtn, mlStyles.endBtn]} activeOpacity={0.8} onPress={onClose}>
+              <Text style={mlStyles.endBtnText}>End</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Viewer bar (pinned below top bar) ── */}
+        <View style={mlStyles.viewerBar}>
+          {["#AB00FF","#FF6C1A","#1DB954","#FF3CAC","#FFD700"].map((c, i) => (
+            <View key={i} style={[mlStyles.viewerDot, { backgroundColor: c, marginLeft: i === 0 ? 0 : -6 }]} />
+          ))}
+          <Text style={mlStyles.viewerBarText}>  Maria, Chris, and 122 others</Text>
+        </View>
+
+        {/* ── Floating right-side reactions ── */}
+        <View style={mlStyles.reactionsCol} pointerEvents="none">
+          {["#FF3CAC","#AB00FF","#FF6C1A","#FF3CAC","#1DB954"].map((c, i) => (
+            <FontAwesome5
+              key={i}
+              name={i % 3 === 0 ? "heart" : i % 3 === 1 ? "star" : "music"}
+              size={14 + (i % 3) * 4}
+              color={c}
+              style={{ opacity: 0.55 + (i % 2) * 0.3, marginBottom: 16 }}
+            />
+          ))}
+        </View>
+
+        {/* ── Chat bubbles (bottom-left) ── */}
+        <View style={mlStyles.chatArea} pointerEvents="none">
+          {LIVE_DUMMY_CHAT.map((msg) => (
+            <View key={msg.id} style={mlStyles.chatBubble}>
+              <View style={[mlStyles.chatAvatar, { backgroundColor: msg.color + "30", borderColor: msg.color + "60" }]}>
+                <Text style={[mlStyles.chatAvatarText, { color: msg.color }]}>{msg.initials}</Text>
+              </View>
+              <View style={mlStyles.chatTextWrap}>
+                <Text style={mlStyles.chatName}>{msg.name}</Text>
+                <Text style={mlStyles.chatText}>{msg.text}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+
+        {/* ── Bottom input bar ── */}
+        <View style={mlStyles.bottomBar}>
+          <View style={mlStyles.inputPill}>
+            <Ionicons name="musical-note" size={15} color="rgba(0,0,0,0.35)" style={{ marginRight: 6 }} />
+            <Text style={mlStyles.inputPlaceholder}>Send a message…</Text>
+            <TouchableOpacity style={mlStyles.sendBtn} activeOpacity={0.8}>
+              <Ionicons name="send" size={15} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={mlStyles.bottomIconBtn} activeOpacity={0.8}>
+            <Ionicons name="heart" size={24} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity style={[mlStyles.bottomIconBtn, { backgroundColor: "rgba(255,60,172,0.22)", borderColor: "rgba(255,60,172,0.35)" }]} activeOpacity={0.8}>
+            <FontAwesome5 name="gift" size={20} color="#FF3CAC" />
+          </TouchableOpacity>
+        </View>
+
+      </Animated.View>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function ProfileView() {
   const { track, liveProgressMs, gradient, needsReconnect, reconnect } = useNowPlayingCtx();
   const router = useRouter();
   const [profile,     setProfile]     = useState<UserProfile | null>(_profileCache);
   const [refreshing,  setRefreshing]  = useState(false);
-  const [editOpen,         setEditOpen]         = useState(false);
-  const [linksSheetOpen,   setLinksSheetOpen]   = useState(false);
+  const [editOpen,            setEditOpen]            = useState(false);
+  const [linksSheetOpen,      setLinksSheetOpen]      = useState(false);
   const [socialLinksSheetOpen, setSocialLinksSheetOpen] = useState(false);
-  const [settingsOpen,     setSettingsOpen]     = useState(false);
+  const [settingsOpen,        setSettingsOpen]        = useState(false);
+  const [pinnedPreviewOpen,   setPinnedPreviewOpen]   = useState(false);
   const [userId,         setUserId]         = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [meetOverlayVisible, setMeetOverlayVisible] = useState(false);
+  const [meetLiveVisible,    setMeetLiveVisible]    = useState(false);
+  const [activeMeetName,     setActiveMeetName]     = useState("");
 
   const fetchProfile = async (force = false) => {
     try {
@@ -5096,7 +6673,7 @@ function ProfileView() {
 
       const { data, error } = await supabase
         .from("users")
-        .select("username, display_name, bio, is_verified, followers_count, following_count, avatar_url, pinned_song_id, pinned_song_name, pinned_song_artist, pinned_song_album_art, profile_links, social_links, spotify_access_token")
+        .select("username, display_name, bio, is_verified, followers_count, following_count, avatar_url, banner_color, banner_image_url, banner_shape, banner_shape_color, username_changed_at, display_name_change_count, display_name_window_start, pinned_song_id, pinned_song_name, pinned_song_artist, pinned_song_album_art, profile_links, social_links, spotify_access_token")
         .eq("id", user.id)
         .single<UserProfile>();
 
@@ -5157,18 +6734,29 @@ function ProfileView() {
       <View style={profileStyles.card}>
         {/* Banner */}
         <View style={profileStyles.bannerWrap}>
-          <LinearGradient
-            colors={["#3D0C00", "#CC4200", "#FF6C1A", "#CC4200", "#3D0C00"]}
-            locations={[0, 0.25, 0.5, 0.75, 1]}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            style={StyleSheet.absoluteFill}
-          />
+          {profile?.banner_image_url ? (
+            <Image source={{ uri: profile.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : profile?.banner_color ? (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: profile.banner_color }]} />
+          ) : (
+            <LinearGradient
+              colors={["#3D0C00", "#CC4200", "#FF6C1A", "#CC4200", "#3D0C00"]}
+              locations={[0, 0.25, 0.5, 0.75, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFill}
+            />
+          )}
+          {profile?.banner_shape && !profile.banner_image_url ? (
+            <View style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]} pointerEvents="none">
+              <BannerShape shape={profile.banner_shape} color={profile.banner_shape_color ?? "#ffffff"} size={72} />
+            </View>
+          ) : null}
           <LinearGradient
             colors={["transparent", "rgba(22,22,24,0.55)"]}
             style={StyleSheet.absoluteFill}
           />
-          <View style={profileStyles.bannerGlow} />
+          {/* <View style={profileStyles.bannerGlow} /> */}
 
           <View style={profileStyles.bannerActions}>
             {/* Social icons — only linked platforms, up to 3 (2 + overflow badge) */}
@@ -5244,7 +6832,14 @@ function ProfileView() {
           </View>
 
           <View style={profileStyles.metaRow}>
-            <TouchableOpacity style={profileStyles.metaItem} activeOpacity={0.7} onPress={() => setEditOpen(true)}>
+            <TouchableOpacity
+              style={profileStyles.metaItem}
+              activeOpacity={0.7}
+              onPress={() => {
+                if (profile?.pinned_song_id) setPinnedPreviewOpen(true);
+                else setEditOpen(true);
+              }}
+            >
               <FontAwesome5 name="music" size={11} color={profile?.pinned_song_id ? "#FF6C1A" : "rgba(255,255,255,0.28)"} />
               <Text
                 style={[profileStyles.metaText, profile?.pinned_song_id && { color: "rgba(255,255,255,0.7)" }]}
@@ -5343,7 +6938,7 @@ function ProfileView() {
                     `https://open.spotify.com/artist/${track.artistId}`,
                   )}
                 >
-                  <Text style={[profileStyles.npArtist, { textDecorationLine: "underline" }]} numberOfLines={1}>
+                  <Text style={[profileStyles.npArtist]} numberOfLines={1}>
                     {track.artist}
                   </Text>
                 </TouchableOpacity>
@@ -5365,6 +6960,16 @@ function ProfileView() {
 
             {/* Broadcast row */}
             <BroadcastRow />
+
+            {/* Start Meet button — nested inside now playing card */}
+            <TouchableOpacity
+              style={profileStyles.startMeetBtn}
+              activeOpacity={0.85}
+              onPress={() => setMeetOverlayVisible(true)}
+            >
+              <FontAwesome5 name="broadcast-tower" size={14} color="#fff" />
+              <Text style={profileStyles.startMeetBtnText}>Start Meet</Text>
+            </TouchableOpacity>
           </LinearGradient>
         );
       })()}
@@ -5396,6 +7001,13 @@ function ProfileView() {
         username: profile?.username ?? "",
         bio: profile?.bio ?? "",
         avatar_url: profile?.avatar_url ?? null,
+        banner_color: profile?.banner_color ?? null,
+        banner_image_url: profile?.banner_image_url ?? null,
+        banner_shape: profile?.banner_shape ?? null,
+        banner_shape_color: profile?.banner_shape_color ?? null,
+        username_changed_at: profile?.username_changed_at ?? null,
+        display_name_change_count: profile?.display_name_change_count ?? 0,
+        display_name_window_start: profile?.display_name_window_start ?? null,
         pinned_song_id: profile?.pinned_song_id ?? null,
         pinned_song_name: profile?.pinned_song_name ?? null,
         pinned_song_artist: profile?.pinned_song_artist ?? null,
@@ -5412,6 +7024,13 @@ function ProfileView() {
           username: data.username,
           bio: data.bio || null,
           avatar_url: data.avatar_url,
+          banner_color: data.banner_color,
+          banner_image_url: data.banner_image_url,
+          banner_shape: data.banner_shape,
+          banner_shape_color: data.banner_shape_color,
+          username_changed_at: data.username_changed_at,
+          display_name_change_count: data.display_name_change_count,
+          display_name_window_start: data.display_name_window_start,
           pinned_song_id: data.pinned_song_id,
           pinned_song_name: data.pinned_song_name,
           pinned_song_artist: data.pinned_song_artist,
@@ -5430,6 +7049,35 @@ function ProfileView() {
         onClose={() => setSettingsOpen(false)}
       />
     )}
+
+    {/* Pinned song preview — opened by tapping the pinned song row */}
+    <SongPreviewSheet
+      visible={pinnedPreviewOpen}
+      onClose={() => setPinnedPreviewOpen(false)}
+      song={
+        profile?.pinned_song_id
+          ? {
+              id:       profile.pinned_song_id,
+              name:     profile.pinned_song_name ?? "",
+              artist:   profile.pinned_song_artist ?? "",
+              albumArt: profile.pinned_song_album_art ?? null,
+            }
+          : null
+      }
+      accessToken={accessToken}
+    />
+
+    <StartMeetOverlay
+      visible={meetOverlayVisible}
+      onClose={() => setMeetOverlayVisible(false)}
+      onStarted={(name) => { setActiveMeetName(name); setMeetLiveVisible(true); }}
+    />
+
+    <MeetLiveScreen
+      visible={meetLiveVisible}
+      onClose={() => setMeetLiveVisible(false)}
+      meetName={activeMeetName}
+    />
     </View>
   );
 }
@@ -5665,6 +7313,302 @@ const profileStyles = StyleSheet.create({
     color: "rgba(255,255,255,0.6)",
     fontWeight: "500",
   },
+
+  // Start Meet button — lives inside the Now Playing card
+  startMeetBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    marginTop: 12,
+    paddingVertical: 11,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.28)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  startMeetBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
+    letterSpacing: 0.2,
+  },
+});
+
+// ─── Start Meet Overlay styles ───────────────────────────────────────────────
+
+const mmStyles = StyleSheet.create({
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.70)",
+  },
+  sheet: {
+    // Fixed height anchored to the bottom. Keyboard slides over the bottom portion;
+    // the inner ScrollView lets the user reach everything by scrolling.
+    position: "absolute",
+    bottom: 0, left: 0, right: 0,
+    height: SH * 0.85,
+    backgroundColor: "#111113",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: "hidden",
+    borderTopWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  handle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignSelf: "center",
+    marginTop: 10,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.07)",
+  },
+  headerTitle: { fontSize: 17, fontWeight: "700", color: "#fff" },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 40, paddingTop: 8 },
+
+  label: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.55)",
+    marginTop: 18,
+    marginBottom: 6,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  labelMuted: { fontWeight: "400", textTransform: "none", letterSpacing: 0 },
+
+  input: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#fff",
+  },
+  inputMultiline: {
+    minHeight: 88,
+    textAlignVertical: "top",
+  },
+
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  toggleLabel: { fontSize: 15, color: "#fff", fontWeight: "500" },
+
+  tagInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  tagInput: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 15,
+    color: "#fff",
+  },
+  tagAddBtn: {
+    width: 44, height: 44, borderRadius: 14,
+    backgroundColor: "rgba(171,0,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(171,0,255,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tagChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  tagChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(171,0,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(171,0,255,0.32)",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  tagChipText: { fontSize: 13, color: "#AB00FF", fontWeight: "600" },
+
+  startBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 28,
+    paddingVertical: 15,
+    borderRadius: 24,
+    backgroundColor: "#AB00FF",
+  },
+  startBtnDisabled: { opacity: 0.40 },
+  startBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+});
+
+// ─── Meet Live Screen styles ──────────────────────────────────────────────────
+
+const mlStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#060011",
+  },
+  bgGlow: {
+    position: "absolute",
+    top: SH * 0.15,
+    left: SW * 0.1,
+    width: SW * 0.8,
+    height: SH * 0.5,
+    borderRadius: SW * 0.4,
+    backgroundColor: "rgba(171,0,255,0.08)",
+  },
+
+  // Top bar
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingTop: 54,   // below status bar
+    paddingBottom: 12,
+  },
+  topLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  hostRing: {
+    width: 46, height: 46, borderRadius: 23,
+    padding: 2,
+    alignItems: "center", justifyContent: "center",
+  },
+  hostAvatarInner: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: "#1a0040",
+    alignItems: "center", justifyContent: "center",
+  },
+  hostInitials: { fontSize: 15, fontWeight: "800", color: "#fff" },
+  hostName: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  liveRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#FF3CAC" },
+  liveLabel: { fontSize: 11, fontWeight: "800", color: "#FF3CAC", marginLeft: 5, letterSpacing: 0.8 },
+  viewerCount: { fontSize: 11, color: "rgba(255,255,255,0.45)" },
+
+  topRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  topBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center", justifyContent: "center",
+  },
+  endBtn: {
+    width: "auto",
+    paddingHorizontal: 16,
+    backgroundColor: "rgba(255,60,172,0.18)",
+    borderColor: "rgba(255,60,172,0.40)",
+  },
+  endBtnText: { fontSize: 13, fontWeight: "700", color: "#FF3CAC" },
+
+  // Viewer avatar strip
+  viewerBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    marginBottom: 12,
+  },
+  viewerDot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: "#060011" },
+  viewerBarText: { fontSize: 11, color: "rgba(255,255,255,0.38)", flex: 1 },
+
+  reactionsCol: {
+    position: "absolute",
+    right: 16,
+    bottom: 140,
+    alignItems: "center",
+  },
+
+  chatArea: {
+    position: "absolute",
+    bottom: 100,
+    left: 0,
+    right: 80,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  chatBubble: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+    maxWidth: "85%",
+    marginBottom: 15,
+  },
+  chatAvatar: {
+    width: 28, height: 28, borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center", justifyContent: "center",
+    flexShrink: 0,
+  },
+  chatAvatarText: { fontSize: 10, fontWeight: "800" },
+  chatTextWrap: {
+    backgroundColor: "rgba(255,255,255,0.20)",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backdropFilter: "blur(8px)",
+  },
+  chatName: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.55)", marginBottom: 2 },
+  chatText:  { fontSize: 15, color: "#fff", lineHeight: 17 },
+
+  bottomBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0, right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingBottom: BOTTOM_INSET + 12,
+    paddingTop: 12,
+    gap: 10,
+    backgroundColor: "rgba(0,0,0,0.38)",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+  },
+  inputPill: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  inputPlaceholder: { flex: 1, fontSize: 14, color: "rgba(0,0,0,0.38)" },
+  sendBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: "#AB00FF",
+    alignItems: "center", justifyContent: "center",
+  },
+  bottomIconBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
+    alignItems: "center", justifyContent: "center",
+  },
 });
 
 // ─── Post Composer styles ─────────────────────────────────────────────────────
@@ -5779,8 +7723,52 @@ const csStyles = StyleSheet.create({
   mediaPickerClose: { paddingLeft: 14, paddingRight: 2, alignSelf: "center" },
 });
 
+const psStyles = StyleSheet.create({
+  sheet: { position: "absolute", bottom: 0, left: 0, right: 0, height: "88%", backgroundColor: "#111113", borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: "hidden", borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  navBtn: { width: 32, alignItems: "center" },
+  homeContent: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 40 },
+  sectionLabel: { fontSize: 11, fontWeight: "700" as const, color: "rgba(255,255,255,0.3)", letterSpacing: 1, marginBottom: 14 },
+  nowPlayingCard: { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, backgroundColor: "rgba(29,185,84,0.08)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(29,185,84,0.2)", padding: 14 },
+  npArt: { width: 52, height: 52, borderRadius: 10, flexShrink: 0 },
+  npArtFallback: { backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center" as const, justifyContent: "center" as const },
+  npTrack: { fontSize: 14, fontWeight: "700" as const, color: "#fff" },
+  npArtist: { fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 },
+  pinBtn: { flexDirection: "row" as const, alignItems: "center" as const, gap: 5, backgroundColor: "#1DB954", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
+  pinBtnText: { fontSize: 12, fontWeight: "700" as const, color: "#000" },
+  addSongBtn: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 10, backgroundColor: "#FF6C1A", borderRadius: 14, paddingVertical: 14 },
+  addSongText: { fontSize: 15, fontWeight: "700" as const, color: "#fff" },
+  divider: { height: 1, backgroundColor: "rgba(255,255,255,0.07)", marginVertical: 24 },
+  menuRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 14, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
+  menuIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center" as const, justifyContent: "center" as const },
+  menuLabel: { flex: 1, fontSize: 15, fontWeight: "600" as const, color: "#fff" },
+  plArt: { width: 48, height: 48, borderRadius: 8, flexShrink: 0 },
+  likedArt: { backgroundColor: "rgba(29,185,84,0.1)", alignItems: "center" as const, justifyContent: "center" as const },
+  plArtFallback: { backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center" as const, justifyContent: "center" as const },
+  // Preview step
+  previewWrap: { flex: 1, alignItems: "center" as const, paddingHorizontal: 28, paddingTop: 20, paddingBottom: 28 },
+  previewArt: { width: 190, height: 190, borderRadius: 18, marginBottom: 22 },
+  previewArtFallback: { backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center" as const, justifyContent: "center" as const },
+  previewTrack: { fontSize: 20, fontWeight: "800" as const, color: "#fff", textAlign: "center" as const, marginBottom: 6 },
+  previewArtist: { fontSize: 14, color: "rgba(255,255,255,0.45)", textAlign: "center" as const, marginBottom: 24 },
+  previewProgressTrack: { width: "100%", height: 4, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 2, marginBottom: 8 },
+  previewProgressFill: { height: 4, backgroundColor: "#1DB954", borderRadius: 2 },
+  previewTimes: { width: "100%", flexDirection: "row" as const, justifyContent: "space-between" as const, marginBottom: 20 },
+  previewTime: { fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: "600" as const },
+  noPreviewText: { fontSize: 13, color: "rgba(255,255,255,0.3)", marginVertical: 24, fontStyle: "italic" as const },
+  playPauseBtn: { width: 60, height: 60, borderRadius: 30, backgroundColor: "#1DB954", alignItems: "center" as const, justifyContent: "center" as const, marginBottom: 28 },
+  previewActions: { flexDirection: "row" as const, gap: 12, width: "100%", marginBottom: 14 },
+  openBtn: { flex: 1, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 7, height: 46, borderRadius: 14, backgroundColor: "rgba(29,185,84,0.12)", borderWidth: 1, borderColor: "rgba(29,185,84,0.3)" },
+  openBtnText: { fontSize: 14, fontWeight: "700" as const, color: "#1DB954" },
+  saveBtn: { flex: 1, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 7, height: 46, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
+  saveBtnSaved: { backgroundColor: "rgba(29,185,84,0.1)", borderColor: "rgba(29,185,84,0.28)" },
+  saveBtnText: { fontSize: 14, fontWeight: "600" as const, color: "rgba(255,255,255,0.7)" },
+  saveBtnTextSaved: { color: "#1DB954" },
+  pinCTA: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8, width: "100%", height: 52, borderRadius: 16, backgroundColor: "#FF6C1A" },
+  pinCTAText: { fontSize: 16, fontWeight: "800" as const, color: "#000" },
+});
+
 const epOverlayStyles = StyleSheet.create({
-  backdrop: { backgroundColor: "rgba(0,0,0,0.72)" },
+  backdrop: { backgroundColor: "rgba(0,0,0,0.70)" },
   sheet: {
     position: "absolute", bottom: 0, left: 0, right: 0, height: "92%",
     backgroundColor: "#111113",
@@ -5811,7 +7799,7 @@ const epOverlayStyles = StyleSheet.create({
   resultArtist: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 },
   emptyText: { textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 14, marginTop: 32 },
   avatarSection: { alignItems: "center", paddingVertical: 24 },
-  avatarWrap: { position: "relative" },
+  avatarWrap: { position: "relative", width: 94, height: 94 },
   avatarCircle: { width: 90, height: 90, borderRadius: 20, backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center", overflow: "hidden" },
   avatarLoading: { backgroundColor: "rgba(255,255,255,0.1)" },
   avatarInitials: { fontSize: 30, fontWeight: "800", color: "#fff" },
@@ -5837,6 +7825,42 @@ const epOverlayStyles = StyleSheet.create({
   socialRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
   socialIconWrap: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   socialInput: { flex: 1, backgroundColor: "#1A1A1C", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 13, paddingHorizontal: 12, paddingVertical: 10 },
+  bannerPreview: { height: 150, borderRadius: 14, overflow: "hidden", backgroundColor: "#1A1A1C", alignItems: "flex-end", justifyContent: "flex-end", padding: 10 },
+  bannerEditBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(0,0,0,0.52)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
+  bannerEditText: { fontSize: 12, fontWeight: "700" as const, color: "#fff" },
+  inputLocked: { opacity: 0.4 },
+  cooldownBadge: { fontSize: 11, fontWeight: "600" as const, color: "#FF6C1A", letterSpacing: 0 },
+  cooldownBadgeLocked: { fontSize: 11, fontWeight: "600" as const, color: "rgba(255,100,80,0.75)", letterSpacing: 0 },
+});
+
+const bcOverlayStyles = StyleSheet.create({
+  backdrop: { backgroundColor: "rgba(0,0,0,0.6)" },
+  sheet: { position: "absolute", bottom: 0, left: 0, right: 0, height: "75%", backgroundColor: "#1A1A1C", borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: "hidden", borderTopWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.15)", alignSelf: "center", marginTop: 10, marginBottom: 4 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)" },
+  title: { fontSize: 16, fontWeight: "700" as const, color: "#fff" },
+  closeBtn: { fontSize: 16, color: "rgba(255,255,255,0.45)", fontWeight: "600" as const },
+  content: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
+  imageBox: { height: 120, borderRadius: 16, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.15)", borderStyle: "dashed" as const, alignItems: "center", justifyContent: "center", gap: 8, overflow: "hidden", backgroundColor: "#1A1A1C" },
+  imageOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", gap: 6 },
+  imageBoxText: { fontSize: 14, color: "rgba(255,255,255,0.5)", fontWeight: "600" as const },
+  dividerRow: { flexDirection: "row", alignItems: "center", marginVertical: 22, gap: 12 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.08)" },
+  dividerText: { fontSize: 12, color: "rgba(255,255,255,0.25)", fontWeight: "600" as const },
+  colorRow: { flexDirection: "row" as const, justifyContent: "space-between" as const, marginBottom: 10 },
+  colorSwatch: { borderRadius: 14, alignItems: "center" as const, justifyContent: "center" as const },
+  colorSwatchSelected: { borderWidth: 2.5, borderColor: "#fff" },
+});
+
+const bsOverlayStyles = StyleSheet.create({
+  sheet: { position: "absolute", bottom: 0, left: 0, right: 0, height: "78%", backgroundColor: "#1A1A1C", borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: "hidden", borderTopWidth: 1, borderColor: "rgba(255,255,255,0.1)" },
+  sectionLabel: { fontSize: 11, fontWeight: "700" as const, color: "rgba(255,255,255,0.35)", letterSpacing: 1, marginBottom: 14 },
+  shapeCell: { height: SWATCH_SIZE + 26, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.07)", alignItems: "center" as const, justifyContent: "center" as const },
+  shapeCellSelected: { backgroundColor: "rgba(255,108,26,0.18)", borderWidth: 1.5, borderColor: "#FF6C1A" },
+  shapeIconWrap: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const },
+  shapeLabel: { fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: "600" as const, paddingBottom: 7 },
+  shapeLabelSelected: { color: "#FF6C1A" },
+  disabledHint: { fontSize: 12, color: "rgba(255,255,255,0.35)", textAlign: "center" as const, marginBottom: 14, fontStyle: "italic" as const },
 });
 
 // ─── Post Composer Sheet ──────────────────────────────────────────────────────
@@ -6722,7 +8746,7 @@ const styles = StyleSheet.create({
   composerGlass: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(22, 22, 28, 0.9)",
+    backgroundColor: "rgba(0,0,0,0.70)",
     borderRadius: 32,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.13)",
@@ -6741,9 +8765,35 @@ const styles = StyleSheet.create({
   composerSend: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#AB00FF", alignItems: "center", justifyContent: "center" },
   composerSendIcon: { fontSize: 18, color: "#fff", fontWeight: "700" },
 
+  // ─── Song card in PostDetailOverlay composer bar ──────────────────────────
+  detailSongCard: {
+    flexDirection: "row" as const, alignItems: "center" as const, gap: 10,
+    backgroundColor: "rgba(29,185,84,0.10)",
+    borderWidth: 1, borderColor: "rgba(29,185,84,0.25)",
+    borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9,
+    marginBottom: 8,
+  },
+  detailSongArt: { width: 38, height: 38, borderRadius: 8, backgroundColor: "#1a1a1c" },
+  detailSongArtFallback: { alignItems: "center" as const, justifyContent: "center" as const },
+  detailSongName: { fontSize: 13, fontWeight: "700" as const, color: "#fff" },
+  detailSongArtist: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 1 },
+
+  // ─── Song card embedded inside a comment bubble ───────────────────────────
+  commentSongCard: {
+    flexDirection: "row" as const, alignItems: "center" as const, gap: 9,
+    marginTop: 7,
+    backgroundColor: "rgba(29,185,84,0.10)",
+    borderWidth: 1, borderColor: "rgba(29,185,84,0.22)",
+    borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8,
+  },
+  commentSongArt: { width: 34, height: 34, borderRadius: 7, backgroundColor: "#1a1a1c" },
+  commentSongArtFallback: { alignItems: "center" as const, justifyContent: "center" as const },
+  commentSongName: { fontSize: 12, fontWeight: "700" as const, color: "#fff" },
+  commentSongArtist: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 1 },
+
   // Bottom glass navbar
-  navBarWrap: { position: "absolute", bottom: 0, left: 0, right: 0, paddingBottom: BOTTOM_INSET, paddingHorizontal: 12, paddingTop: 8, backgroundColor: "rgba(13,13,13,0.85)", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)" },
-  navBarGlass: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 96, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", paddingVertical: 6, height: NAVBAR_H - 8 },
+  navBarWrap: { position: "absolute", bottom: 0, left: 0, right: 0, paddingBottom: BOTTOM_INSET, paddingHorizontal: 12, paddingTop: 8 },
+  navBarGlass: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", backgroundColor: "rgba(0,0,0,0.70)", borderRadius: 96, borderWidth: 1, borderColor: "rgba(255,255,255,0.09)", paddingVertical: 6, height: NAVBAR_H - 8 },
   navItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 3, paddingVertical: 4 },
   navIcon: { fontSize: 30, color: "rgba(255,255,255,0.3)" },
   navIconActive: { color: "#AB00FF" },
@@ -6787,6 +8837,19 @@ const styles = StyleSheet.create({
   qrSendIcon: { fontSize: 17, color: "#fff", fontWeight: "700" },
   qrPlusBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" },
   qrPlusBtnIcon: { fontSize: 22, color: "#fff", lineHeight: 26 },
+
+  // Attached song card above the quick-reply input glass
+  qrSongCard: {
+    flexDirection: "row" as const, alignItems: "center" as const, gap: 10,
+    backgroundColor: "rgba(29,185,84,0.12)",
+    borderWidth: 1, borderColor: "rgba(29,185,84,0.28)",
+    borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8,
+    marginBottom: 8,
+  },
+  qrSongArt: { width: 36, height: 36, borderRadius: 8, backgroundColor: "#1a1a1c" },
+  qrSongArtFallback: { alignItems: "center" as const, justifyContent: "center" as const },
+  qrSongName: { fontSize: 13, fontWeight: "700" as const, color: "#fff" },
+  qrSongArtist: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 1 },
 
   // Action menu sheet
   menuBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.55)" },
@@ -6858,6 +8921,48 @@ const styles = StyleSheet.create({
   commentLikeIcon: { fontSize: 18, color: "rgba(255,255,255,0.3)" },
   commentLikeCount: { fontSize: 11, color: "rgba(255,255,255,0.35)", fontWeight: "600" },
   commentSeparator: { height: 1, backgroundColor: "rgba(255,255,255,0.04)", marginHorizontal: 16 },
+
+  // ── Threaded replies ────────────────────────────────────────────────────────
+  repliesBlock: {
+    flexDirection: "row",
+    marginLeft: 52,        // align with bubble (avatar width + gap)
+    marginTop: 2,
+    marginBottom: 2,
+  },
+  threadLine: {
+    width: 2,
+    marginRight: 12,
+    marginTop: 4,
+    marginBottom: 4,
+    borderRadius: 1,
+    backgroundColor: "rgba(255,255,255,0.10)",
+  },
+  replyRow: {
+    flex: 1,
+  },
+  showMoreReplies: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  showMoreDots: {
+    flexDirection: "row",
+    gap: 3,
+    alignItems: "center",
+  },
+  showMoreDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(171,0,255,0.55)",
+  },
+  showMoreRepliesText: {
+    fontSize: 12,
+    color: "#AB00FF",
+    fontWeight: "600",
+  },
 
   // Detail reply bar
   detailReplyBarWrap: { position: "absolute", left: 16, right: 16 },

@@ -23,6 +23,13 @@ export type UserProfile = {
   followers_count: number | null;
   following_count: number | null;
   avatar_url: string | null;
+  banner_color: string | null;
+  banner_image_url: string | null;
+  banner_shape: string | null;
+  banner_shape_color: string | null;
+  username_changed_at: string | null;
+  display_name_change_count: number | null;
+  display_name_window_start: string | null;
   pinned_song_id: string | null;
   pinned_song_name: string | null;
   pinned_song_artist: string | null;

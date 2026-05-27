@@ -419,6 +419,7 @@ export type SpotifyTrackResult = {
   artist: string
   albumArt: string | null
   durationMs: number
+  previewUrl: string | null
 }
 
 export const searchSpotifyTracks = async (
@@ -439,10 +440,256 @@ export const searchSpotifyTracks = async (
       artist: item.artists[0]?.name ?? '',
       albumArt: item.album.images[0]?.url ?? null,
       durationMs: item.duration_ms,
+      previewUrl: item.preview_url ?? null,
     }))
   } catch {
     return []
   }
+}
+
+export type SpotifyPlaylist = {
+  id: string
+  name: string
+  imageUrl: string | null
+  trackCount: number
+  isLiked?: boolean
+}
+
+export const getUserPlaylists = async (accessToken: string): Promise<SpotifyPlaylist[]> => {
+  try {
+    const results: SpotifyPlaylist[] = []
+
+    // Liked Songs first — fetch just 1 item to get the total count
+    const savedRes = await fetch('https://api.spotify.com/v1/me/tracks?limit=1', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (savedRes.ok) {
+      const d = await savedRes.json()
+      results.push({ id: 'liked', name: 'Liked Songs', imageUrl: null, trackCount: d.total ?? 0, isLiked: true })
+    }
+
+    // User playlists (paginated)
+    let url: string = 'https://api.spotify.com/v1/me/playlists?limit=50'
+    while (url) {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+      if (!res.ok) break
+      const data = await res.json()
+      for (const item of data.items ?? []) {
+        results.push({
+          id: item.id,
+          name: item.name,
+          imageUrl: item.images?.[0]?.url ?? null,
+          trackCount: item.tracks?.total ?? 0,
+        })
+      }
+      url = data.next ?? ''
+    }
+
+    return results
+  } catch {
+    return []
+  }
+}
+
+export const getPlaylistTracks = async (
+  accessToken: string,
+  playlistId: string,
+): Promise<SpotifyTrackResult[]> => {
+  try {
+    const results: SpotifyTrackResult[] = []
+    const baseUrl = playlistId === 'liked'
+      ? 'https://api.spotify.com/v1/me/tracks?limit=50'
+      : `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50`
+
+    let url: string = baseUrl
+    while (url) {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+      if (!res.ok) break
+      const data = await res.json()
+      for (const item of data.items ?? []) {
+        if (!item) continue  // Spotify can return null items for local files
+        const track = item.track  // both /me/tracks and /playlists/*/tracks wrap in .track
+        if (!track?.id) continue  // skip local files (id is null)
+        results.push({
+          id: track.id,
+          name: track.name,
+          artist: track.artists?.[0]?.name ?? '',
+          albumArt: track.album?.images?.[0]?.url ?? null,
+          durationMs: track.duration_ms,
+          previewUrl: track.preview_url ?? null,
+        })
+      }
+      url = data.next ?? ''
+      if (results.length >= 200) break  // cap to avoid unbounded loading
+    }
+    return results
+  } catch {
+    return []
+  }
+}
+
+// ─── Public (app-level) token ─────────────────────────────────────────────────
+// Uses the spotify-public-token Edge Function which runs Client Credentials flow
+// server-side (client_secret never exposed in the app bundle).
+// The result is cached in module memory so we only call the function once per hour.
+let _publicToken    = "";
+let _publicTokenExp = 0;
+
+export const getPublicSpotifyToken = async (): Promise<string | null> => {
+  if (_publicToken && Date.now() < _publicTokenExp - 30_000) return _publicToken;
+  try {
+    const supabaseUrl     = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+    const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+    const { data: { session } } = await supabase.auth.getSession();
+
+    const res = await fetch(
+      `${supabaseUrl}/functions/v1/spotify-public-token`,
+      {
+        headers: {
+          apikey:        supabaseAnonKey,
+          Authorization: `Bearer ${session?.access_token ?? supabaseAnonKey}`,
+        },
+      },
+    );
+    if (!res.ok) {
+      console.error('[spotify] public token fetch failed:', res.status, await res.text());
+      return null;
+    }
+    const { access_token } = await res.json();
+    if (!access_token) return null;
+    _publicToken    = access_token;
+    _publicTokenExp = Date.now() + 55 * 60 * 1000;
+    return _publicToken;
+  } catch (e) {
+    console.error('[spotify] getPublicSpotifyToken error:', e);
+    return null;
+  }
+};
+
+// ─── Token helper ─────────────────────────────────────────────────────────────
+// Returns a valid (non-expired) Spotify access token for the given user,
+// refreshing automatically if it has less than 60 seconds left.
+// Returns null when no token exists or the refresh fails.
+export const getValidSpotifyToken = async (userId: string): Promise<string | null> => {
+  try {
+    const { data: profile } = await supabase
+      .from('users')
+      .select('spotify_access_token, spotify_refresh_token, spotify_token_expires_at')
+      .eq('id', userId)
+      .single()
+
+    if (!profile?.spotify_access_token) return null
+
+    const msLeft = profile.spotify_token_expires_at
+      ? new Date(profile.spotify_token_expires_at).getTime() - Date.now()
+      : -1
+
+    if (msLeft >= 60_000) return profile.spotify_access_token
+
+    // Token expired (or about to) — try to refresh
+    if (!profile.spotify_refresh_token) return null
+    const refreshed = await refreshSpotifyToken(userId, profile.spotify_refresh_token)
+    return refreshed ?? null
+  } catch {
+    return null
+  }
+}
+
+// ─── Artist discovery ─────────────────────────────────────────────────────────
+
+export type SpotifyArtistInfo = {
+  id: string
+  name: string
+  imageUrl: string | null
+  genres: string[]
+  followersCount: number
+}
+
+export type SpotifyAlbum = {
+  id: string
+  name: string
+  albumType: string   // "album" | "single" | "compilation"
+  releaseDate: string
+  totalTracks: number
+  imageUrl: string | null
+}
+
+export type SpotifyAlbumTrack = {
+  id: string
+  name: string
+  trackNumber: number
+  durationMs: number
+  previewUrl: string | null
+}
+
+// Search Spotify for an artist by name and return the best match.
+export const searchSpotifyArtist = async (
+  accessToken: string,
+  name: string,
+): Promise<SpotifyArtistInfo | null> => {
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(name)}&type=artist&limit=1`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (!res.ok) return null
+    const data = await res.json()
+    const a = data.artists?.items?.[0]
+    if (!a) return null
+    return {
+      id: a.id,
+      name: a.name,
+      imageUrl: a.images?.[0]?.url ?? null,
+      genres: a.genres ?? [],
+      followersCount: a.followers?.total ?? 0,
+    }
+  } catch { return null }
+}
+
+// Fetch an artist's albums/singles from Spotify.
+export const getArtistAlbums = async (
+  accessToken: string,
+  artistId: string,
+): Promise<SpotifyAlbum[]> => {
+  try {
+    const cleanId = artistId.trim()
+    const res = await fetch(
+      `https://api.spotify.com/v1/artists/${cleanId}/albums`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.items ?? []).map((a: any) => ({
+      id: a.id,
+      name: a.name,
+      albumType: a.album_type,
+      releaseDate: a.release_date,
+      totalTracks: a.total_tracks,
+      imageUrl: a.images?.[0]?.url ?? null,
+    }))
+  } catch { return [] }
+}
+
+// Fetch tracks for a specific album.
+export const getAlbumTracks = async (
+  accessToken: string,
+  albumId: string,
+): Promise<SpotifyAlbumTrack[]> => {
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/albums/${albumId}/tracks?limit=50`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.items ?? []).map((t: any) => ({
+      id: t.id,
+      name: t.name,
+      trackNumber: t.track_number,
+      durationMs: t.duration_ms,
+      previewUrl: t.preview_url ?? null,
+    }))
+  } catch { return [] }
 }
 
 // Check if a track is already in the user's Liked Songs.
