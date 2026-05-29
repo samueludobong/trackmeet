@@ -29,20 +29,29 @@ export const redirectUri = AuthSession.makeRedirectUri({
 })
 
 // Generate code verifier for PKCE
-const generateCodeVerifier = async () => {
+// Avoid btoa(String.fromCharCode(...typedArray)) — spreading Uint8Array into
+// String.fromCharCode is unreliable in Hermes for byte values > 127.
+// Use Crypto.getRandomBytesAsync then encode via base64url with Expo's built-in encoder.
+const generateCodeVerifier = async (): Promise<string> => {
   const randomBytes = await Crypto.getRandomBytesAsync(32)
-  return btoa(String.fromCharCode(...randomBytes))
+  // Encode each byte individually — safe in all JS engines
+  let binary = ''
+  for (let i = 0; i < randomBytes.length; i++) binary += String.fromCharCode(randomBytes[i])
+  return btoa(binary)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '')
 }
 
-// Generate code challenge from verifier
-const generateCodeChallenge = async (verifier: string) => {
+// Generate code challenge from verifier (PKCE: BASE64URL(SHA256(ASCII(verifier))))
+// expo-crypto digestStringAsync is correct here because the code verifier only
+// contains base64url characters (A-Z, a-z, 0-9, -, _) — all ASCII — so its
+// UTF-8 encoding is identical to its ASCII encoding, producing the right hash.
+const generateCodeChallenge = async (verifier: string): Promise<string> => {
   const hash = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     verifier,
-    { encoding: Crypto.CryptoEncoding.BASE64 }
+    { encoding: Crypto.CryptoEncoding.BASE64 },
   )
   return hash
     .replace(/\+/g, '-')
@@ -56,6 +65,7 @@ const generateCodeChallenge = async (verifier: string) => {
 // so omit userId and use the returned token fields to include in the INSERT instead.
 export const connectSpotify = async (userId?: string) => {
   try {
+    console.log('[Spotify] connectSpotify v4 start')
     const codeVerifier = await generateCodeVerifier()
     const codeChallenge = await generateCodeChallenge(codeVerifier)
 
@@ -68,63 +78,41 @@ export const connectSpotify = async (userId?: string) => {
       code_challenge: codeChallenge,
     })
 
+    // When reconnecting from Settings (userId already exists), force the Spotify
+    // permissions dialog to appear every time so the user explicitly grants ALL
+    // current scopes — Spotify otherwise caches the previous grant and skips the
+    // dialog, issuing a token with the old (smaller) scope set.
+    if (userId) params.set('show_dialog', 'true')
+
     // Log so you can verify this matches what's in your Spotify Dashboard
     console.log('[Spotify] redirectUri:', redirectUri)
 
+    // Always use openAuthSessionAsync regardless of whether the Spotify app is
+    // installed.  On iOS this uses ASWebAuthenticationSession (in-app browser
+    // overlay); on Android it uses Chrome Custom Tabs.  Both handle the
+    // trackmeet://spotify-callback redirect internally so Expo Router never
+    // sees it as a navigation event — avoiding the "unknown route" crash on
+    // Android that the old Linking.openURL + addEventListener path caused.
+    const result = await WebBrowser.openAuthSessionAsync(
+      `https://accounts.spotify.com/authorize?${params.toString()}`,
+      redirectUri,
+    )
+    console.log('[Spotify] openAuthSession result:', result.type)
+    if (result.type !== 'success') return { error: 'Auth cancelled' }
+
+    // Parse the callback URL safely — new URL() can behave unexpectedly with
+    // non-standard schemes (exp://) in some Hermes builds, so fall back to regex.
     let code: string | null = null
-
-    const spotifyInstalled = await Linking.canOpenURL('spotify://')
-    console.log('[Spotify] app installed:', spotifyInstalled)
-
-    if (spotifyInstalled) {
-      // Open the HTTPS auth URL in the system browser.
-      // On iOS, Spotify registers accounts.spotify.com as a Universal Link,
-      // so iOS automatically hands the URL off to the Spotify app instead of Safari.
-      // After the user approves, Spotify redirects to trackmeet://spotify-callback?code=...
-      // and iOS routes that back to this app.
-      //
-      // NOTE: this requires a dev build or standalone app — Expo Go does not
-      // register the trackmeet:// URL scheme, so the callback will never arrive.
-      code = await new Promise<string | null>((resolve) => {
-        let settled = false
-
-        const finish = (value: string | null) => {
-          if (settled) return
-          settled = true
-          sub.remove()
-          clearTimeout(timer)
-          resolve(value)
-        }
-
-        // Only handle URLs that are our callback — ignore anything else
-        const sub = Linking.addEventListener('url', ({ url }) => {
-          console.log('[Spotify] incoming url:', url)
-          if (!url.startsWith(redirectUri)) return
-          try {
-            finish(new URL(url).searchParams.get('code'))
-          } catch {
-            finish(null)
-          }
-        })
-
-        Linking.openURL(
-          `https://accounts.spotify.com/authorize?${params.toString()}`
-        )
-
-        // Safety timeout — 5 minutes
-        const timer = setTimeout(() => finish(null), 5 * 60 * 1000)
-      })
-    } else {
-      // Spotify not installed — open auth in an in-app browser (WebView)
-      const result = await WebBrowser.openAuthSessionAsync(
-        `https://accounts.spotify.com/authorize?${params.toString()}`,
-        redirectUri,
-      )
-      if (result.type !== 'success') return { error: 'Auth cancelled' }
+    try {
       code = new URL(result.url).searchParams.get('code')
+    } catch {
+      const m = result.url.match(/[?&]code=([^&]+)/)
+      code = m ? decodeURIComponent(m[1]) : null
     }
-
-    if (!code) return { error: 'No code returned' }
+    if (!code) {
+      const errParam = result.url.match(/[?&]error=([^&]+)/)?.[1]
+      return { error: errParam ? decodeURIComponent(errParam) : 'No code returned' }
+    }
 
     // Exchange code for tokens
     const tokenResponse = await fetch('https://accounts.spotify.com/api/token', {
@@ -141,22 +129,55 @@ export const connectSpotify = async (userId?: string) => {
       }).toString(),
     })
 
-    const tokens = await tokenResponse.json()
+    // Read raw text first — Spotify occasionally returns plain-text errors (e.g. when
+    // the code_verifier doesn't match the challenge) instead of JSON.
+    const tokenRaw = await tokenResponse.text()
+    console.log('[Spotify] token response status:', tokenResponse.status)
+    let tokens: any
+    try {
+      tokens = JSON.parse(tokenRaw)
+    } catch {
+      console.log('[Spotify] token response body (non-JSON):', tokenRaw.slice(0, 300))
+      return { error: `Token exchange failed: ${tokenRaw.slice(0, 120)}` }
+    }
 
-    if (tokens.error) return { error: tokens.error_description }
+    if (tokens.error) return { error: tokens.error_description ?? tokens.error }
+    if (!tokens.access_token) {
+      console.log('[Spotify] token response missing access_token:', JSON.stringify(tokens))
+      return { error: 'No access token in response' }
+    }
+    console.log('[Spotify] got access_token OK')
 
     // Get Spotify user profile
     const profileResponse = await fetch('https://api.spotify.com/v1/me', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     })
-    const spotifyProfile = await profileResponse.json()
+    const profileRaw = await profileResponse.text()
+    console.log('[Spotify] profile status:', profileResponse.status)
+    let spotifyProfile: any
+    try {
+      spotifyProfile = JSON.parse(profileRaw)
+    } catch {
+      console.log('[Spotify] profile body (non-JSON):', profileRaw.slice(0, 200))
+      return { error: 'Could not fetch Spotify profile' }
+    }
+    if (spotifyProfile.error) return { error: spotifyProfile.error?.message ?? 'Profile error' }
 
     // Get top artists for taste profile
     const topArtistsResponse = await fetch(
       'https://api.spotify.com/v1/me/top/artists?limit=20&time_range=medium_term',
       { headers: { Authorization: `Bearer ${tokens.access_token}` } }
     )
-    const topArtists = await topArtistsResponse.json()
+    const topArtistsRaw = await topArtistsResponse.text()
+    console.log('[Spotify] top-artists status:', topArtistsResponse.status)
+    let topArtists: any
+    try {
+      topArtists = JSON.parse(topArtistsRaw)
+    } catch {
+      console.log('[Spotify] top-artists body (non-JSON):', topArtistsRaw.slice(0, 200))
+      // Non-fatal — continue with empty artist list
+      topArtists = { items: [] }
+    }
 
     // Extract genres from top artists
     const genres = [...new Set(
@@ -203,6 +224,24 @@ export const connectSpotify = async (userId?: string) => {
     console.log('Spotify connect error:', error)
     return { error: error.message }
   }
+}
+
+// Disconnect Spotify — clears all token fields from the user's DB row
+export const disconnectSpotify = async (userId: string): Promise<void> => {
+  await supabase.from('users').update({
+    spotify_id:               null,
+    spotify_access_token:     null,
+    spotify_refresh_token:    null,
+    spotify_token_expires_at: null,
+    current_song_name:        null,
+    current_song_artist:      null,
+    current_song_id:          null,
+    current_song_album_art:   null,
+    current_song_duration_ms: null,
+    current_song_progress_ms: null,
+    current_song_updated_at:  null,
+    is_broadcasting:          false,
+  }).eq('id', userId)
 }
 
 // Refresh expired token
@@ -265,37 +304,26 @@ export const reconnectSpotify = async (userId: string): Promise<
       code_challenge: codeChallenge,
     })
 
+    // Same unified approach as connectSpotify — always use openAuthSessionAsync
+    // so Android doesn't get an "unknown route" error on the callback deep link.
+    const result = await WebBrowser.openAuthSessionAsync(
+      `https://accounts.spotify.com/authorize?${params.toString()}`,
+      redirectUri,
+    )
+    if (result.type !== 'success') return { error: 'Auth cancelled' }
+
+    // Safe URL parsing with regex fallback (same as connectSpotify)
     let code: string | null = null
-    const spotifyInstalled = await Linking.canOpenURL('spotify://')
-
-    if (spotifyInstalled) {
-      code = await new Promise<string | null>((resolve) => {
-        let settled = false
-        const finish = (value: string | null) => {
-          if (settled) return
-          settled = true
-          sub.remove()
-          clearTimeout(timer)
-          resolve(value)
-        }
-        const sub = Linking.addEventListener('url', ({ url }) => {
-          if (!url.startsWith(redirectUri)) return
-          try { finish(new URL(url).searchParams.get('code')) }
-          catch { finish(null) }
-        })
-        Linking.openURL(`https://accounts.spotify.com/authorize?${params.toString()}`)
-        const timer = setTimeout(() => finish(null), 5 * 60 * 1000)
-      })
-    } else {
-      const result = await WebBrowser.openAuthSessionAsync(
-        `https://accounts.spotify.com/authorize?${params.toString()}`,
-        redirectUri,
-      )
-      if (result.type !== 'success') return { error: 'Auth cancelled' }
+    try {
       code = new URL(result.url).searchParams.get('code')
+    } catch {
+      const m = result.url.match(/[?&]code=([^&]+)/)
+      code = m ? decodeURIComponent(m[1]) : null
     }
-
-    if (!code) return { error: 'No code returned' }
+    if (!code) {
+      const errParam = result.url.match(/[?&]error=([^&]+)/)?.[1]
+      return { error: errParam ? decodeURIComponent(errParam) : 'No code returned' }
+    }
 
     const tokenResponse = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
@@ -309,7 +337,15 @@ export const reconnectSpotify = async (userId: string): Promise<
       }).toString(),
     })
 
-    const tokens = await tokenResponse.json()
+    const tokenRaw = await tokenResponse.text()
+    console.log('[Spotify] reconnect token status:', tokenResponse.status)
+    let tokens: any
+    try {
+      tokens = JSON.parse(tokenRaw)
+    } catch {
+      console.log('[Spotify] reconnect token body (non-JSON):', tokenRaw.slice(0, 300))
+      return { error: `Token exchange failed: ${tokenRaw.slice(0, 120)}` }
+    }
     if (tokens.error) return { error: tokens.error_description ?? tokens.error }
 
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString()
@@ -475,6 +511,10 @@ export const getUserPlaylists = async (accessToken: string): Promise<SpotifyPlay
       if (!res.ok) break
       const data = await res.json()
       for (const item of data.items ?? []) {
+        // Skip Spotify-owned algorithmic playlists (Daily Mix, Discover Weekly,
+        // Release Radar, etc.) — Spotify restricted Web API track access to these
+        // in 2024 and they always return 403 "Forbidden" on /playlists/{id}/tracks.
+        if (!item?.id || item.owner?.id === 'spotify') continue
         results.push({
           id: item.id,
           name: item.name,
@@ -491,25 +531,45 @@ export const getUserPlaylists = async (accessToken: string): Promise<SpotifyPlay
   }
 }
 
+export type PlaylistTracksResult = {
+  tracks: SpotifyTrackResult[]
+  httpError?: number   // set when the API returned a non-2xx status
+}
+
 export const getPlaylistTracks = async (
-  accessToken: string,
+  userToken: string,
   playlistId: string,
-): Promise<SpotifyTrackResult[]> => {
+): Promise<PlaylistTracksResult> => {
   try {
     const results: SpotifyTrackResult[] = []
+
+    // Liked Songs must use the user token (user-library-read scope, /me/tracks).
+    // All other playlists use the public client-credentials token — Spotify's
+    // 2024 API policy change blocks user-token requests to /playlists/{id}/tracks
+    // in development-mode apps with "Forbidden", but the public token works fine
+    // for any public playlist without touching user scopes at all.
+    let token = userToken
     const baseUrl = playlistId === 'liked'
       ? 'https://api.spotify.com/v1/me/tracks?limit=50'
       : `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50`
 
+    if (playlistId !== 'liked') {
+      const pubToken = await getPublicSpotifyToken()
+      if (pubToken) token = pubToken
+    }
+
     let url: string = baseUrl
     while (url) {
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
-      if (!res.ok) break
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) {
+        console.log(`[Spotify] getPlaylistTracks "${playlistId}" → HTTP ${res.status}`)
+        return { tracks: [], httpError: res.status }
+      }
       const data = await res.json()
       for (const item of data.items ?? []) {
-        if (!item) continue  // Spotify can return null items for local files
-        const track = item.track  // both /me/tracks and /playlists/*/tracks wrap in .track
-        if (!track?.id) continue  // skip local files (id is null)
+        if (!item) continue
+        const track = item.track
+        if (!track?.id) continue
         results.push({
           id: track.id,
           name: track.name,
@@ -520,11 +580,13 @@ export const getPlaylistTracks = async (
         })
       }
       url = data.next ?? ''
-      if (results.length >= 200) break  // cap to avoid unbounded loading
+      if (results.length >= 200) break
     }
-    return results
-  } catch {
-    return []
+    console.log(`[Spotify] getPlaylistTracks "${playlistId}" → ${results.length} tracks`)
+    return { tracks: results }
+  } catch (e) {
+    console.log('[Spotify] getPlaylistTracks error:', e)
+    return { tracks: [] }
   }
 }
 
@@ -704,5 +766,251 @@ export const isTrackSaved = async (accessToken: string, trackId: string): Promis
     return data[0] === true
   } catch {
     return false
+  }
+}
+
+// ─── Playback controls ────────────────────────────────────────────────────────
+// All three require the user-modify-playback-state scope (already in SPOTIFY_SCOPES).
+
+export const skipPrevious = async (accessToken: string): Promise<void> => {
+  try {
+    await fetch('https://api.spotify.com/v1/me/player/previous', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  } catch (e) {
+    console.log('[Spotify] skipPrevious error:', e)
+  }
+}
+
+export const skipNext = async (accessToken: string): Promise<void> => {
+  try {
+    await fetch('https://api.spotify.com/v1/me/player/next', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  } catch (e) {
+    console.log('[Spotify] skipNext error:', e)
+  }
+}
+
+// play=true → resume/play, play=false → pause
+export const setPlayback = async (accessToken: string, play: boolean): Promise<void> => {
+  try {
+    await fetch(`https://api.spotify.com/v1/me/player/${play ? 'play' : 'pause'}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  } catch (e) {
+    console.log('[Spotify] setPlayback error:', e)
+  }
+}
+
+// Seek to a position (ms) in the user's currently-playing track.
+// Requires the user-modify-playback-state scope and an active device.
+export const seekPlayback = async (accessToken: string, positionMs: number): Promise<void> => {
+  try {
+    await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${Math.max(0, Math.round(positionMs))}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  } catch (e) {
+    console.log('[Spotify] seekPlayback error:', e)
+  }
+}
+
+// Read the current playback volume (0–100) of the active device, or null when
+// there's no active device / volume isn't reported.
+export const getPlaybackVolume = async (accessToken: string): Promise<number | null> => {
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/player', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!res.ok || res.status === 204) return null
+    const data = await res.json()
+    const v = data?.device?.volume_percent
+    return typeof v === 'number' ? v : null
+  } catch (e) {
+    console.log('[Spotify] getPlaybackVolume error:', e)
+    return null
+  }
+}
+
+// Set the active device's playback volume (0–100). Used by talk mode to "duck"
+// the listener's music instead of pausing it — pausing can let the Spotify
+// device go idle, leaving playback in an unrecoverable state. Keeping the stream
+// alive at volume 0 means it resumes instantly when talk mode ends.
+export const setVolume = async (accessToken: string, percent: number): Promise<void> => {
+  const vol = Math.max(0, Math.min(100, Math.round(percent)))
+  try {
+    await fetch(`https://api.spotify.com/v1/me/player/volume?volume_percent=${vol}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+  } catch (e) {
+    console.log('[Spotify] setVolume error:', e)
+  }
+}
+
+// List the user's available Spotify Connect devices (open apps, speakers, etc.).
+export const getSpotifyDevices = async (
+  accessToken: string,
+): Promise<{ id: string; is_active: boolean; name: string }[]> => {
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/player/devices', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.devices ?? []) as { id: string; is_active: boolean; name: string }[]
+  } catch (e) {
+    console.log('[Spotify] getSpotifyDevices error:', e)
+    return []
+  }
+}
+
+// Pick the best device to target: the active one, else the first available.
+// Returns null when the user has no open Spotify app anywhere.
+const pickTargetDevice = async (accessToken: string): Promise<string | null> => {
+  const devices = await getSpotifyDevices(accessToken)
+  if (devices.length === 0) return null
+  return (devices.find((d) => d.is_active) ?? devices[0]).id
+}
+
+// Play a specific track at a given start position (ms) in one call.
+// The Web API returns 404 NO_ACTIVE_DEVICE when the user has no *active* device
+// (common for a listener who just opened the app and hasn't pressed play in
+// Spotify yet). In that case we discover an available device and retry against
+// it explicitly, which also wakes the device up.
+export const playTrackAt = async (accessToken: string, trackUri: string, positionMs: number): Promise<void> => {
+  const body = JSON.stringify({ uris: [trackUri], position_ms: Math.max(0, Math.round(positionMs)) })
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/player/play', { method: 'PUT', headers, body })
+    if (res.status === 404) {
+      const deviceId = await pickTargetDevice(accessToken)
+      if (!deviceId) {
+        console.log('[Spotify] playTrackAt: no available device — listener must open Spotify')
+        return
+      }
+      await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, { method: 'PUT', headers, body })
+    }
+  } catch (e) {
+    console.log('[Spotify] playTrackAt error:', e)
+  }
+}
+
+// Play a specific track immediately by its Spotify URI (e.g. "spotify:track:<id>").
+// Requires an active Spotify device; silently no-ops if none is available.
+export const playTrack = async (accessToken: string, trackUri: string): Promise<void> => {
+  try {
+    await fetch('https://api.spotify.com/v1/me/player/play', {
+      method: 'PUT',
+      headers: {
+        Authorization:  `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ uris: [trackUri] }),
+    })
+  } catch (e) {
+    console.log('[Spotify] playTrack error:', e)
+  }
+}
+
+// ─── Spotify Canvas (unofficial spclient API) ─────────────────────────────────
+// Returns a looping MP4/WebM URL for the given track, or null when unavailable.
+// Uses a hand-rolled minimal protobuf encoder/decoder — no extra dependencies.
+
+function _varint(n: number): number[] {
+  const out: number[] = []
+  while (n > 0x7f) { out.push((n & 0x7f) | 0x80); n >>>= 7 }
+  out.push(n & 0x7f)
+  return out
+}
+
+function _readVarint(buf: Uint8Array, pos: number): [number, number] {
+  let result = 0, shift = 0
+  while (pos < buf.length) {
+    const b = buf[pos++]
+    result |= (b & 0x7f) << shift
+    shift += 7
+    if (!(b & 0x80)) break
+  }
+  return [result, pos]
+}
+
+function _readProto(buf: Uint8Array): Map<number, Uint8Array[]> {
+  const fields = new Map<number, Uint8Array[]>()
+  let pos = 0
+  while (pos < buf.length) {
+    let tag: number
+    ;[tag, pos] = _readVarint(buf, pos)
+    const fieldNum = tag >>> 3
+    const wireType = tag & 7
+    if (wireType === 0) {
+      let _v: number
+      ;[_v, pos] = _readVarint(buf, pos)
+    } else if (wireType === 2) {
+      let len: number
+      ;[len, pos] = _readVarint(buf, pos)
+      const data = buf.slice(pos, pos + len)
+      pos += len
+      if (!fields.has(fieldNum)) fields.set(fieldNum, [])
+      fields.get(fieldNum)!.push(data)
+    } else {
+      break  // unsupported wire type — stop parsing
+    }
+  }
+  return fields
+}
+
+export const fetchSpotifyCanvas = async (
+  trackId: string,
+  accessToken: string,
+): Promise<string | null> => {
+  try {
+    // Build CanvazRequest { repeated EntityCanvasRequest canvases = 1; }
+    //   EntityCanvasRequest { string entity_uri = 1; }
+    const entityUri  = `spotify:track:${trackId}`
+    const uriBytes   = Array.from(new TextEncoder().encode(entityUri))
+    const entityMsg  = [0x0a, ..._varint(uriBytes.length), ...uriBytes]  // field 1 LEN
+    const requestBuf = new Uint8Array([0x0a, ..._varint(entityMsg.length), ...entityMsg])
+
+    const res = await fetch(
+      'https://spclient.wg.spotify.com/canvaz-cache/v0/canvases',
+      {
+        method:  'POST',
+        headers: {
+          Authorization:  `Bearer ${accessToken}`,
+          'Content-Type': 'application/x-protobuf',
+          Accept:         'application/x-protobuf',
+        },
+        body: requestBuf,
+      },
+    )
+
+    if (!res.ok) {
+      // 403 is expected — spclient requires Spotify's internal client credentials,
+      // not a user OAuth token. Fall back to album art silently.
+      if (res.status !== 403) console.log('[Spotify] canvas fetch failed:', res.status)
+      return null
+    }
+
+    // Parse CanvazResponse { repeated EntityCanvasResponse canvases = 1; }
+    //   EntityCanvasResponse { string entity_uri = 1; string url = 2; ... }
+    const buf         = new Uint8Array(await res.arrayBuffer())
+    const topFields   = _readProto(buf)
+    const canvases    = topFields.get(1) ?? []
+    for (const canvasBytes of canvases) {
+      const canvasFields = _readProto(canvasBytes)
+      const urlBytes     = canvasFields.get(2)?.[0]   // field 2 = url
+      if (urlBytes && urlBytes.length > 0) {
+        return new TextDecoder().decode(urlBytes)
+      }
+    }
+    return null
+  } catch (e) {
+    console.log('[Spotify] fetchSpotifyCanvas error:', e)
+    return null
   }
 }

@@ -989,8 +989,9 @@ export default function SignupScreen() {
         }).start(() => router.replace("/feed"));
       });
     } catch (err) {
-      console.log("Login error:", err.message);
-      setError(err.message);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log("Login error:", msg);
+      setError(msg);
     } finally {
       setLoading(false);
     }

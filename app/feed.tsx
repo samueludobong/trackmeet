@@ -20,10 +20,11 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  AppState,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Audio } from "expo-av";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRef, useState, useEffect, createContext, useContext } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
@@ -34,19 +35,18 @@ import {
   FAKE_PHOTO_COLORS,
   DISCOVER_FILTERS, CAROUSEL_CARD_W, CAROUSEL_GAP, CAROUSEL_ITEMS,
   TRENDING_ARTISTS, FOR_YOU_RECS, UPCOMING_MEETS,
-  MEETS_STREAMS,
   NOW_PLAYING_STORIES,
   GROUP_CHATS, COMMUNITY_ITEMS, MESSAGES_UNREAD,
   PROFILE_TABS, PROFILE_POSTS, PROFILE_REPOSTS,
-  DUMMY_PLAYLISTS, DUMMY_COMMUNITIES, ALL_SONGS, PLAYLIST_SONGS,
+  DUMMY_COMMUNITIES,
   fmtCount,
-  type Post, type DummyComment, type DummyPlaylist, type DummySong,
-  type DummyCommunity, type CarouselItem, type ProfileTab, type MeetStream,
+  type Post, type DummyComment,
+  type DummyCommunity, type CarouselItem, type ProfileTab,
   type NowPlayingStory,
   type GroupChat, type CommunityItem, type UserProfile,
 } from "./data/mock";
 
-import { openSpotifyLink, saveTrackToLiked, searchSpotifyTracks, getCurrentlyPlaying, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, type SpotifyTrackResult, type SpotifyPlaylist } from '../lib/spotify'
+import { openSpotifyLink, saveTrackToLiked, searchSpotifyTracks, getCurrentlyPlaying, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, skipPrevious, skipNext, setPlayback, playTrack, fetchSpotifyCanvas, connectSpotify, disconnectSpotify, type SpotifyTrackResult, type SpotifyPlaylist } from '../lib/spotify'
 import { useNowPlaying, type NowPlayingTrack } from '../lib/useNowPlaying'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { SongPreviewSheet } from '../components/SongPreviewSheet'
@@ -56,6 +56,20 @@ import {
   sendTextMessage, sendSpotifyTrackMessage,
 } from '../lib/messages'
 import { followUser, unfollowUser } from '../lib/follows'
+import {
+  startMeet, endMeet, joinMeet, leaveMeet,
+  getLiveMeetsFromFollowing, getMeet, getActiveListenerCount,
+  getMeetMessages, sendMeetMessage,
+  updateMeetTrack, meetRowToTrackState, setTalkMode, setMeetOnProfile,
+  recordMeetTrack, getMeetTracks, getActiveMeetForUser,
+  type LiveMeet, type MeetMessage, type MeetTrack, type MeetTrackState, type MeetRow,
+  type ActiveMeetForUser,
+} from '../lib/meets'
+import {
+  syncListenerToHost, sanityCheckSync, expectedHostPosition,
+  registerMeetSync, unregisterMeetSync,
+  startTalkAudio, stopTalkAudio, restoreVolumeIfDucked,
+} from '../lib/meetSync'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import * as SecureStore from 'expo-secure-store'
 
@@ -97,6 +111,18 @@ const BANNER_PLATFORM_PRIORITY = ["instagram", "x", "youtube", "tiktok", "snapch
 // Lets any component inside a post card open the detail view without prop-drilling through card types
 const OpenDetailCtx = createContext<(() => void) | undefined>(undefined);
 
+// Lets the Meets tab (and notification deep links) open the listener room,
+// which is mounted once at FeedScreen level.
+// isPublic omitted → the listener room flow prompts the joiner to pick
+// public/private; passed explicitly → join straight away with that choice.
+const OpenMeetCtx = createContext<((meetId: string, isPublic?: boolean) => void) | null>(null);
+const useOpenMeet = () => useContext(OpenMeetCtx);
+
+// Lets ProfileView's "Start Meet" flow open the host room, which is mounted once
+// at FeedScreen level so it (and the minimized mini-bar) survives tab switches.
+const HostMeetCtx = createContext<((meetId: string, name: string) => void) | null>(null);
+const useOpenHostMeet = () => useContext(HostMeetCtx);
+
 // ─── Now Playing context ──────────────────────────────────────────────────────
 // The hook lives in FeedScreen (never unmounts) so tab switches don't destroy
 // the token cache or needsReconnect state.
@@ -106,6 +132,28 @@ const useNowPlayingCtx = () => {
   const ctx = useContext(NowPlayingCtx)
   if (!ctx) throw new Error('useNowPlayingCtx must be used inside NowPlayingCtx.Provider')
   return ctx
+}
+
+// ─── Curated playlist types ───────────────────────────────────────────────────
+type CuratedPlaylist = {
+  id: string
+  user_id: string
+  name: string
+  image_url: string | null
+  tags: string[]
+  show_on_profile: boolean
+  created_at: string
+}
+
+type CuratedSong = {
+  id: string
+  playlist_id: string
+  spotify_track_id: string
+  track_name: string
+  track_artist: string
+  album_art: string | null
+  duration_ms: number
+  position: number
 }
 
 // ─── Feed user context (current-user liked-post IDs + toggle handler) ────────
@@ -2583,90 +2631,89 @@ const STREAM_CARD_GAP = 8;
 const STREAM_CARD_W   = (SW - 32 - STREAM_CARD_GAP) / 2;
 const WAVE_HEIGHTS    = [12, 22, 32, 18, 28, 10, 24, 16];
 
-function StreamCard({ stream }: { stream: MeetStream }) {
-  const photo = AVATAR_MAP[stream.user];
-  const cardH = stream.tall ? 216 : 152;
-  const iconColor = stream.accentColor === "#CAFF00" ? "#0D0D0D" : "#fff";
-
+// ─── Live meet card (real data) ───────────────────────────────────────────────
+function LiveMeetCard({ meet, onJoin }: { meet: LiveMeet; onJoin: (id: string) => void }) {
+  const hostName = meet.host.display_name || meet.host.username;
   return (
-    <TouchableOpacity style={[ms.card, { height: cardH }]} activeOpacity={0.88}>
-      {/* Background */}
-      {stream.type === "video" && photo && (
-        <Image source={photo} style={StyleSheet.absoluteFill} resizeMode="cover" />
+    <View style={lmStyles.card}>
+      {meet.current_track_album_art ? (
+        <Image source={{ uri: meet.current_track_album_art }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      ) : (
+        <LinearGradient colors={["#AB00FF66", "#1c0030EE"]} style={StyleSheet.absoluteFill} />
       )}
-      <LinearGradient
-        colors={
-          stream.type === "audio"
-            ? [stream.color + "66", stream.color + "EE"]
-            : ["rgba(0,0,0,0.05)", "rgba(0,0,0,0.72)"]
-        }
-        style={StyleSheet.absoluteFill}
-      />
+      <LinearGradient colors={["rgba(0,0,0,0.15)", "rgba(0,0,0,0.82)"]} style={StyleSheet.absoluteFill} />
 
-      {/* Audio waveform */}
-      {stream.type === "audio" && (
-        <View style={ms.waveWrap}>
-          {WAVE_HEIGHTS.map((h, i) => (
-            <View key={i} style={[ms.waveBar, { height: h, backgroundColor: stream.accentColor + "BB" }]} />
-          ))}
+      <View style={lmStyles.cardTop}>
+        <View style={lmStyles.liveBadge}>
+          <View style={lmStyles.liveDot} />
+          <Text style={lmStyles.liveBadgeText}>Live</Text>
         </View>
-      )}
-
-      {/* Top row: LIVE/Meet badge + viewer count */}
-      <View style={ms.cardTop}>
-        {stream.isLive ? (
-          <View style={ms.liveBadge}>
-            <View style={ms.liveDot} />
-            <Text style={ms.liveBadgeText}>Live</Text>
-          </View>
-        ) : (
-          <View style={ms.meetBadge}>
-            <Text style={ms.meetBadgeText}>Meet</Text>
-          </View>
-        )}
-        <View style={ms.viewerBadge}>
-          <Ionicons name="eye-outline" size={9} color="rgba(255,255,255,0.85)" />
-          <Text style={ms.viewerText}>{fmtCount(stream.viewers)}</Text>
+        <View style={lmStyles.viewerBadge}>
+          <Ionicons name="headset-outline" size={10} color="rgba(255,255,255,0.85)" />
+          <Text style={lmStyles.viewerText}>{fmtCount(meet.listenerCount)}</Text>
         </View>
       </View>
 
-      {/* Bottom: type dot + title + host */}
-      <View style={ms.cardBottom}>
-        <View style={[ms.typeTag, { backgroundColor: stream.accentColor }]}>
-          <Ionicons
-            name={stream.type === "video" ? "videocam" : "radio"}
-            size={8}
-            color={iconColor}
-          />
-        </View>
-        <Text style={ms.cardTitle} numberOfLines={2}>{stream.title}</Text>
-        <Text style={ms.cardHost}>@{stream.host}</Text>
+      <View style={lmStyles.cardBottom}>
+        <Text style={lmStyles.cardTitle} numberOfLines={2}>{meet.name}</Text>
+        {meet.current_track_name ? (
+          <Text style={lmStyles.cardTrack} numberOfLines={1}>♪ {meet.current_track_name}</Text>
+        ) : null}
+        <Text style={lmStyles.cardHost} numberOfLines={1}>@{hostName}</Text>
+        <TouchableOpacity style={lmStyles.joinBtn} activeOpacity={0.85} onPress={() => onJoin(meet.id)}>
+          <Text style={lmStyles.joinBtnText}>Join</Text>
+        </TouchableOpacity>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
-type MeetsTab = "For You" | "Meets" | "Live";
-const MEETS_TABS: MeetsTab[] = ["For You", "Meets", "Live"];
+const lmStyles = StyleSheet.create({
+  card: { borderRadius: 16, overflow: "hidden", backgroundColor: "#111", marginBottom: STREAM_CARD_GAP, minHeight: 196, justifyContent: "space-between" },
+  cardTop: { flexDirection: "row", justifyContent: "space-between", padding: 8 },
+  liveBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#E8000F", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
+  liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: "#fff" },
+  liveBadgeText: { fontSize: 10, color: "#fff", fontWeight: "800" },
+  viewerBadge: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3 },
+  viewerText: { fontSize: 10, color: "#fff", fontWeight: "700" },
+  cardBottom: { padding: 10, gap: 3 },
+  cardTitle: { fontSize: 14, color: "#fff", fontWeight: "800", lineHeight: 18 },
+  cardTrack: { fontSize: 11, color: "rgba(255,255,255,0.7)" },
+  cardHost: { fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 6 },
+  joinBtn: { backgroundColor: "#AB00FF", borderRadius: 18, paddingVertical: 8, alignItems: "center" },
+  joinBtnText: { fontSize: 13, fontWeight: "800", color: "#fff" },
+});
 
 function MeetsView() {
-  const [activeTab, setActiveTab]   = useState<MeetsTab>("For You");
   const [searchText, setSearchText] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [meets,      setMeets]      = useState<LiveMeet[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const openMeet = useOpenMeet();
+
+  const load = async () => {
+    const live = await getLiveMeetsFromFollowing();
+    setMeets(live);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
     setSearchText("");
-    setActiveTab("For You");
+    await load();
     setRefreshing(false);
   };
 
   const q = searchText.toLowerCase();
-  const filtered = MEETS_STREAMS.filter((s) => {
-    const matchSearch = !q || s.title.toLowerCase().includes(q) || s.host.toLowerCase().includes(q) || s.tags.some((t) => t.toLowerCase().includes(q));
-    const matchTab = activeTab === "For You" ? true : activeTab === "Live" ? s.isLive : s.isMeet;
-    return matchSearch && matchTab;
-  });
+  const filtered = meets.filter((m) =>
+    !q ||
+    m.name.toLowerCase().includes(q) ||
+    m.host.username.toLowerCase().includes(q) ||
+    (m.host.display_name ?? "").toLowerCase().includes(q) ||
+    m.tags.some((t) => t.toLowerCase().includes(q))
+  );
 
   const leftCol  = filtered.filter((_, i) => i % 2 === 0);
   const rightCol = filtered.filter((_, i) => i % 2 === 1);
@@ -2690,7 +2737,7 @@ function MeetsView() {
         <Ionicons name="search-outline" size={16} color="rgba(255,255,255,0.35)" style={{ marginRight: 8 }} />
         <TextInput
           style={ds.searchInput}
-          placeholder="Search streams, meets, hosts…"
+          placeholder="Search live meets, hosts…"
           placeholderTextColor="rgba(255,255,255,0.3)"
           value={searchText}
           onChangeText={setSearchText}
@@ -2702,40 +2749,24 @@ function MeetsView() {
         )}
       </View>
 
-      {/* Tab toggles */}
-      <View style={ms.tabRow}>
-        {MEETS_TABS.map((tab) => {
-          const active = tab === activeTab;
-          return (
-            <TouchableOpacity
-              key={tab}
-              style={[ms.tabPill, active && ms.tabPillActive]}
-              activeOpacity={0.75}
-              onPress={() => setActiveTab(tab)}
-            >
-              {tab === "Live" && (
-                <View style={[ms.liveTabDot, active && ms.liveTabDotActive]} />
-              )}
-              <Text style={[ms.tabText, active && ms.tabTextActive]}>{tab}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Masonry grid */}
-      {filtered.length > 0 ? (
+      {loading ? (
+        <ActivityIndicator color="#AB00FF" style={{ marginTop: 48 }} />
+      ) : filtered.length > 0 ? (
         <View style={ms.grid}>
           <View style={ms.col}>
-            {leftCol.map((s) => <StreamCard key={s.id} stream={s} />)}
+            {leftCol.map((m) => <LiveMeetCard key={m.id} meet={m} onJoin={(id) => openMeet?.(id)} />)}
           </View>
           <View style={ms.col}>
-            {rightCol.map((s) => <StreamCard key={s.id} stream={s} />)}
+            {rightCol.map((m) => <LiveMeetCard key={m.id} meet={m} onJoin={(id) => openMeet?.(id)} />)}
           </View>
         </View>
       ) : (
         <View style={ds.emptyState}>
-          <Ionicons name="search-outline" size={40} color="rgba(255,255,255,0.15)" />
-          <Text style={ds.emptyText}>No streams found</Text>
+          <Ionicons name="radio-outline" size={40} color="rgba(255,255,255,0.15)" />
+          <Text style={ds.emptyText}>No live meets right now</Text>
+          <Text style={[ds.emptyText, { fontSize: 12, marginTop: 4, opacity: 0.6 }]}>
+            Meets from people you follow show up here
+          </Text>
         </View>
       )}
     </ScrollView>
@@ -4323,56 +4354,459 @@ function BroadcastRow() {
 
 // ─── Profile section tabs ─────────────────────────────────────────────────────
 
-// ─── Song row ─────────────────────────────────────────────────────────────────
+// ─── Add Song dialog ──────────────────────────────────────────────────────────
 
-function SongRow({ song, accent }: { song: DummySong; accent: string }) {
+function AddSongDialog({
+  playlistId, userId, onClose, onAdded,
+}: {
+  playlistId: string
+  userId: string
+  onClose: () => void
+  onAdded: () => void
+}) {
+  const { track: nowPlaying } = useNowPlayingCtx()
+  const [mode, setMode] = useState<'search' | 'now'>('search')
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<SpotifyTrackResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [adding, setAdding] = useState<string | null>(null)
+  const [added, setAdded] = useState<Set<string>>(new Set())
+
+  const handleSearch = async () => {
+    if (!query.trim()) return
+    setSearching(true)
+    const token = await getValidSpotifyToken(userId)
+    if (!token) { setSearching(false); return }
+    const found = await searchSpotifyTracks(token, query.trim(), 20)
+    setResults(found)
+    setSearching(false)
+  }
+
+  const addTrack = async (track: SpotifyTrackResult) => {
+    if (adding || added.has(track.id)) return
+    setAdding(track.id)
+    const { data: existing } = await supabase
+      .from('curated_playlist_songs')
+      .select('position')
+      .eq('playlist_id', playlistId)
+      .order('position', { ascending: false })
+      .limit(1)
+    const nextPos = (existing?.[0]?.position ?? -1) + 1
+    await supabase.from('curated_playlist_songs').insert({
+      playlist_id: playlistId,
+      spotify_track_id: track.id,
+      track_name: track.name,
+      track_artist: track.artist,
+      album_art: track.albumArt,
+      duration_ms: track.durationMs,
+      position: nextPos,
+    })
+    setAdded(prev => new Set(prev).add(track.id))
+    setAdding(null)
+    onAdded()
+  }
+
+  const nowTrack: SpotifyTrackResult | null = nowPlaying ? {
+    id: nowPlaying.id,
+    name: nowPlaying.name,
+    artist: nowPlaying.artist,
+    albumArt: nowPlaying.albumArt,
+    durationMs: nowPlaying.durationMs,
+    previewUrl: nowPlaying.previewUrl,
+  } : null
+
   return (
-    <TouchableOpacity style={pdStyles.songRow} activeOpacity={0.75}>
-      <View style={pdStyles.songInfo}>
-        <Text style={pdStyles.songTitle} numberOfLines={1}>{song.title}</Text>
-        <Text style={pdStyles.songArtist} numberOfLines={1}>{song.artist}</Text>
-      </View>
-      <View style={[pdStyles.songArt, { backgroundColor: song.color + "30" }]}>
-        <Text style={{ fontSize: 13 }}>🎵</Text>
-      </View>
-    </TouchableOpacity>
-  );
+    <Modal transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <Pressable style={cpStyles.dialogOverlay} onPress={onClose}>
+          <Pressable onPress={e => e.stopPropagation()}>
+            <View style={cpStyles.dialogSheet}>
+              <View style={cpStyles.dialogHandle} />
+              <Text style={cpStyles.dialogTitle}>Add Song</Text>
+
+              <View style={cpStyles.modeRow}>
+                <TouchableOpacity
+                  style={[cpStyles.modeBtn, mode === 'search' && cpStyles.modeBtnActive]}
+                  onPress={() => setMode('search')}
+                >
+                  <Text style={[cpStyles.modeBtnText, mode === 'search' && cpStyles.modeBtnTextActive]}>Search</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[cpStyles.modeBtn, mode === 'now' && cpStyles.modeBtnActive]}
+                  onPress={() => setMode('now')}
+                >
+                  <Text style={[cpStyles.modeBtnText, mode === 'now' && cpStyles.modeBtnTextActive]}>Now Playing</Text>
+                </TouchableOpacity>
+              </View>
+
+              {mode === 'search' ? (
+                <>
+                  <View style={cpStyles.searchRow}>
+                    <TextInput
+                      style={cpStyles.searchInput}
+                      placeholder="Search Spotify…"
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      value={query}
+                      onChangeText={setQuery}
+                      onSubmitEditing={handleSearch}
+                      returnKeyType="search"
+                    />
+                    <TouchableOpacity style={cpStyles.searchBtn} onPress={handleSearch} activeOpacity={0.8}>
+                      {searching
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Ionicons name="search" size={18} color="#fff" />
+                      }
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                    {results.map(track => (
+                      <View key={track.id} style={cpStyles.trackRow}>
+                        {track.albumArt
+                          ? <Image source={{ uri: track.albumArt }} style={cpStyles.trackArt} />
+                          : <View style={[cpStyles.trackArt, { alignItems: 'center', justifyContent: 'center' }]}>
+                              <Text style={{ fontSize: 18 }}>🎵</Text>
+                            </View>
+                        }
+                        <View style={cpStyles.trackInfo}>
+                          <Text style={cpStyles.trackName} numberOfLines={1}>{track.name}</Text>
+                          <Text style={cpStyles.trackArtist} numberOfLines={1}>{track.artist}</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[cpStyles.addBtn, added.has(track.id) && cpStyles.addBtnDone]}
+                          onPress={() => addTrack(track)}
+                          activeOpacity={0.7}
+                          disabled={!!adding || added.has(track.id)}
+                        >
+                          {adding === track.id
+                            ? <ActivityIndicator size="small" color="#FF6C1A" />
+                            : <Text style={[cpStyles.addBtnText, added.has(track.id) && cpStyles.addBtnTextDone]}>
+                                {added.has(track.id) ? '✓' : 'Add'}
+                              </Text>
+                          }
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    {results.length === 0 && !searching && query.length > 0 && (
+                      <Text style={{ color: 'rgba(255,255,255,0.25)', textAlign: 'center', paddingVertical: 20 }}>
+                        No results found
+                      </Text>
+                    )}
+                  </ScrollView>
+                </>
+              ) : (
+                <View>
+                  {nowTrack ? (
+                    <View style={cpStyles.trackRow}>
+                      {nowTrack.albumArt
+                        ? <Image source={{ uri: nowTrack.albumArt }} style={cpStyles.trackArt} />
+                        : <View style={[cpStyles.trackArt, { alignItems: 'center', justifyContent: 'center' }]}>
+                            <Text style={{ fontSize: 18 }}>🎵</Text>
+                          </View>
+                      }
+                      <View style={cpStyles.trackInfo}>
+                        <Text style={cpStyles.trackName} numberOfLines={1}>{nowTrack.name}</Text>
+                        <Text style={cpStyles.trackArtist} numberOfLines={1}>{nowTrack.artist}</Text>
+                        <Text style={{ fontSize: 11, color: '#1DB954', fontWeight: '600', marginTop: 2 }}>● Now playing</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[cpStyles.addBtn, added.has(nowTrack.id) && cpStyles.addBtnDone]}
+                        onPress={() => addTrack(nowTrack)}
+                        activeOpacity={0.7}
+                        disabled={!!adding || added.has(nowTrack.id)}
+                      >
+                        {adding === nowTrack.id
+                          ? <ActivityIndicator size="small" color="#FF6C1A" />
+                          : <Text style={[cpStyles.addBtnText, added.has(nowTrack.id) && cpStyles.addBtnTextDone]}>
+                              {added.has(nowTrack.id) ? '✓' : 'Add'}
+                            </Text>
+                        }
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                      <Text style={{ fontSize: 32, marginBottom: 12 }}>🎵</Text>
+                      <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>Nothing playing right now</Text>
+                      <Text style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, marginTop: 6 }}>Open Spotify and play a track</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+          </Pressable>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
+  )
 }
 
-// ─── Playlist detail overlay ──────────────────────────────────────────────────
+// ─── Create Playlist dialog ───────────────────────────────────────────────────
 
-function PlaylistDetailOverlay({ playlist, onClose }: { playlist: DummyPlaylist; onClose: () => void }) {
-  const slideX = useRef(new Animated.Value(SW)).current;
-  const [liked, setLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(2347);
-  const [showOnProfile, setShowOnProfile] = useState(false);
-  const songs = PLAYLIST_SONGS[playlist.id] ?? [];
+function CreatePlaylistDialog({
+  userId, onClose, onCreate,
+}: {
+  userId: string
+  onClose: () => void
+  onCreate: (playlist: CuratedPlaylist) => void
+}) {
+  const [name, setName] = useState('')
+  const [imageUri, setImageUri] = useState<string | null>(null)
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [tags, setTags] = useState<string[]>([])
+  const [tagInput, setTagInput] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [uploading, setUploading] = useState(false)
+
+  const pickImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (!perm.granted) { Alert.alert('Permission required', 'Allow photo access to set a cover image.'); return }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    })
+    if (result.canceled || !result.assets[0]) return
+    const uri = result.assets[0].uri
+    setImageUri(uri)
+    setUploading(true)
+    try {
+      const ext = uri.split('.').pop()?.toLowerCase() ?? 'jpg'
+      const res = await fetch(uri)
+      const blob = await res.blob()
+      // blob.arrayBuffer() is unreliable in React Native — use FileReader like
+      // the avatar/banner uploads do
+      const ab = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as ArrayBuffer)
+        reader.onerror = reject
+        reader.readAsArrayBuffer(blob)
+      })
+      // First path segment must be the user ID to satisfy the post-media RLS policy:
+      // auth.uid()::text = (storage.foldername(name))[1]
+      const fileName = `${userId}/playlist-${Date.now()}.${ext}`
+      const { error } = await supabase.storage
+        .from('post-media')
+        .upload(fileName, ab, { contentType: `image/${ext}`, upsert: true })
+      if (error) {
+        console.log('[Playlist] cover upload error:', error.message)
+      } else {
+        const { data: { publicUrl } } = supabase.storage.from('post-media').getPublicUrl(fileName)
+        setImageUrl(publicUrl)
+      }
+    } catch (e) {
+      console.log('[Playlist] cover upload exception:', e)
+    }
+    setUploading(false)
+  }
+
+  const addTag = () => {
+    const t = tagInput.trim()
+    if (t && !tags.includes(t)) { setTags(prev => [...prev, t]); setTagInput('') }
+  }
+
+  const removeTag = (tag: string) => setTags(prev => prev.filter(t => t !== tag))
+
+  const create = async () => {
+    if (!name.trim() || creating) return
+    setCreating(true)
+    const { data, error } = await supabase
+      .from('curated_playlists')
+      .insert({ user_id: userId, name: name.trim(), image_url: imageUrl, tags, show_on_profile: false })
+      .select()
+      .single()
+    setCreating(false)
+    if (!error && data) onCreate(data as CuratedPlaylist)
+  }
+
+  return (
+    <Modal transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <Pressable style={cpStyles.dialogOverlay} onPress={onClose}>
+          <Pressable onPress={e => e.stopPropagation()}>
+            <ScrollView style={cpStyles.dialogSheet} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={cpStyles.dialogHandle} />
+              <Text style={cpStyles.dialogTitle}>Create Playlist</Text>
+
+              {/* Cover image picker */}
+              <TouchableOpacity style={cpStyles.imagePicker} onPress={pickImage} activeOpacity={0.8}>
+                {imageUri
+                  ? <Image source={{ uri: imageUri }} style={{ width: 90, height: 90, borderRadius: 18 }} resizeMode="cover" />
+                  : <>
+                      <Ionicons name="camera-outline" size={26} color="rgba(255,255,255,0.35)" />
+                      <Text style={cpStyles.imagePickerText}>Cover Photo</Text>
+                    </>
+                }
+                {uploading && (
+                  <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+                    <ActivityIndicator color="#fff" />
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Name */}
+              <Text style={cpStyles.label}>PLAYLIST NAME</Text>
+              <TextInput
+                style={cpStyles.input}
+                placeholder="Give it a name…"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={name}
+                onChangeText={setName}
+                maxLength={60}
+              />
+
+              {/* Tags */}
+              <Text style={cpStyles.label}>TAGS</Text>
+              {tags.length > 0 && (
+                <View style={cpStyles.tagRow}>
+                  {tags.map(tag => (
+                    <TouchableOpacity key={tag} style={cpStyles.tagChip} onPress={() => removeTag(tag)} activeOpacity={0.75}>
+                      <Text style={cpStyles.tagChipText}>{tag}</Text>
+                      <Text style={cpStyles.tagChipText}> ×</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              <View style={cpStyles.tagInputRow}>
+                <TextInput
+                  style={cpStyles.tagInput}
+                  placeholder="e.g. Chill, Late Night…"
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  value={tagInput}
+                  onChangeText={setTagInput}
+                  onSubmitEditing={addTag}
+                  returnKeyType="done"
+                  maxLength={30}
+                />
+                <TouchableOpacity style={cpStyles.addTagBtn} onPress={addTag} activeOpacity={0.8}>
+                  <Text style={cpStyles.addTagBtnText}>Add</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[cpStyles.createSubmitBtn, (!name.trim() || creating) && { opacity: 0.45 }]}
+                onPress={create}
+                activeOpacity={0.8}
+                disabled={!name.trim() || creating}
+              >
+                {creating
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={cpStyles.createSubmitText}>Create Playlist</Text>
+                }
+              </TouchableOpacity>
+              <View style={{ height: 20 }} />
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
+  )
+}
+
+// ─── Real song rows ───────────────────────────────────────────────────────────
+
+function RealSongRow({ track, accent, onDelete }: { track: CuratedSong; accent: string; onDelete?: () => void }) {
+  return (
+    <TouchableOpacity style={pdStyles.songRow} activeOpacity={0.75}>
+      {track.album_art
+        ? <Image source={{ uri: track.album_art }} style={[pdStyles.songArt, { borderRadius: 8 }]} />
+        : <View style={[pdStyles.songArt, { backgroundColor: accent + '30', alignItems: 'center', justifyContent: 'center' }]}>
+            <Text style={{ fontSize: 13 }}>🎵</Text>
+          </View>
+      }
+      <View style={pdStyles.songInfo}>
+        <Text style={pdStyles.songTitle} numberOfLines={1}>{track.track_name}</Text>
+        <Text style={pdStyles.songArtist} numberOfLines={1}>{track.track_artist}</Text>
+      </View>
+      {onDelete && (
+        <TouchableOpacity onPress={onDelete} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Ionicons name="trash-outline" size={16} color="rgba(255,255,255,0.22)" />
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
+  )
+}
+
+function SpotifyTrackRow({ track, accent }: { track: SpotifyTrackResult; accent: string }) {
+  return (
+    <TouchableOpacity style={pdStyles.songRow} activeOpacity={0.75}>
+      {track.albumArt
+        ? <Image source={{ uri: track.albumArt }} style={[pdStyles.songArt, { borderRadius: 8 }]} />
+        : <View style={[pdStyles.songArt, { backgroundColor: accent + '30', alignItems: 'center', justifyContent: 'center' }]}>
+            <Text style={{ fontSize: 13 }}>🎵</Text>
+          </View>
+      }
+      <View style={pdStyles.songInfo}>
+        <Text style={pdStyles.songTitle} numberOfLines={1}>{track.name}</Text>
+        <Text style={pdStyles.songArtist} numberOfLines={1}>{track.artist}</Text>
+      </View>
+    </TouchableOpacity>
+  )
+}
+
+// ─── Curated playlist detail overlay ─────────────────────────────────────────
+
+function CuratedPlaylistDetailOverlay({
+  playlist, userId, onClose, onUpdated,
+}: {
+  playlist: CuratedPlaylist
+  userId: string
+  onClose: () => void
+  onUpdated: (updated: CuratedPlaylist) => void
+}) {
+  const insets = useSafeAreaInsets()
+  const slideX = useRef(new Animated.Value(SW)).current
+  const [songs, setSongs] = useState<CuratedSong[]>([])
+  const [songsLoading, setSongsLoading] = useState(true)
+  const [showOnProfile, setShowOnProfile] = useState(playlist.show_on_profile)
+  const [showAddSong, setShowAddSong] = useState(false)
+
+  const ACCENT = '#AB00FF'
 
   useEffect(() => {
-    Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start();
-  }, []);
+    Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start()
+    loadSongs()
+  }, [])
+
+  const loadSongs = async () => {
+    setSongsLoading(true)
+    const { data } = await supabase
+      .from('curated_playlist_songs')
+      .select('*')
+      .eq('playlist_id', playlist.id)
+      .order('position', { ascending: true })
+    setSongs((data ?? []) as CuratedSong[])
+    setSongsLoading(false)
+  }
 
   const handleClose = () => {
-    Animated.timing(slideX, { toValue: SW, duration: 260, useNativeDriver: true }).start(onClose);
-  };
+    Animated.timing(slideX, { toValue: SW, duration: 260, useNativeDriver: true }).start(onClose)
+  }
+
+  const toggleShowOnProfile = async () => {
+    const newVal = !showOnProfile
+    setShowOnProfile(newVal)
+    await supabase.from('curated_playlists').update({ show_on_profile: newVal }).eq('id', playlist.id)
+    onUpdated({ ...playlist, show_on_profile: newVal })
+  }
+
+  const deleteSong = async (songId: string) => {
+    await supabase.from('curated_playlist_songs').delete().eq('id', songId)
+    setSongs(prev => prev.filter(s => s.id !== songId))
+  }
 
   const pan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, { dx, dy }) => dx > 8 && dx > Math.abs(dy) * 2,
     onShouldBlockNativeResponder: () => false,
-    onPanResponderMove: (_, { dx }) => { if (dx > 0) slideX.setValue(dx); },
+    onPanResponderMove: (_, { dx }) => { if (dx > 0) slideX.setValue(dx) },
     onPanResponderRelease: (_, { dx, vx }) => {
-      if (dx > SW * 0.3 || vx > 0.8) handleClose();
-      else Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start();
+      if (dx > SW * 0.3 || vx > 0.8) handleClose()
+      else Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start()
     },
     onPanResponderTerminate: () => {
-      Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start();
+      Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start()
     },
-  })).current;
-
-  const handleLike = () => {
-    setLiked(prev => { setLikeCount(c => prev ? c - 1 : c + 1); return !prev; });
-  };
+  })).current
 
   return (
     <Modal transparent animationType="none" statusBarTranslucent onRequestClose={handleClose}>
@@ -4382,66 +4816,86 @@ function PlaylistDetailOverlay({ playlist, onClose }: { playlist: DummyPlaylist;
           keyExtractor={s => s.id}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            songsLoading
+              ? <ActivityIndicator color={ACCENT} style={{ marginTop: 32 }} />
+              : <View style={{ alignItems: 'center', paddingTop: 40 }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.25)', fontSize: 15 }}>No songs yet</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.15)', fontSize: 13, marginTop: 6 }}>Tap "Add Song" above to get started</Text>
+                </View>
+          }
           ListHeaderComponent={
             <>
               {/* ── Hero ── */}
-              <View style={pdStyles.hero}>
+              <View style={[pdStyles.hero, { minHeight: 340 + insets.top }]}>
+                {/* Full-bleed background: cover image or mosaic of album arts */}
+                {playlist.image_url ? (
+                  <Image source={{ uri: playlist.image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                ) : songs.length > 0 ? (
+                  <View style={[StyleSheet.absoluteFill, { flexDirection: 'row', flexWrap: 'wrap' }]}>
+                    {songs.slice(0, 4).map((s, i) =>
+                      s.album_art
+                        ? <Image key={s.id} source={{ uri: s.album_art }} style={{ width: '50%', height: '50%' }} resizeMode="cover" />
+                        : <View key={s.id} style={{ width: '50%', height: '50%', backgroundColor: ACCENT + (i % 2 === 0 ? '55' : '33') }} />
+                    )}
+                  </View>
+                ) : (
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: ACCENT + '33' }]} />
+                )}
+                {/* Dark gradient overlay so text is readable over the image */}
                 <LinearGradient
-                  colors={[playlist.accent + "55", playlist.color, "#0D0D0D"]}
+                  colors={['rgba(0,0,0,0.18)', 'rgba(0,0,0,0.55)', '#0D0D0D']}
                   start={{ x: 0.5, y: 0 }}
                   end={{ x: 0.5, y: 1 }}
                   style={StyleSheet.absoluteFill}
                 />
-                {/* Back button */}
-                <SafeAreaView edges={["top"]}>
-                  <TouchableOpacity style={pdStyles.backBtn} onPress={handleClose} activeOpacity={0.7}>
-                    <Text style={pdStyles.backIcon}>‹</Text>
-                  </TouchableOpacity>
-                </SafeAreaView>
-
-                {/* Art mosaic */}
-                <View style={pdStyles.artMosaic}>
-                  {songs.slice(0, 4).map(s => (
-                    <View key={s.id} style={[pdStyles.mosaicCell, { backgroundColor: s.color + "55" }]} />
-                  ))}
-                </View>
+                {/* Back button – absolutely positioned so it doesn't disturb flex-end flow */}
+                <TouchableOpacity
+                  style={[pdStyles.backBtn, { paddingTop: insets.top + 6 }]}
+                  onPress={handleClose}
+                  activeOpacity={0.7}
+                >
+                  <Text style={pdStyles.backIcon}>‹</Text>
+                </TouchableOpacity>
 
                 {/* Title block */}
                 <View style={pdStyles.heroInfo}>
                   <Text style={pdStyles.heroTitle} numberOfLines={2}>{playlist.name}</Text>
-
-                  {/* Source · songs · duration */}
                   <View style={pdStyles.heroMetaRow}>
-                    <View style={[pdStyles.sourceIconBadge, { backgroundColor: playlist.sourceColor }]}>
-                      <Text style={pdStyles.sourceIconText}>
-                        {playlist.source === "Spotify" ? "S" : playlist.source === "Apple Music" ? "♪" : "T"}
-                      </Text>
+                    <View style={[pdStyles.sourceIconBadge, { backgroundColor: '#AB00FF' }]}>
+                      <Text style={pdStyles.sourceIconText}>T</Text>
                     </View>
-                    <Text style={pdStyles.heroMetaText}>{playlist.source}</Text>
+                    <Text style={pdStyles.heroMetaText}>Curated</Text>
                     <Text style={pdStyles.heroMetaDot}>·</Text>
-                    <Text style={pdStyles.heroMetaText}>{playlist.tracks} Songs</Text>
-                    <Text style={pdStyles.heroMetaDot}>·</Text>
-                    <Text style={pdStyles.heroMetaText}>{playlist.duration}</Text>
+                    <Text style={pdStyles.heroMetaText}>{songs.length} Song{songs.length !== 1 ? 's' : ''}</Text>
+                    {playlist.tags.length > 0 && (
+                      <>
+                        <Text style={pdStyles.heroMetaDot}>·</Text>
+                        <Text style={pdStyles.heroMetaText}>{playlist.tags.slice(0, 2).join(', ')}</Text>
+                      </>
+                    )}
                   </View>
 
                   {/* Show on profile toggle */}
                   <TouchableOpacity
-                    style={[
-                      pdStyles.showOnProfileBtn,
-                      showOnProfile && { borderColor: playlist.accent, backgroundColor: playlist.accent + "18" },
-                    ]}
-                    onPress={() => setShowOnProfile(v => !v)}
+                    style={[pdStyles.showOnProfileBtn, showOnProfile && { borderColor: ACCENT, backgroundColor: ACCENT + '18' }]}
+                    onPress={toggleShowOnProfile}
                     activeOpacity={0.8}
                   >
-                    {showOnProfile && <Text style={[pdStyles.showOnProfileText, { color: playlist.accent }]}>✓ </Text>}
-                    <Text style={[pdStyles.showOnProfileText, showOnProfile && { color: playlist.accent }]}>
-                      {showOnProfile ? "Showing on profile" : "Show on profile"}
+                    {showOnProfile && <Text style={[pdStyles.showOnProfileText, { color: ACCENT }]}>✓ </Text>}
+                    <Text style={[pdStyles.showOnProfileText, showOnProfile && { color: ACCENT }]}>
+                      {showOnProfile ? 'Showing on profile' : 'Show on profile'}
                     </Text>
+                  </TouchableOpacity>
+
+                  {/* Add Song button */}
+                  <TouchableOpacity style={cpStyles.addSongBtn} onPress={() => setShowAddSong(true)} activeOpacity={0.8}>
+                    <Ionicons name="add-circle-outline" size={16} color="#FF6C1A" />
+                    <Text style={cpStyles.addSongBtnText}>Add Song</Text>
                   </TouchableOpacity>
                 </View>
 
-                {/* Play button */}
-                <TouchableOpacity style={[pdStyles.playBtn, { backgroundColor: playlist.accent }]} activeOpacity={0.85}>
+                <TouchableOpacity style={[pdStyles.playBtn, { backgroundColor: ACCENT }]} activeOpacity={0.85}>
                   <Text style={pdStyles.playIcon}>▶</Text>
                 </TouchableOpacity>
               </View>
@@ -4451,9 +4905,8 @@ function PlaylistDetailOverlay({ playlist, onClose }: { playlist: DummyPlaylist;
                 <TouchableOpacity style={pdStyles.actionBtn} activeOpacity={0.7}>
                   <Text style={pdStyles.actionIcon}>↺</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={pdStyles.actionBtn} onPress={handleLike} activeOpacity={0.7}>
-                  <Text style={[pdStyles.actionIcon, liked && { color: "#FF3CAC" }]}>{liked ? "♥" : "♡"}</Text>
-                  <Text style={[pdStyles.actionCount, liked && { color: "#FF3CAC" }]}>{fmtCount(likeCount)}</Text>
+                <TouchableOpacity style={pdStyles.actionBtn} activeOpacity={0.7}>
+                  <Text style={pdStyles.actionIcon}>♡</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={pdStyles.actionBtn} activeOpacity={0.7}>
                   <Text style={pdStyles.actionIcon}>↓</Text>
@@ -4462,22 +4915,201 @@ function PlaylistDetailOverlay({ playlist, onClose }: { playlist: DummyPlaylist;
                   <Text style={[pdStyles.actionIcon, { fontSize: 22, letterSpacing: 2 }]}>···</Text>
                 </TouchableOpacity>
               </View>
-
               <View style={pdStyles.songListDivider} />
             </>
           }
-          renderItem={({ item }) => <SongRow song={item} accent={playlist.accent} />}
+          renderItem={({ item }) => (
+            <RealSongRow track={item} accent={ACCENT} onDelete={() => deleteSong(item.id)} />
+          )}
+          ItemSeparatorComponent={() => <View style={pdStyles.songDivider} />}
+        />
+      </Animated.View>
+
+      {showAddSong && (
+        <AddSongDialog
+          playlistId={playlist.id}
+          userId={userId}
+          onClose={() => setShowAddSong(false)}
+          onAdded={loadSongs}
+        />
+      )}
+    </Modal>
+  )
+}
+
+// ─── Spotify playlist detail overlay ─────────────────────────────────────────
+
+function SpotifyPlaylistDetailOverlay({
+  playlist, userId, onClose,
+}: {
+  playlist: SpotifyPlaylist
+  userId: string
+  onClose: () => void
+}) {
+  const insets = useSafeAreaInsets()
+  const slideX = useRef(new Animated.Value(SW)).current
+  const [tracks, setTracks] = useState<SpotifyTrackResult[]>([])
+  const [tracksLoading, setTracksLoading] = useState(true)
+  const [showOnProfile, setShowOnProfile] = useState(false)
+
+  const ACCENT = '#1DB954'
+
+  useEffect(() => {
+    Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start()
+    // Check if already showing on profile
+    supabase.from('spotify_playlist_profile')
+      .select('playlist_id')
+      .eq('user_id', userId)
+      .eq('playlist_id', playlist.id)
+      .maybeSingle()
+      .then(({ data }) => setShowOnProfile(!!data))
+    // Load tracks
+    ;(async () => {
+      const token = await getValidSpotifyToken(userId)
+      if (!token) { setTracksLoading(false); return }
+      const { tracks: t } = await getPlaylistTracks(token, playlist.id)
+      setTracks(t)
+      setTracksLoading(false)
+    })()
+  }, [])
+
+  const handleClose = () => {
+    Animated.timing(slideX, { toValue: SW, duration: 260, useNativeDriver: true }).start(onClose)
+  }
+
+  const toggleShowOnProfile = async () => {
+    const newVal = !showOnProfile
+    setShowOnProfile(newVal)
+    if (newVal) {
+      await supabase.from('spotify_playlist_profile').upsert({ user_id: userId, playlist_id: playlist.id })
+    } else {
+      await supabase.from('spotify_playlist_profile').delete()
+        .eq('user_id', userId).eq('playlist_id', playlist.id)
+    }
+  }
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, { dx, dy }) => dx > 8 && dx > Math.abs(dy) * 2,
+    onShouldBlockNativeResponder: () => false,
+    onPanResponderMove: (_, { dx }) => { if (dx > 0) slideX.setValue(dx) },
+    onPanResponderRelease: (_, { dx, vx }) => {
+      if (dx > SW * 0.3 || vx > 0.8) handleClose()
+      else Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start()
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(slideX, { toValue: 0, useNativeDriver: true }).start()
+    },
+  })).current
+
+  return (
+    <Modal transparent animationType="none" statusBarTranslucent onRequestClose={handleClose}>
+      <Animated.View style={[StyleSheet.absoluteFill, pdStyles.screen, { transform: [{ translateX: slideX }] }]} {...pan.panHandlers}>
+        <FlatList
+          data={tracks}
+          keyExtractor={t => t.id}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            tracksLoading
+              ? <ActivityIndicator color={ACCENT} style={{ marginTop: 32 }} />
+              : <View style={{ alignItems: 'center', paddingTop: 40 }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.25)', fontSize: 15 }}>No tracks found</Text>
+                </View>
+          }
+          ListHeaderComponent={
+            <>
+              {/* ── Hero ── */}
+              <View style={[pdStyles.hero, { minHeight: 340 + insets.top }]}>
+                {/* Full-bleed background: cover image or mosaic of album arts */}
+                {playlist.imageUrl ? (
+                  <Image source={{ uri: playlist.imageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                ) : tracks.length > 0 ? (
+                  <View style={[StyleSheet.absoluteFill, { flexDirection: 'row', flexWrap: 'wrap' }]}>
+                    {tracks.slice(0, 4).map((t, i) =>
+                      t.albumArt
+                        ? <Image key={t.id} source={{ uri: t.albumArt }} style={{ width: '50%', height: '50%' }} resizeMode="cover" />
+                        : <View key={t.id} style={{ width: '50%', height: '50%', backgroundColor: ACCENT + (i % 2 === 0 ? '55' : '33') }} />
+                    )}
+                  </View>
+                ) : (
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0a1a0a' }]} />
+                )}
+                {/* Dark gradient overlay so text is readable over the image */}
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.18)', 'rgba(0,0,0,0.55)', '#0D0D0D']}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                />
+                {/* Back button – absolutely positioned so it doesn't disturb flex-end flow */}
+                <TouchableOpacity
+                  style={[pdStyles.backBtn, { paddingTop: insets.top + 6 }]}
+                  onPress={handleClose}
+                  activeOpacity={0.7}
+                >
+                  <Text style={pdStyles.backIcon}>‹</Text>
+                </TouchableOpacity>
+
+                {/* Title block */}
+                <View style={pdStyles.heroInfo}>
+                  <Text style={pdStyles.heroTitle} numberOfLines={2}>{playlist.name}</Text>
+                  <View style={pdStyles.heroMetaRow}>
+                    <View style={[pdStyles.sourceIconBadge, { backgroundColor: '#1DB954' }]}>
+                      <Text style={pdStyles.sourceIconText}>S</Text>
+                    </View>
+                    <Text style={pdStyles.heroMetaText}>Spotify</Text>
+                    <Text style={pdStyles.heroMetaDot}>·</Text>
+                    <Text style={pdStyles.heroMetaText}>{playlist.trackCount} Song{playlist.trackCount !== 1 ? 's' : ''}</Text>
+                  </View>
+
+                  {/* Show on profile toggle */}
+                  <TouchableOpacity
+                    style={[pdStyles.showOnProfileBtn, showOnProfile && { borderColor: ACCENT, backgroundColor: ACCENT + '18' }]}
+                    onPress={toggleShowOnProfile}
+                    activeOpacity={0.8}
+                  >
+                    {showOnProfile && <Text style={[pdStyles.showOnProfileText, { color: ACCENT }]}>✓ </Text>}
+                    <Text style={[pdStyles.showOnProfileText, showOnProfile && { color: ACCENT }]}>
+                      {showOnProfile ? 'Showing on profile' : 'Show on profile'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity style={[pdStyles.playBtn, { backgroundColor: ACCENT }]} activeOpacity={0.85}>
+                  <Text style={pdStyles.playIcon}>▶</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* ── Action bar ── */}
+              <View style={pdStyles.actionBar}>
+                <TouchableOpacity style={pdStyles.actionBtn} activeOpacity={0.7}>
+                  <Text style={pdStyles.actionIcon}>↺</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={pdStyles.actionBtn} activeOpacity={0.7}>
+                  <Text style={pdStyles.actionIcon}>♡</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={pdStyles.actionBtn} activeOpacity={0.7}>
+                  <Text style={pdStyles.actionIcon}>↓</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={pdStyles.actionBtn} activeOpacity={0.7}>
+                  <Text style={[pdStyles.actionIcon, { fontSize: 22, letterSpacing: 2 }]}>···</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={pdStyles.songListDivider} />
+            </>
+          }
+          renderItem={({ item }) => <SpotifyTrackRow track={item} accent={ACCENT} />}
           ItemSeparatorComponent={() => <View style={pdStyles.songDivider} />}
         />
       </Animated.View>
     </Modal>
-  );
+  )
 }
 
 const pdStyles = StyleSheet.create({
   screen: { backgroundColor: "#0D0D0D" },
-  hero: { height: 340, justifyContent: "flex-end", overflow: "hidden" },
-  backBtn: { paddingHorizontal: 18, paddingTop: 6, paddingBottom: 0, alignSelf: "flex-start" },
+  hero: { minHeight: 340, justifyContent: "flex-end", overflow: "hidden" },
+  backBtn: { position: "absolute", top: 0, left: 0, paddingHorizontal: 18, paddingBottom: 0, zIndex: 10 },
   backIcon: { fontSize: 32, color: "#fff", fontWeight: "300", lineHeight: 36 },
   artMosaic: { flexDirection: "row", flexWrap: "wrap", width: 130, height: 130, borderRadius: 16, overflow: "hidden", alignSelf: "center", marginBottom: 20 },
   mosaicCell: { width: 65, height: 65 },
@@ -4513,22 +5145,110 @@ const pdStyles = StyleSheet.create({
   songDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.05)", marginHorizontal: 16 },
 });
 
-// ─── Playlist list card ───────────────────────────────────────────────────────
+const cpStyles = StyleSheet.create({
+  // Filter pills
+  filterRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  filterBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(255,255,255,0.04)' },
+  filterBtnActive: { borderColor: '#FF6C1A', backgroundColor: 'rgba(255,108,26,0.12)' },
+  filterLabel: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.38)' },
+  filterLabelActive: { color: '#FF6C1A' },
+  // Create playlist button
+  createBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12, paddingHorizontal: 14, backgroundColor: 'rgba(255,108,26,0.07)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,108,26,0.18)', marginBottom: 6 },
+  createBtnText: { fontSize: 14, fontWeight: '700', color: '#FF6C1A' },
+  // Profile badge on card
+  profileBadge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, backgroundColor: 'rgba(171,0,255,0.15)', marginRight: 2 },
+  profileBadgeText: { fontSize: 10, fontWeight: '700', color: '#AB00FF' },
+  // Dialog overlay + sheet
+  dialogOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'flex-end' },
+  dialogSheet: { backgroundColor: '#161618', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.08)', maxHeight: SH * 0.88 },
+  dialogHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.15)', alignSelf: 'center', marginBottom: 20 },
+  dialogTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 18 },
+  // Image picker
+  imagePicker: { width: 90, height: 90, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.12)', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 20, overflow: 'hidden' },
+  imagePickerText: { fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 4 },
+  // Form fields
+  label: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.35)', letterSpacing: 0.9, marginBottom: 8 },
+  input: { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#fff', marginBottom: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  // Tags
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  tagChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, backgroundColor: 'rgba(171,0,255,0.14)', borderWidth: 1, borderColor: 'rgba(171,0,255,0.28)' },
+  tagChipText: { fontSize: 12, fontWeight: '600', color: '#AB00FF' },
+  tagInputRow: { flexDirection: 'row', gap: 8, marginBottom: 20 },
+  tagInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: '#fff', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  addTagBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center' },
+  addTagBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  // Create submit
+  createSubmitBtn: { backgroundColor: '#FF6C1A', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 4 },
+  createSubmitText: { fontSize: 16, fontWeight: '800', color: '#fff' },
+  // Mode tabs (Add Song dialog)
+  modeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  modeBtn: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center' },
+  modeBtnActive: { backgroundColor: 'rgba(255,108,26,0.12)', borderColor: '#FF6C1A' },
+  modeBtnText: { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.4)' },
+  modeBtnTextActive: { color: '#FF6C1A' },
+  // Search
+  searchRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  searchInput: { flex: 1, backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: '#fff', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  searchBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: '#FF6C1A', alignItems: 'center', justifyContent: 'center' },
+  // Track rows
+  trackRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  trackArt: { width: 46, height: 46, borderRadius: 8, backgroundColor: '#1a0a2e', flexShrink: 0 },
+  trackInfo: { flex: 1 },
+  trackName: { fontSize: 14, fontWeight: '600', color: '#fff', marginBottom: 2 },
+  trackArtist: { fontSize: 12, color: 'rgba(255,255,255,0.38)' },
+  // Add buttons
+  addBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: 'rgba(255,108,26,0.12)', borderWidth: 1, borderColor: 'rgba(255,108,26,0.25)' },
+  addBtnText: { fontSize: 12, fontWeight: '700', color: '#FF6C1A' },
+  addBtnDone: { backgroundColor: 'rgba(29,185,84,0.12)', borderColor: 'rgba(29,185,84,0.3)' },
+  addBtnTextDone: { color: '#1DB954' },
+  // Add Song button in detail hero
+  addSongBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: 'rgba(255,108,26,0.1)', borderWidth: 1, borderColor: 'rgba(255,108,26,0.28)', marginTop: 10 },
+  addSongBtnText: { fontSize: 13, fontWeight: '700', color: '#FF6C1A' },
+});
 
-function PlaylistCard({ pl, onPress }: { pl: DummyPlaylist; onPress: () => void }) {
+// ─── Playlist list cards ──────────────────────────────────────────────────────
+
+function CuratedPlaylistCard({ pl, onPress }: { pl: CuratedPlaylist; onPress: () => void }) {
   return (
     <TouchableOpacity style={profileStyles.playlistListItem} onPress={onPress} activeOpacity={0.82}>
-      <View style={[profileStyles.playlistListArt, { backgroundColor: pl.color }]}>
-        <View style={profileStyles.playlistListArtInner}>
-          {[pl.accent + "55", pl.accent + "33"].map((bg, i) => (
-            <View key={i} style={[profileStyles.playlistListMiniCell, { backgroundColor: bg }]} />
-          ))}
-        </View>
-        <Text style={{ fontSize: 16, position: "absolute" }}>🎵</Text>
+      <View style={[profileStyles.playlistListArt, { backgroundColor: '#1a0030' }]}>
+        {pl.image_url
+          ? <Image source={{ uri: pl.image_url }} style={{ width: 56, height: 56 }} resizeMode="cover" />
+          : <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 22 }}>🎵</Text>
+            </View>
+        }
       </View>
       <View style={{ flex: 1 }}>
         <Text style={profileStyles.playlistListName} numberOfLines={1}>{pl.name}</Text>
-        <Text style={profileStyles.playlistListMeta}>{pl.tracks} songs</Text>
+        <Text style={profileStyles.playlistListMeta}>
+          {pl.tags.length > 0 ? pl.tags.slice(0, 2).join(' · ') : 'Curated'}
+        </Text>
+      </View>
+      {pl.show_on_profile && (
+        <View style={cpStyles.profileBadge}>
+          <Text style={cpStyles.profileBadgeText}>On profile</Text>
+        </View>
+      )}
+      <Text style={profileStyles.playlistChevron}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
+function SpotifyPlaylistCard({ pl, onPress }: { pl: SpotifyPlaylist; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={profileStyles.playlistListItem} onPress={onPress} activeOpacity={0.82}>
+      <View style={[profileStyles.playlistListArt, { backgroundColor: '#0a1a0a' }]}>
+        {pl.imageUrl
+          ? <Image source={{ uri: pl.imageUrl }} style={{ width: 56, height: 56 }} resizeMode="cover" />
+          : <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 22 }}>🎵</Text>
+            </View>
+        }
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={profileStyles.playlistListName} numberOfLines={1}>{pl.name}</Text>
+        <Text style={profileStyles.playlistListMeta}>{pl.trackCount} song{pl.trackCount !== 1 ? 's' : ''}</Text>
       </View>
       <Text style={profileStyles.playlistChevron}>›</Text>
     </TouchableOpacity>
@@ -4551,8 +5271,7 @@ function CommunityCard({ co }: { co: DummyCommunity }) {
 }
 
 function ProfileTabs({ userId }: { userId: string | null }) {
-  const [active, setActive] = useState<ProfileTab>("Posts");
-  const [openPlaylist, setOpenPlaylist] = useState<DummyPlaylist | null>(null);
+  const [active, setActive]             = useState<ProfileTab>("Posts");
   const [myPosts, setMyPosts]           = useState<Post[]>(_myPostsCache ?? []);
   const [postsLoading, setPostsLoading] = useState(!_myPostsCache);
   const indicatorAnim = useRef(new Animated.Value(0)).current;
@@ -4560,7 +5279,19 @@ function ProfileTabs({ userId }: { userId: string | null }) {
   const activeRef     = useRef<ProfileTab>("Posts");
   const tabWidth = (SW - 32) / PROFILE_TABS.length;
 
-  // Fetch this user's posts — skipped if already cached
+  // ── Playlist state ─────────────────────────────────────────────────────────
+  const [playlistFilter, setPlaylistFilter] = useState<'curated' | 'spotify'>('curated');
+  const [curatedPlaylists, setCuratedPlaylists] = useState<CuratedPlaylist[]>([]);
+  const [curatedLoading, setCuratedLoading]     = useState(false);
+  const [curatedLoaded, setCuratedLoaded]       = useState(false);
+  const [spotifyPlaylists, setSpotifyPlaylists] = useState<SpotifyPlaylist[]>([]);
+  const [spLoading, setSpLoading]               = useState(false);
+  const [spLoaded, setSpLoaded]                 = useState(false);
+  const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
+  const [openCurated, setOpenCurated]   = useState<CuratedPlaylist | null>(null);
+  const [openSpotify, setOpenSpotify]   = useState<SpotifyPlaylist | null>(null);
+
+  // ── Posts effect ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!userId || _myPostsCache) return;
     setPostsLoading(true);
@@ -4580,7 +5311,36 @@ function ProfileTabs({ userId }: { userId: string | null }) {
       });
   }, [userId]);
 
-  // Stable switcher — safe to call from both tap handlers and the PanResponder closure
+  // ── Load curated playlists when tab is active ──────────────────────────────
+  useEffect(() => {
+    if (active !== 'Playlists' || playlistFilter !== 'curated' || curatedLoaded || !userId) return;
+    setCuratedLoading(true);
+    supabase
+      .from('curated_playlists')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        setCuratedPlaylists((data ?? []) as CuratedPlaylist[]);
+        setCuratedLoading(false);
+        setCuratedLoaded(true);
+      });
+  }, [active, playlistFilter, userId, curatedLoaded]);
+
+  // ── Load Spotify playlists when tab is active ──────────────────────────────
+  useEffect(() => {
+    if (active !== 'Playlists' || playlistFilter !== 'spotify' || spLoaded || !userId) return;
+    setSpLoading(true);
+    getValidSpotifyToken(userId).then(async token => {
+      if (!token) { setSpLoading(false); return; }
+      const pls = await getUserPlaylists(token);
+      setSpotifyPlaylists(pls);
+      setSpLoading(false);
+      setSpLoaded(true);
+    });
+  }, [active, playlistFilter, userId, spLoaded]);
+
+  // ── Tab switcher ───────────────────────────────────────────────────────────
   const switchTo = (tab: ProfileTab, index: number) => {
     activeRef.current = tab;
     setActive(tab);
@@ -4589,7 +5349,7 @@ function ProfileTabs({ userId }: { userId: string | null }) {
     Animated.spring(indicatorAnim, { toValue: index * tabWidth, useNativeDriver: true, damping: 22, stiffness: 280 }).start();
   };
 
-  // Swipe left/right to change tabs — uses activeRef so the closure never goes stale
+  // Swipe left/right to change tabs
   const swipePan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, { dx, dy }) =>
@@ -4615,11 +5375,10 @@ function ProfileTabs({ userId }: { userId: string | null }) {
     },
   })).current;
 
+  // ── Render content ─────────────────────────────────────────────────────────
   const renderContent = () => {
     if (active === "Posts") {
-      if (postsLoading) {
-        return <ActivityIndicator color="#FF6C1A" style={{ marginTop: 48 }} />;
-      }
+      if (postsLoading) return <ActivityIndicator color="#FF6C1A" style={{ marginTop: 48 }} />;
       if (myPosts.length === 0) {
         return (
           <View style={{ alignItems: "center", paddingTop: 52 }}>
@@ -4633,6 +5392,7 @@ function ProfileTabs({ userId }: { userId: string | null }) {
         </View>
       );
     }
+
     if (active === "Reposts") {
       return (
         <View style={{ gap: 12, paddingTop: 12 }}>
@@ -4647,15 +5407,86 @@ function ProfileTabs({ userId }: { userId: string | null }) {
         </View>
       );
     }
+
     if (active === "Playlists") {
       return (
-        <View style={{ gap: 8, paddingTop: 12 }}>
-          {DUMMY_PLAYLISTS.map((pl) => (
-            <PlaylistCard key={pl.id} pl={pl} onPress={() => setOpenPlaylist(pl)} />
-          ))}
+        <View style={{ paddingTop: 12 }}>
+          {/* ── Filter: Curated Playlists / Spotify Playlists ── */}
+          <View style={cpStyles.filterRow}>
+            <TouchableOpacity
+              style={[cpStyles.filterBtn, playlistFilter === 'curated' && cpStyles.filterBtnActive]}
+              onPress={() => setPlaylistFilter('curated')}
+            >
+              <Text style={[cpStyles.filterLabel, playlistFilter === 'curated' && cpStyles.filterLabelActive]}>
+                Curated Playlists
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[cpStyles.filterBtn, playlistFilter === 'spotify' && cpStyles.filterBtnActive]}
+              onPress={() => setPlaylistFilter('spotify')}
+            >
+              <Text style={[cpStyles.filterLabel, playlistFilter === 'spotify' && cpStyles.filterLabelActive]}>
+                Spotify Playlists
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {playlistFilter === 'curated' ? (
+            <>
+              {/* Create playlist button */}
+              <TouchableOpacity
+                style={cpStyles.createBtn}
+                onPress={() => setShowCreatePlaylist(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#FF6C1A" />
+                <Text style={cpStyles.createBtnText}>Create Playlist</Text>
+              </TouchableOpacity>
+
+              {curatedLoading ? (
+                <ActivityIndicator color="#FF6C1A" style={{ marginTop: 28 }} />
+              ) : curatedPlaylists.length === 0 ? (
+                <View style={{ alignItems: 'center', paddingTop: 36 }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.25)', fontSize: 15 }}>No curated playlists yet</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.15)', fontSize: 13, marginTop: 6 }}>Create one above to get started</Text>
+                </View>
+              ) : (
+                <View style={{ gap: 6 }}>
+                  {curatedPlaylists.map(pl => (
+                    <CuratedPlaylistCard
+                      key={pl.id}
+                      pl={pl}
+                      onPress={() => setOpenCurated(pl)}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              {spLoading ? (
+                <ActivityIndicator color="#1DB954" style={{ marginTop: 28 }} />
+              ) : spotifyPlaylists.length === 0 && spLoaded ? (
+                <View style={{ alignItems: 'center', paddingTop: 36 }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.25)', fontSize: 15 }}>No Spotify playlists found</Text>
+                </View>
+              ) : (
+                <View style={{ gap: 6 }}>
+                  {spotifyPlaylists.map(pl => (
+                    <SpotifyPlaylistCard
+                      key={pl.id}
+                      pl={pl}
+                      onPress={() => setOpenSpotify(pl)}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
+          )}
         </View>
       );
     }
+
     return (
       <View style={{ gap: 10, paddingTop: 12 }}>
         {DUMMY_COMMUNITIES.map((co) => <CommunityCard key={co.id} co={co} />)}
@@ -4677,7 +5508,6 @@ function ProfileTabs({ userId }: { userId: string | null }) {
             style={StyleSheet.absoluteFill}
           />
         </Animated.View>
-
         {PROFILE_TABS.map((tab, i) => (
           <TouchableOpacity
             key={tab}
@@ -4692,13 +5522,41 @@ function ProfileTabs({ userId }: { userId: string | null }) {
         ))}
       </View>
 
-      {/* Content fades in on every tab switch */}
+      {/* Content fades in on tab switch */}
       <Animated.View style={{ opacity: contentAnim }}>
         {renderContent()}
       </Animated.View>
 
-      {openPlaylist && (
-        <PlaylistDetailOverlay playlist={openPlaylist} onClose={() => setOpenPlaylist(null)} />
+      {/* ── Modals ── */}
+      {showCreatePlaylist && userId && (
+        <CreatePlaylistDialog
+          userId={userId}
+          onClose={() => setShowCreatePlaylist(false)}
+          onCreate={(pl) => {
+            setCuratedPlaylists(prev => [pl, ...prev]);
+            setShowCreatePlaylist(false);
+          }}
+        />
+      )}
+
+      {openCurated && userId && (
+        <CuratedPlaylistDetailOverlay
+          playlist={openCurated}
+          userId={userId}
+          onClose={() => setOpenCurated(null)}
+          onUpdated={(updated) => {
+            setCuratedPlaylists(prev => prev.map(p => p.id === updated.id ? updated : p));
+            setOpenCurated(updated);
+          }}
+        />
+      )}
+
+      {openSpotify && userId && (
+        <SpotifyPlaylistDetailOverlay
+          playlist={openSpotify}
+          userId={userId}
+          onClose={() => setOpenSpotify(null)}
+        />
       )}
     </View>
   );
@@ -4868,7 +5726,7 @@ function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, ctaLabel =
     if (typeof step === "object" && step.type === "playlistTracks" && accessToken) {
       setLoadingTracks(true);
       setPlaylistTracks([]);
-      getPlaylistTracks(accessToken, step.id).then((tracks) => { setPlaylistTracks(tracks); setLoadingTracks(false); });
+      getPlaylistTracks(accessToken, step.id).then(({ tracks }) => { setPlaylistTracks(tracks); setLoadingTracks(false); });
     }
   }, [step]);
 
@@ -5985,31 +6843,64 @@ const SAVED_ACCOUNTS_KEY = "trackmeet_saved_accounts";
 
 function SettingsOverlay({
   profile,
+  userId,
   onClose,
+  onProfileRefresh,
 }: {
   profile: UserProfile | null;
+  userId: string | null;
   onClose: () => void;
+  onProfileRefresh: () => void;
 }) {
+  const { resetSpotify, refresh: refreshNowPlaying } = useNowPlayingCtx();
+
+  // Which screen is visible: 'main' | 'connected-apps'
+  type Screen = 'main' | 'connected-apps';
+  const [screen,      setScreen]      = useState<Screen>('main');
   const [showConfirm, setShowConfirm] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-  const slideAnim   = useRef(new Animated.Value(400)).current;
+  const [signingOut,  setSigningOut]  = useState(false);
+
+  // Connected-apps sub-screen state
+  const [spotifyConnected,    setSpotifyConnected]    = useState(!!profile?.spotify_access_token);
+  const [showDisconnectAlert, setShowDisconnectAlert] = useState(false);
+  const [disconnecting,       setDisconnecting]       = useState(false);
+  const [connecting,          setConnecting]          = useState(false);
+
+  const slideAnim    = useRef(new Animated.Value(400)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
+  // Sub-screen slides in from the right (within the sheet)
+  const subSlideX    = useRef(new Animated.Value(SW)).current;
   const router = useRouter();
 
   useEffect(() => {
     Animated.parallel([
-      Animated.spring(slideAnim,   { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 200 }),
+      Animated.spring(slideAnim,    { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 200 }),
       Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
     ]).start();
   }, []);
 
   const close = () => {
     Animated.parallel([
-      Animated.timing(slideAnim,   { toValue: 400, duration: 200, useNativeDriver: true }),
+      Animated.timing(slideAnim,    { toValue: 400, duration: 200, useNativeDriver: true }),
       Animated.timing(backdropAnim, { toValue: 0,   duration: 180, useNativeDriver: true }),
     ]).start(onClose);
   };
 
+  // Push to a sub-screen
+  const openScreen = (s: Screen) => {
+    setScreen(s);
+    subSlideX.setValue(SW);
+    Animated.spring(subSlideX, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 220 }).start();
+  };
+
+  const goBack = () => {
+    Animated.timing(subSlideX, { toValue: SW, duration: 220, useNativeDriver: true }).start(() => {
+      setScreen('main');
+      setShowDisconnectAlert(false);
+    });
+  };
+
+  // ── Sign-out ──────────────────────────────────────────────────────────────
   const doSignOut = async (save: boolean) => {
     setSigningOut(true);
     try {
@@ -6024,7 +6915,6 @@ function SettingsOverlay({
           };
           const raw = await SecureStore.getItemAsync(SAVED_ACCOUNTS_KEY);
           const existing: SavedAccount[] = raw ? JSON.parse(raw) : [];
-          // De-duplicate by email, new account goes first
           const merged = [account, ...existing.filter(a => a.email !== account.email)];
           await SecureStore.setItemAsync(SAVED_ACCOUNTS_KEY, JSON.stringify(merged));
         }
@@ -6037,65 +6927,205 @@ function SettingsOverlay({
     }
   };
 
+  // ── Spotify disconnect ────────────────────────────────────────────────────
+  const handleDisconnect = async () => {
+    if (!userId) return;
+    setDisconnecting(true);
+    await disconnectSpotify(userId);
+    // Immediately wipe context state so all screens reflect the change
+    resetSpotify();
+    setSpotifyConnected(false);
+    setShowDisconnectAlert(false);
+    setDisconnecting(false);
+    onProfileRefresh();
+  };
+
+  // ── Spotify connect ───────────────────────────────────────────────────────
+  const handleConnect = async () => {
+    if (!userId || connecting) return;
+    setConnecting(true);
+    const result = await connectSpotify(userId);
+    setConnecting(false);
+    if ('success' in result && result.success) {
+      // Wipe stale cache then immediately poll with the new token
+      resetSpotify();
+      refreshNowPlaying();
+      setSpotifyConnected(true);
+      onProfileRefresh();
+    } else if ('error' in result) {
+      console.log('[Settings] Spotify connect error:', result.error);
+    }
+  };
+
   return (
-    <Modal transparent animationType="none" statusBarTranslucent onRequestClose={close}>
+    <Modal transparent animationType="none" statusBarTranslucent onRequestClose={screen === 'main' ? close : goBack}>
       <Animated.View
         style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)", opacity: backdropAnim }]}
         pointerEvents="none"
       />
-      <Pressable style={StyleSheet.absoluteFill} onPress={close} />
+      <Pressable style={StyleSheet.absoluteFill} onPress={screen === 'main' ? close : goBack} />
 
       <Animated.View
         style={[settingsOverlayStyles.sheet, { transform: [{ translateY: slideAnim }] }]}
         pointerEvents="box-none"
       >
         <Pressable onPress={() => {}}>
-          {/* Drag handle */}
-          <View style={settingsOverlayStyles.handle} />
 
-          <Text style={settingsOverlayStyles.title}>Settings</Text>
-
-          {!showConfirm ? (
+          {/* ── MAIN SCREEN ─────────────────────────────────────────────── */}
+          {screen === 'main' && (
             <>
-              <TouchableOpacity
-                style={settingsOverlayStyles.logoutRow}
-                activeOpacity={0.8}
-                onPress={() => setShowConfirm(true)}
-              >
-                <View style={settingsOverlayStyles.logoutIconWrap}>
-                  <Ionicons name="log-out-outline" size={20} color="#ff4d6d" />
+              <View style={settingsOverlayStyles.handle} />
+              <Text style={settingsOverlayStyles.title}>Settings</Text>
+
+              {!showConfirm ? (
+                <>
+                  {/* Connected Apps row */}
+                  <TouchableOpacity
+                    style={settingsOverlayStyles.menuRow}
+                    activeOpacity={0.8}
+                    onPress={() => openScreen('connected-apps')}
+                  >
+                    <View style={settingsOverlayStyles.menuIconWrap}>
+                      <Ionicons name="apps-outline" size={20} color="rgba(255,255,255,0.85)" />
+                    </View>
+                    <Text style={settingsOverlayStyles.menuLabel}>Connected Apps</Text>
+                    <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
+                  </TouchableOpacity>
+
+                  {/* Spacer */}
+                  <View style={{ height: 8 }} />
+
+                  {/* Log Out row */}
+                  <TouchableOpacity
+                    style={settingsOverlayStyles.logoutRow}
+                    activeOpacity={0.8}
+                    onPress={() => setShowConfirm(true)}
+                  >
+                    <View style={settingsOverlayStyles.logoutIconWrap}>
+                      <Ionicons name="log-out-outline" size={20} color="#ff4d6d" />
+                    </View>
+                    <Text style={settingsOverlayStyles.logoutLabel}>Log Out</Text>
+                    <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <View style={settingsOverlayStyles.confirmBlock}>
+                  <Text style={settingsOverlayStyles.confirmTitle}>Save account?</Text>
+                  <Text style={settingsOverlayStyles.confirmSub}>
+                    Keep your account saved for quick sign-in next time.
+                  </Text>
+                  <TouchableOpacity
+                    style={settingsOverlayStyles.saveBtn}
+                    activeOpacity={0.85}
+                    onPress={() => doSignOut(true)}
+                    disabled={signingOut}
+                  >
+                    {signingOut
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Text style={settingsOverlayStyles.saveBtnText}>Save & Sign Out</Text>
+                    }
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={settingsOverlayStyles.skipBtn}
+                    activeOpacity={0.8}
+                    onPress={() => doSignOut(false)}
+                    disabled={signingOut}
+                  >
+                    <Text style={settingsOverlayStyles.skipBtnText}>Just Sign Out</Text>
+                  </TouchableOpacity>
                 </View>
-                <Text style={settingsOverlayStyles.logoutLabel}>Log Out</Text>
-                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
-              </TouchableOpacity>
+              )}
             </>
-          ) : (
-            <View style={settingsOverlayStyles.confirmBlock}>
-              <Text style={settingsOverlayStyles.confirmTitle}>Save account?</Text>
-              <Text style={settingsOverlayStyles.confirmSub}>
-                Keep your account saved for quick sign-in next time.
-              </Text>
-              <TouchableOpacity
-                style={settingsOverlayStyles.saveBtn}
-                activeOpacity={0.85}
-                onPress={() => doSignOut(true)}
-                disabled={signingOut}
-              >
-                {signingOut
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={settingsOverlayStyles.saveBtnText}>Save & Sign Out</Text>
-                }
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={settingsOverlayStyles.skipBtn}
-                activeOpacity={0.8}
-                onPress={() => doSignOut(false)}
-                disabled={signingOut}
-              >
-                <Text style={settingsOverlayStyles.skipBtnText}>Just Sign Out</Text>
-              </TouchableOpacity>
-            </View>
           )}
+
+          {/* ── CONNECTED APPS SCREEN ───────────────────────────────────── */}
+          {screen === 'connected-apps' && (
+            <Animated.View style={{ transform: [{ translateX: subSlideX }] }}>
+              {/* Drag handle (keeps visual parity with main screen) */}
+              <View style={settingsOverlayStyles.handle} />
+              {/* Sub-screen header */}
+              <View style={settingsOverlayStyles.subHeader}>
+                <TouchableOpacity style={settingsOverlayStyles.backBtn} activeOpacity={0.7} onPress={goBack}>
+                  <Ionicons name="chevron-back" size={20} color="#fff" />
+                </TouchableOpacity>
+                <Text style={settingsOverlayStyles.subTitle}>Connected Apps</Text>
+                <View style={{ width: 36 }} />
+              </View>
+
+              {/* Spotify row */}
+              <View style={settingsOverlayStyles.appRow}>
+                {/* Spotify logo */}
+                <View style={settingsOverlayStyles.spotifyLogoWrap}>
+                  <FontAwesome5 name="spotify" size={22} color="#1DB954" />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={settingsOverlayStyles.appName}>Spotify</Text>
+                  <Text style={settingsOverlayStyles.appStatus}>
+                    {spotifyConnected ? "Connected" : "Not connected"}
+                  </Text>
+                </View>
+
+                {spotifyConnected ? (
+                  /* Connected state — green dot + X to disconnect */
+                  <View style={settingsOverlayStyles.connectedRight}>
+                    <View style={settingsOverlayStyles.connectedDot} />
+                    <TouchableOpacity
+                      style={settingsOverlayStyles.disconnectBtn}
+                      activeOpacity={0.75}
+                      onPress={() => setShowDisconnectAlert(true)}
+                    >
+                      <Ionicons name="close" size={15} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  /* Disconnected state — Connect button */
+                  <TouchableOpacity
+                    style={settingsOverlayStyles.connectBtn}
+                    activeOpacity={0.85}
+                    onPress={handleConnect}
+                    disabled={connecting}
+                  >
+                    {connecting
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Text style={settingsOverlayStyles.connectBtnText}>Connect</Text>
+                    }
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Disconnect confirm */}
+              {showDisconnectAlert && (
+                <View style={settingsOverlayStyles.disconnectConfirm}>
+                  <Text style={settingsOverlayStyles.disconnectConfirmTitle}>Disconnect Spotify?</Text>
+                  <Text style={settingsOverlayStyles.disconnectConfirmSub}>
+                    Your now-playing and broadcasting data will be cleared.
+                  </Text>
+                  <View style={settingsOverlayStyles.disconnectBtnRow}>
+                    <TouchableOpacity
+                      style={settingsOverlayStyles.disconnectCancelBtn}
+                      activeOpacity={0.8}
+                      onPress={() => setShowDisconnectAlert(false)}
+                    >
+                      <Text style={settingsOverlayStyles.disconnectCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={settingsOverlayStyles.disconnectConfirmBtn}
+                      activeOpacity={0.85}
+                      onPress={handleDisconnect}
+                      disabled={disconnecting}
+                    >
+                      {disconnecting
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Text style={settingsOverlayStyles.disconnectConfirmText}>Disconnect</Text>
+                      }
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </Animated.View>
+          )}
+
         </Pressable>
       </Animated.View>
     </Modal>
@@ -6114,6 +7144,7 @@ const settingsOverlayStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
     paddingBottom: 40,
+    overflow: "hidden",
   },
   handle: {
     alignSelf: "center",
@@ -6171,6 +7202,143 @@ const settingsOverlayStyles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.12)",
   },
   skipBtnText: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.55)" },
+
+  // ── Generic menu row (used for Connected Apps, etc.) ──────────────────────
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    marginHorizontal: 12,
+    marginTop: 4,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  menuIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: "#fff" },
+
+  // ── Connected Apps sub-screen ─────────────────────────────────────────────
+  subHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.07)",
+    marginBottom: 8,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  subTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+  },
+
+  // Spotify app row
+  appRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    marginHorizontal: 16,
+    marginVertical: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  spotifyLogoWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "rgba(29,185,84,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  appName:   { fontSize: 15, fontWeight: "700", color: "#fff" },
+  appStatus: { fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 },
+
+  // Right side of app row when connected
+  connectedRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  connectedDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#1DB954",
+  },
+  disconnectBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Connect button (when disconnected)
+  connectBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "#1DB954",
+  },
+  connectBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+
+  // Disconnect confirmation block
+  disconnectConfirm: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 16,
+    backgroundColor: "rgba(255,77,109,0.08)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,77,109,0.18)",
+    gap: 10,
+  },
+  disconnectConfirmTitle: { fontSize: 15, fontWeight: "700", color: "#fff" },
+  disconnectConfirmSub:   { fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 18 },
+  disconnectBtnRow:       { flexDirection: "row", gap: 10, marginTop: 2 },
+  disconnectCancelBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  disconnectCancelText: { fontSize: 14, fontWeight: "600", color: "rgba(255,255,255,0.55)" },
+  disconnectConfirmBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#ff4d6d",
+  },
+  disconnectConfirmText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });
 
 // ─── Social links sheet (mini overlay listing all linked social accounts) ──────
@@ -6328,7 +7496,7 @@ function LinksSheet({
 
 // ─── Start Meet Overlay ──────────────────────────────────────────────────────
 
-function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boolean; onClose: () => void; onStarted: (name: string) => void }) {
+function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boolean; onClose: () => void; onStarted: (meetId: string, name: string) => void }) {
   const slideY    = useRef(new Animated.Value(SH)).current;
   const backdropO = useRef(new Animated.Value(0)).current;
   // kbPad grows to keyboard height so scroll content is never hidden behind it
@@ -6394,20 +7562,16 @@ function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boolean; o
     if (!meetName.trim()) return;
     setStarting(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-      const { error } = await supabase.from("meets").insert({
-        host_id:         user.id,
-        name:            meetName.trim(),
-        description:     meetDescription.trim() || null,
+      const { meetId, error } = await startMeet({
+        name:           meetName.trim(),
+        description:    meetDescription.trim() || null,
         tags,
-        allow_comments:  allowComments,
-        allow_reactions: allowReactions,
-        is_live:         true,
+        allowComments:  allowComments,
+        allowReactions: allowReactions,
       });
-      if (error) throw error;
+      if (error || !meetId) throw new Error(error ?? "Could not start meet");
       onClose();
-      onStarted(meetName.trim());
+      onStarted(meetId, meetName.trim());
     } catch (err) {
       console.error("Start Meet error:", err);
     } finally {
@@ -6521,18 +7685,50 @@ function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boolean; o
   );
 }
 // ─── Meet Live Screen ─────────────────────────────────────────────────────────
+// Architecture: Page 1 (now-playing) is always rendered inside the modal.
+// Page 2 (music picker) is an absolutely-positioned panel that slides in
+// from the right — avoids horizontal-ScrollView touch/height conflicts.
 
-const LIVE_DUMMY_CHAT = [
-  { id: "1", initials: "MJ", color: "#AB00FF", name: "Maria John",  text: "this is so 🔥🔥🔥" },
-  { id: "2", initials: "CJ", color: "#FF6C1A", name: "Chris J",     text: "bro what song is this" },
-  { id: "3", initials: "SK", color: "#1DB954", name: "sarakay",      text: "the vibes are immaculate rn" },
-  { id: "4", initials: "MJ", color: "#AB00FF", name: "Maria John",  text: "can you play that again??" },
-  { id: "5", initials: "NR", color: "#FF3CAC", name: "n_ramos",     text: "joined the meet ✨" },
-];
+// SecureStore flag — set once the user checks "don't show again" on the
+// join explainer so we skip it on future joins.
+const MEET_GUIDE_KEY = 'meet-playback-guide-dismissed';
 
-function MeetLiveScreen({ visible, onClose, meetName }: { visible: boolean; onClose: () => void; meetName?: string }) {
+// ─── Listener Meet room ───────────────────────────────────────────────────────
+function MeetListenerScreen({
+  visible, onClose, meetId, userId, isPublic = false, minimized = false, onMinimize, onExpand, onInfo,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  meetId: string | null;
+  userId: string | null;
+  isPublic?: boolean;
+  minimized?: boolean;
+  onMinimize?: () => void;
+  onExpand?: () => void;
+  onInfo?: (info: { name: string; trackName: string | null; albumArt: string | null }) => void;
+}) {
   const slideAnim = useRef(new Animated.Value(SH)).current;
 
+  const [accessToken,   setAccessToken]   = useState<string | null>(null);
+  const [meet,          setMeet]          = useState<MeetRow | null>(null);
+  const [trackState,    setTrackState]    = useState<MeetTrackState | null>(null);
+  const [host,          setHost]          = useState<{ username: string; display_name: string | null; avatar_url: string | null } | null>(null);
+  const [listenerCount, setListenerCount] = useState(1);
+  const [messages,      setMessages]      = useState<MeetMessage[]>([]);
+  const [chatInput,     setChatInput]     = useState('');
+  const [livePos,       setLivePos]       = useState(0);
+  const [saving,        setSaving]        = useState(false);
+  const [savedId,       setSavedId]       = useState<string | null>(null);
+  const [ended,         setEnded]         = useState(false);
+  const [summary,       setSummary]       = useState<MeetTrack[] | null>(null);
+  const [showGuide,     setShowGuide]     = useState(false);
+  const [dontShowGuide, setDontShowGuide] = useState(false);
+  // Becomes true once the listener has kicked off playback in Spotify (by tapping
+  // "Got it"). Until then we don't drive playback via the Web API — there's no
+  // active device yet, so Web API play calls would 404.
+  const [launched,      setLaunched]      = useState(false);
+
+  // ── Slide in/out ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (visible) {
       Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 180 }).start();
@@ -6541,106 +7737,1368 @@ function MeetLiveScreen({ visible, onClose, meetName }: { visible: boolean; onCl
     }
   }, [visible]);
 
+  // Resolve a valid Spotify token for sync + save on open.
+  useEffect(() => {
+    if (!visible || !userId) return;
+    getValidSpotifyToken(userId).then((t) => setAccessToken(t));
+  }, [visible, userId]);
+
+  // On open, decide whether to show the "we'll briefly open Spotify" explainer.
+  // If the user previously checked "don't show again", skip straight to launch.
+  useEffect(() => {
+    if (!visible) return;
+    let active = true;
+    (async () => {
+      const dismissed = await SecureStore.getItemAsync(MEET_GUIDE_KEY);
+      if (!active) return;
+      if (dismissed === '1') { setShowGuide(false); setLaunched(true); }
+      else                   { setShowGuide(true);  setLaunched(false); }
+    })();
+    return () => { active = false; };
+  }, [visible]);
+
+  // Open Spotify to the host's current track exactly once per join, once we've
+  // both passed the explainer (launched) and know what's playing. Opening the
+  // app makes it the active Spotify device so the Web API can keep it in sync
+  // when the user returns.
+  const openedOnceRef = useRef(false);
+  useEffect(() => {
+    if (!visible) { openedOnceRef.current = false; return; }
+    if (!launched || showGuide || !trackState?.id) return;
+    if (openedOnceRef.current) return;
+    openedOnceRef.current = true;
+    openSpotifyLink(
+      `spotify:track:${trackState.id}`,
+      `https://open.spotify.com/track/${trackState.id}`,
+    );
+  }, [visible, launched, showGuide, trackState?.id]);
+
+  const handleGotIt = async () => {
+    if (dontShowGuide) { try { await SecureStore.setItemAsync(MEET_GUIDE_KEY, '1'); } catch {} }
+    setShowGuide(false);
+    setLaunched(true);
+  };
+
+  // ── Join + load + subscribe ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!visible || !meetId) return;
+    let active = true;
+
+    (async () => {
+      await joinMeet(meetId, isPublic);
+      await registerMeetSync();
+      const m = await getMeet(meetId);
+      if (!active) return;
+      if (m) {
+        setMeet(m);
+        setTrackState(meetRowToTrackState(m));
+        const { data: h } = await supabase
+          .from('users').select('username, display_name, avatar_url').eq('id', m.host_id).single();
+        if (active) setHost(h ?? null);
+      }
+      getMeetMessages(meetId).then((msgs) => { if (active) setMessages(msgs); });
+      getActiveListenerCount(meetId).then((c) => { if (active) setListenerCount(Math.max(c, 1)); });
+    })();
+
+    const channel = supabase
+      .channel(`meet-listener-${meetId}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'meets', filter: `id=eq.${meetId}` },
+        ({ new: row }: any) => {
+          if (!active) return;
+          setMeet(row);
+          setTrackState(meetRowToTrackState(row));
+          if (row.is_live === false) setEnded(true);
+        })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'meet_messages', filter: `meet_id=eq.${meetId}` },
+        async ({ new: row }: any) => {
+          const { data: author } = await supabase
+            .from('users').select('username, display_name, avatar_url').eq('id', row.user_id).single();
+          if (active) setMessages((prev) =>
+            prev.some((x) => x.id === row.id) ? prev : [...prev, { ...row, author: author ?? undefined }]);
+        })
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'meet_participants', filter: `meet_id=eq.${meetId}` },
+        () => { getActiveListenerCount(meetId).then((c) => { if (active) setListenerCount(Math.max(c, 1)); }); })
+      .subscribe();
+
+    return () => { active = false; supabase.removeChannel(channel); };
+  }, [visible, meetId]);
+
+  // Refs holding the freshest token + host state so the steady 5s sanity-check
+  // interval below reads live values instead of a stale closure snapshot.
+  const syncTokenRef = useRef(accessToken);
+  const syncStateRef = useRef(trackState);
+  syncTokenRef.current = accessToken;
+  syncStateRef.current = trackState;
+  const [inSync, setInSync] = useState(true);
+
+  // If the viewer is actually this meet's host (e.g. they tapped their own meet
+  // in the Meets list), NEVER run listener sync — it would seek the host's own
+  // Spotify to match the row the host itself writes, fighting any manual seek
+  // and rewinding playback in a loop. The host is the source of truth.
+  const isHostViewer = !!meet && !!userId && meet.host_id === userId;
+
+  // ── Event-driven sync ───────────────────────────────────────────────────────
+  // The realtime `meets` UPDATE subscription re-runs this effect on every host
+  // write (~2s) because trackState changes, so we react near-live. Drift-only +
+  // cooldown logic in sanityCheckSync prevents seek thrash.
+  // Only runs after the listener has launched Spotify (so a device is active).
+  useEffect(() => {
+    if (!visible || !launched || ended || isHostViewer || !accessToken || !trackState) return;
+    syncListenerToHost(accessToken, trackState);
+  }, [visible, launched, ended, isHostViewer, accessToken, trackState?.id, trackState?.isPlaying, trackState?.talkMode, trackState?.positionUpdatedAt]);
+
+  // ── Sanity check every 5s ─────────────────────────────────────────────────────
+  // Independent steady heartbeat: confirms the listener's song AND playback timer
+  // still match the host, correcting only when they've drifted. Reads refs so the
+  // interval never resets when host state changes (which would starve the timer).
+  // Stops once the meet has ended, so a host who keeps playing in the summary view
+  // can't drag listeners back into playback.
+  useEffect(() => {
+    if (!visible || !launched || ended || isHostViewer) return;
+    const check = async () => {
+      const tok = syncTokenRef.current;
+      const st  = syncStateRef.current;
+      if (!tok || !st) return;
+      const status = await sanityCheckSync(tok, st);
+      setInSync(status.inSync);
+      if (!status.inSync) {
+        console.log(`[MeetSync] sanity check — out of sync (${status.reason}` +
+          (status.driftMs != null ? `, drift ${Math.round(status.driftMs)}ms` : '') +
+          `)${status.corrected ? ' → corrected' : ''}`);
+      }
+    };
+    const id = setInterval(check, 5_000);
+    return () => clearInterval(id);
+  }, [visible, launched, ended]);
+
+  // ── Re-sync the moment the user returns to the app from Spotify ─────────────
+  // This is what "comes back here and we'll handle the rest" means: when the app
+  // foregrounds, snap the listener to the host's current position.
+  useEffect(() => {
+    if (!visible || !launched || ended || isHostViewer) return;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active' && accessToken && trackState) {
+        syncListenerToHost(accessToken, trackState);
+      }
+    });
+    return () => sub.remove();
+  }, [visible, launched, ended, isHostViewer, accessToken, trackState?.id, trackState?.isPlaying, trackState?.talkMode, trackState?.positionUpdatedAt]);
+
+  // ── Talk-mode voice channel ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!visible || !meetId) return;
+    if (trackState?.talkMode) startTalkAudio(meetId, false);
+    else stopTalkAudio();
+  }, [visible, meetId, trackState?.talkMode]);
+
+  // ── Local progress ticker (extrapolates host position) ──────────────────────
+  useEffect(() => {
+    if (!visible || !trackState) return;
+    const tick = () => setLivePos(expectedHostPosition(trackState));
+    tick();
+    const id = setInterval(tick, 1_000);
+    return () => clearInterval(id);
+  }, [visible, trackState?.id, trackState?.isPlaying, trackState?.positionUpdatedAt, trackState?.positionMs]);
+
+  // When the host ends the meet: stop the listener's music (restoring volume
+  // first in case the host was mid-talk), surface the room if it was minimized,
+  // and load the tracklist so the listener gets the same end-of-meet summary.
+  useEffect(() => {
+    if (!ended || !meetId) return;
+    onExpand?.();
+    if (accessToken) {
+      (async () => {
+        await restoreVolumeIfDucked(accessToken);
+        await setPlayback(accessToken, false);
+      })();
+    }
+    getMeetTracks(meetId).then(setSummary);
+  }, [ended, meetId, accessToken]);
+
+  // Report lightweight display info up to the persistent mini-bar.
+  useEffect(() => {
+    if (!visible) return;
+    onInfo?.({
+      name: host?.display_name || host?.username || meet?.name || "Meet",
+      trackName: trackState?.name ?? null,
+      albumArt: trackState?.albumArt ?? null,
+    });
+  }, [visible, host?.username, host?.display_name, meet?.name, trackState?.name, trackState?.albumArt]);
+
+  const handleSendChat = async () => {
+    const body = chatInput.trim();
+    if (!body || !meetId) return;
+    setChatInput('');
+    const sent = await sendMeetMessage(meetId, body);
+    if (sent) setMessages((prev) => prev.some((x) => x.id === sent.id) ? prev : [...prev, sent]);
+  };
+
+  const handleSaveSong = async () => {
+    if (!accessToken || !trackState?.id || saving) return;
+    setSaving(true);
+    const ok = await saveTrackToLiked(accessToken, trackState.id);
+    setSaving(false);
+    if (ok) setSavedId(trackState.id);
+  };
+
+  const handleLeave = async () => {
+    if (meetId) await leaveMeet(meetId);
+    if (accessToken) await restoreVolumeIfDucked(accessToken);
+    await unregisterMeetSync();
+    await stopTalkAudio();
+    setMeet(null); setTrackState(null); setMessages([]); setEnded(false); setSummary(null);
+    setShowGuide(false); setLaunched(false); setDontShowGuide(false);
+    openedOnceRef.current = false;
+    onClose();
+  };
+
+  if (!visible) return null;
+
+  const fmtMs = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+  const progressPct = trackState?.durationMs ? Math.min(livePos / trackState.durationMs, 1) : 0;
+  const hostName = host?.display_name || host?.username || meet?.name || "Host";
+  const isSaved  = savedId === trackState?.id;
+
+  return (
+    <Modal visible={visible && !minimized} animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? handleLeave}>
+      <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]}>
+        {/* Background — synced album art */}
+        {trackState?.albumArt ? (
+          <Image source={{ uri: trackState.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
+        )}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.5)" }]} pointerEvents="none" />
+        <LinearGradient colors={["transparent", "rgba(0,0,0,0.6)", "rgba(0,0,0,0.94)"]} locations={[0.30, 0.62, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
+
+        {/* Talk-mode banner */}
+        {trackState?.talkMode && (
+          <View style={llStyles.talkBanner}>
+            <Ionicons name="mic" size={16} color="#fff" />
+            <Text style={llStyles.talkBannerText}>{hostName} is talking — music paused</Text>
+          </View>
+        )}
+
+        {/* Synced now-playing */}
+        <View style={mlStyles.trackSection}>
+          <Text style={mlStyles.trackName} numberOfLines={1}>{trackState?.name ?? "Waiting for host…"}</Text>
+          <Text style={mlStyles.trackArtist} numberOfLines={1}>{trackState?.artist ?? ""}</Text>
+
+          {/* Live sync status — reflects the 5s sanity check against the host */}
+          {launched && trackState?.id && !trackState?.talkMode && (
+            <View style={llStyles.syncRow}>
+              {inSync ? (
+                <>
+                  <View style={llStyles.syncDotOk} />
+                  <Text style={llStyles.syncTextOk}>In sync with host</Text>
+                </>
+              ) : (
+                <>
+                  <ActivityIndicator size="small" color="#FFB020" />
+                  <Text style={llStyles.syncTextBusy}>Syncing with host…</Text>
+                </>
+              )}
+            </View>
+          )}
+
+          <View style={mlStyles.progressTrack}>
+            <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
+          </View>
+          <View style={mlStyles.progressTimes}>
+            <Text style={mlStyles.progressTime}>{fmtMs(livePos)}</Text>
+            <Text style={mlStyles.progressTime}>{fmtMs(trackState?.durationMs ?? 0)}</Text>
+          </View>
+          {/* Save song */}
+          <TouchableOpacity
+            style={[llStyles.saveSongBtn, (isSaved || !trackState?.id) && llStyles.saveSongBtnDone]}
+            activeOpacity={0.85}
+            onPress={handleSaveSong}
+            disabled={saving || isSaved || !trackState?.id}
+          >
+            <Ionicons name={isSaved ? "checkmark" : "heart-outline"} size={18} color="#fff" />
+            <Text style={llStyles.saveSongText}>{isSaved ? "Saved" : saving ? "Saving…" : "Save song"}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Live chat */}
+        <View style={mlStyles.commentSection}>
+          <MeetChatList messages={messages} />
+        </View>
+
+        {/* Chat input */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={mlStyles.bottomBarWrap}
+        >
+          <View style={mlStyles.bottomBar}>
+            <View style={mlStyles.inputPill}>
+              <TextInput
+                style={mlStyles.inputField}
+                placeholder="Send a message"
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                value={chatInput}
+                onChangeText={setChatInput}
+                onSubmitEditing={handleSendChat}
+                returnKeyType="send"
+              />
+              <TouchableOpacity onPress={handleSendChat} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="send" size={20} color="#E91E8C" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+
+        {/* Ended → tracklist summary (same as host, with a save option).
+            Falls back to a simple notice until the tracklist has loaded. */}
+        {ended && (summary ? (
+          <MeetSummaryScreen
+            tracks={summary}
+            listenerCount={listenerCount}
+            accessToken={accessToken}
+            onClose={handleLeave}
+            role="listener"
+            meetId={meetId}
+          />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, llStyles.endedOverlay]}>
+            <Ionicons name="radio-outline" size={56} color="rgba(255,255,255,0.5)" />
+            <Text style={llStyles.endedTitle}>This Meet has ended</Text>
+            <TouchableOpacity style={llStyles.endedBtn} activeOpacity={0.85} onPress={handleLeave}>
+              <Text style={llStyles.endedBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+
+        {/* Join explainer — shown once (until "don't show again") so the brief
+            jump to Spotify doesn't feel like a glitch. */}
+        {showGuide && !ended && (
+          <View style={[StyleSheet.absoluteFill, gdStyles.scrim]}>
+            <View style={gdStyles.card}>
+              <View style={gdStyles.iconWrap}>
+                <Ionicons name="sync-outline" size={28} color="#1DB954" />
+              </View>
+              <Text style={gdStyles.title}>Starting the music</Text>
+              <Text style={gdStyles.body}>
+                We&apos;ll briefly open your streaming service to start playback — then
+                come back here and we&apos;ll handle the rest, keeping you in sync with the host.
+              </Text>
+
+              <TouchableOpacity
+                style={gdStyles.toggleRow}
+                activeOpacity={0.7}
+                onPress={() => setDontShowGuide((v) => !v)}
+              >
+                <View style={[gdStyles.checkbox, dontShowGuide && gdStyles.checkboxOn]}>
+                  {dontShowGuide && <Ionicons name="checkmark" size={14} color="#fff" />}
+                </View>
+                <Text style={gdStyles.toggleText}>Don&apos;t show this again</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={gdStyles.gotItBtn} activeOpacity={0.85} onPress={handleGotIt}>
+                <Text style={gdStyles.gotItText}>Got it</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Top bar — host info + minimize + leave. Rendered LAST so it stays
+            above the guide scrim and is always tappable (minimize/leave). */}
+        <View style={mlStyles.topBar}>
+          <View style={mlStyles.topLeft}>
+            {host?.avatar_url ? (
+              <Image source={{ uri: host.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+            ) : (
+              <LinearGradient colors={["#AB00FF", "#FF6C1A"]} style={mlStyles.avatarRing}>
+                <View style={mlStyles.avatarInner}>
+                  <Text style={mlStyles.avatarInitial}>{hostName.slice(0, 1).toUpperCase()}</Text>
+                </View>
+              </LinearGradient>
+            )}
+            <View>
+              <Text style={mlStyles.hostName}>{hostName}</Text>
+              <View style={mlStyles.listenerRow}>
+                <View style={mlStyles.liveDotSm} />
+                <Text style={mlStyles.listenerText}>{listenerCount} listening</Text>
+              </View>
+            </View>
+          </View>
+          <View style={mlStyles.topRight}>
+            <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={onMinimize ?? handleLeave}>
+              <Ionicons name="chevron-down" size={19} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={mlStyles.endBtn} activeOpacity={0.8} onPress={handleLeave}>
+              <Text style={mlStyles.endBtnText}>Leave</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+const gdStyles = StyleSheet.create({
+  scrim: { backgroundColor: "rgba(0,0,0,0.78)", alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
+  card: { width: "100%", maxWidth: 360, backgroundColor: "#171018", borderRadius: 24, padding: 24, alignItems: "center" },
+  iconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(29,185,84,0.16)", alignItems: "center", justifyContent: "center", marginBottom: 14 },
+  title: { fontSize: 20, fontWeight: "800", color: "#fff", marginBottom: 8, textAlign: "center" },
+  body: { fontSize: 14, lineHeight: 20, color: "rgba(255,255,255,0.7)", textAlign: "center", marginBottom: 20 },
+  toggleRow: { flexDirection: "row", alignItems: "center", gap: 10, alignSelf: "stretch", marginBottom: 20 },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: "rgba(255,255,255,0.35)", alignItems: "center", justifyContent: "center" },
+  checkboxOn: { backgroundColor: "#1DB954", borderColor: "#1DB954" },
+  toggleText: { fontSize: 14, color: "rgba(255,255,255,0.85)", fontWeight: "600" },
+  gotItBtn: { alignSelf: "stretch", backgroundColor: "#1DB954", borderRadius: 26, paddingVertical: 15, alignItems: "center" },
+  gotItText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+});
+
+// ─── Join confirmation (public vs private) ────────────────────────────────────
+// Before entering a meet, the joiner chooses whether their participation is
+// visible on their profile. Public surfaces a "Join" affordance to anyone who
+// views their now-playing; private keeps their profile looking like ordinary
+// solo listening.
+function JoinMeetPrompt({
+  visible, onCancel, onChoose,
+}: {
+  visible: boolean;
+  onCancel: () => void;
+  onChoose: (isPublic: boolean) => void;
+}) {
+  return (
+    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={onCancel}>
+      <TouchableOpacity style={jpStyles.scrim} activeOpacity={1} onPress={onCancel}>
+        <TouchableOpacity activeOpacity={1} style={jpStyles.card}>
+          <View style={jpStyles.iconWrap}>
+            <FontAwesome5 name="headphones" size={24} color="#AB00FF" />
+          </View>
+          <Text style={jpStyles.title}>Join this Meet</Text>
+          <Text style={jpStyles.body}>
+            Choose how you join. You can listen privately, or let others see you&apos;re
+            here so they can join too.
+          </Text>
+
+          <TouchableOpacity style={jpStyles.publicBtn} activeOpacity={0.85} onPress={() => onChoose(true)}>
+            <Ionicons name="people" size={18} color="#fff" />
+            <View style={{ flex: 1 }}>
+              <Text style={jpStyles.publicBtnText}>Join publicly</Text>
+              <Text style={jpStyles.btnSub}>Shown on your profile — friends can join you</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={jpStyles.privateBtn} activeOpacity={0.85} onPress={() => onChoose(false)}>
+            <Ionicons name="lock-closed" size={18} color="#fff" />
+            <View style={{ flex: 1 }}>
+              <Text style={jpStyles.privateBtnText}>Join privately</Text>
+              <Text style={jpStyles.btnSub}>Your profile shows a normal now-playing</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={jpStyles.cancelBtn} activeOpacity={0.7} onPress={onCancel}>
+            <Text style={jpStyles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+const jpStyles = StyleSheet.create({
+  scrim: { flex: 1, backgroundColor: "rgba(0,0,0,0.78)", alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
+  card: { width: "100%", maxWidth: 360, backgroundColor: "#171018", borderRadius: 24, padding: 24, alignItems: "center" },
+  iconWrap: { width: 56, height: 56, borderRadius: 28, backgroundColor: "rgba(171,0,255,0.16)", alignItems: "center", justifyContent: "center", marginBottom: 14 },
+  title: { fontSize: 20, fontWeight: "800", color: "#fff", marginBottom: 8, textAlign: "center" },
+  body: { fontSize: 14, lineHeight: 20, color: "rgba(255,255,255,0.7)", textAlign: "center", marginBottom: 20 },
+  publicBtn: { alignSelf: "stretch", flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#AB00FF", borderRadius: 18, paddingVertical: 14, paddingHorizontal: 16, marginBottom: 12 },
+  publicBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+  privateBtn: { alignSelf: "stretch", flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 18, paddingVertical: 14, paddingHorizontal: 16, marginBottom: 8 },
+  privateBtnText: { fontSize: 16, fontWeight: "800", color: "#fff" },
+  btnSub: { fontSize: 12, color: "rgba(255,255,255,0.65)", marginTop: 2 },
+  cancelBtn: { paddingVertical: 12, alignItems: "center", alignSelf: "stretch" },
+  cancelText: { fontSize: 15, fontWeight: "700", color: "rgba(255,255,255,0.55)" },
+});
+
+// ─── Persistent minimized-meet bar ────────────────────────────────────────────
+// Floats above the bottom nav on every screen while a meet is minimized, so the
+// user can browse the app without leaving the meet. Tap to expand back.
+function MeetMiniBar({
+  albumArt, title, subtitle, onExpand,
+}: {
+  albumArt: string | null;
+  title: string;
+  subtitle: string;
+  onExpand: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <TouchableOpacity
+      style={[mbStyles.bar, { bottom: 78 + Math.max(insets.bottom - 6, 0) }]}
+      activeOpacity={0.9}
+      onPress={onExpand}
+    >
+      {albumArt ? (
+        <Image source={{ uri: albumArt }} style={mbStyles.art} />
+      ) : (
+        <View style={[mbStyles.art, mbStyles.artFallback]}>
+          <Ionicons name="musical-note" size={16} color="#fff" />
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <View style={mbStyles.titleRow}>
+          <View style={mbStyles.liveDot} />
+          <Text style={mbStyles.title} numberOfLines={1}>{title}</Text>
+        </View>
+        <Text style={mbStyles.subtitle} numberOfLines={1}>{subtitle}</Text>
+      </View>
+      <View style={mbStyles.expandBtn}>
+        <Ionicons name="chevron-up" size={18} color="#fff" />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const mbStyles = StyleSheet.create({
+  bar: {
+    position: "absolute", left: 12, right: 12,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: "rgba(20,10,24,0.97)", borderRadius: 16, padding: 10,
+    borderWidth: 1, borderColor: "rgba(171,0,255,0.45)",
+    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8,
+  },
+  art: { width: 42, height: 42, borderRadius: 9, backgroundColor: "#222" },
+  artFallback: { backgroundColor: "rgba(171,0,255,0.35)", alignItems: "center", justifyContent: "center" },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#FF3B5C" },
+  title: { fontSize: 14, fontWeight: "800", color: "#fff", flexShrink: 1 },
+  subtitle: { fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 2 },
+  expandBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
+});
+
+const llStyles = StyleSheet.create({
+  talkBanner: {
+    position: "absolute", top: 104, left: 16, right: 16,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "rgba(171,0,255,0.85)", borderRadius: 14, paddingVertical: 10,
+  },
+  talkBannerText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  saveSongBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "rgba(29,185,84,0.92)", borderRadius: 24, paddingVertical: 12, marginTop: 18,
+  },
+  saveSongBtnDone: { backgroundColor: "rgba(29,185,84,0.4)" },
+  saveSongText: { fontSize: 14, fontWeight: "800", color: "#fff" },
+  syncRow: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 8 },
+  syncDotOk: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#1DB954" },
+  syncTextOk: { fontSize: 12, fontWeight: "600", color: "rgba(255,255,255,0.6)" },
+  syncTextBusy: { fontSize: 12, fontWeight: "600", color: "#FFB020" },
+  endedOverlay: { backgroundColor: "rgba(0,0,0,0.88)", alignItems: "center", justifyContent: "center", gap: 14 },
+  endedTitle: { fontSize: 20, fontWeight: "800", color: "#fff" },
+  endedBtn: { backgroundColor: "#AB00FF", borderRadius: 24, paddingHorizontal: 32, paddingVertical: 13, marginTop: 8 },
+  endedBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+});
+
+// ─── Meet chat list (shared by host + listener rooms) ─────────────────────────
+function MeetChatList({ messages }: { messages: MeetMessage[] }) {
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    return () => clearTimeout(t);
+  }, [messages.length]);
+
+  // Only show the most recent handful so the overlay never fills the screen.
+  const recent = messages.slice(-6);
+
+  return (
+    <ScrollView
+      ref={scrollRef}
+      style={{ maxHeight: 220 }}
+      contentContainerStyle={{ gap: 9, justifyContent: "flex-end", flexGrow: 1 }}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
+      {recent.map((m) => {
+        const name = m.author?.display_name || m.author?.username || "Listener";
+        return (
+          <View key={m.id} style={mcStyles.row}>
+            {m.author?.avatar_url ? (
+              <Image source={{ uri: m.author.avatar_url }} style={mcStyles.avatar} />
+            ) : (
+              <View style={[mcStyles.avatar, mcStyles.avatarFallback]}>
+                <Text style={mcStyles.avatarLetter}>{name.slice(0, 1).toUpperCase()}</Text>
+              </View>
+            )}
+            <View style={mcStyles.bubble}>
+              <Text style={mcStyles.name}>{name}</Text>
+              <Text style={mcStyles.text}>{m.body}</Text>
+            </View>
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+const mcStyles = StyleSheet.create({
+  row: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  avatar: { width: 30, height: 30, borderRadius: 15, flexShrink: 0, backgroundColor: "#222" },
+  avatarFallback: { backgroundColor: "rgba(171,0,255,0.4)", alignItems: "center", justifyContent: "center" },
+  avatarLetter: { fontSize: 12, fontWeight: "800", color: "#fff" },
+  bubble: { backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7, flexShrink: 1 },
+  name: { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.6)", marginBottom: 1 },
+  text: { fontSize: 13, color: "#fff" },
+});
+
+// ─── End-of-meet summary ──────────────────────────────────────────────────────
+function MeetSummaryScreen({
+  tracks, listenerCount, accessToken, onClose, role = "listener", meetId = null,
+}: {
+  tracks: MeetTrack[];
+  listenerCount: number;
+  accessToken: string | null;
+  onClose: () => void;
+  role?: "host" | "listener";
+  meetId?: string | null;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [saved,  setSaved]  = useState(false);
+  const [onProfile, setOnProfile] = useState(false);
+  const [pinning,   setPinning]   = useState(false);
+  // Per-track save state, keyed by Spotify track_id.
+  const [savedIds,  setSavedIds]  = useState<Record<string, boolean>>({});
+  const [savingId,  setSavingId]  = useState<string | null>(null);
+
+  const handleSaveAll = async () => {
+    if (!accessToken || saving || tracks.length === 0) return;
+    setSaving(true);
+    const next: Record<string, boolean> = {};
+    for (const t of tracks) {
+      const ok = await saveTrackToLiked(accessToken, t.track_id);
+      if (ok) next[t.track_id] = true;
+    }
+    setSavedIds((prev) => ({ ...prev, ...next }));
+    setSaving(false);
+    setSaved(true);
+  };
+
+  const handleSaveOne = async (trackId: string) => {
+    if (!accessToken || savingId || savedIds[trackId]) return;
+    setSavingId(trackId);
+    const ok = await saveTrackToLiked(accessToken, trackId);
+    setSavingId(null);
+    if (ok) setSavedIds((prev) => ({ ...prev, [trackId]: true }));
+  };
+
+  const handleShowOnProfile = async () => {
+    if (!meetId || pinning || onProfile) return;
+    setPinning(true);
+    await setMeetOnProfile(meetId, true);
+    setPinning(false);
+    setOnProfile(true);
+  };
+
+  return (
+    <View style={[StyleSheet.absoluteFill, sumStyles.root]}>
+      <SafeAreaView style={{ flex: 1 }} edges={["top", "bottom"]}>
+        <View style={sumStyles.header}>
+          <Ionicons name="checkmark-circle" size={48} color="#AB00FF" />
+          <Text style={sumStyles.title}>Meet ended</Text>
+          <Text style={sumStyles.sub}>{tracks.length} tracks · {listenerCount} listeners</Text>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 10 }} showsVerticalScrollIndicator={false}>
+          {tracks.length === 0 ? (
+            <Text style={sumStyles.empty}>No tracks were played this meet.</Text>
+          ) : tracks.map((t) => (
+            <View key={t.id} style={sumStyles.trackRow}>
+              {t.album_art ? (
+                <Image source={{ uri: t.album_art }} style={sumStyles.art} />
+              ) : (
+                <View style={[sumStyles.art, { backgroundColor: "#1DB95422", alignItems: "center", justifyContent: "center" }]}>
+                  <Ionicons name="musical-note" size={16} color="#1DB954" />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={sumStyles.trackName} numberOfLines={1}>{t.name}</Text>
+                <Text style={sumStyles.trackArtist} numberOfLines={1}>{t.artist ?? ""}</Text>
+              </View>
+              {accessToken && (
+                <TouchableOpacity
+                  style={sumStyles.rowSaveBtn}
+                  activeOpacity={0.7}
+                  onPress={() => handleSaveOne(t.track_id)}
+                  disabled={!!savingId || savedIds[t.track_id]}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  {savingId === t.track_id ? (
+                    <ActivityIndicator size="small" color="#1DB954" />
+                  ) : (
+                    <Ionicons
+                      name={savedIds[t.track_id] ? "checkmark-circle" : "add-circle-outline"}
+                      size={26}
+                      color={savedIds[t.track_id] ? "#1DB954" : "rgba(255,255,255,0.8)"}
+                    />
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+        </ScrollView>
+
+        <View style={sumStyles.footer}>
+          {/* Host: surface this meet's tracklist on their profile.
+              Listener: save the tracklist to their own Spotify Liked Songs. */}
+          {role === "host" ? (
+            tracks.length > 0 && (
+              <TouchableOpacity
+                style={[sumStyles.saveBtn, onProfile && sumStyles.saveBtnDone]}
+                activeOpacity={0.85}
+                onPress={handleShowOnProfile}
+                disabled={pinning || onProfile || !meetId}
+              >
+                <Ionicons name={onProfile ? "checkmark" : "person-circle-outline"} size={16} color="#fff" />
+                <Text style={sumStyles.saveBtnText}>
+                  {onProfile ? "Showing on profile" : pinning ? "Adding…" : "Show on profile"}
+                </Text>
+              </TouchableOpacity>
+            )
+          ) : (
+            tracks.length > 0 && (
+              <TouchableOpacity
+                style={[sumStyles.saveBtn, (saved || !accessToken) && sumStyles.saveBtnDone]}
+                activeOpacity={0.85}
+                onPress={handleSaveAll}
+                disabled={saving || saved || !accessToken}
+              >
+                <Ionicons name={saved ? "checkmark" : "heart"} size={16} color="#fff" />
+                <Text style={sumStyles.saveBtnText}>
+                  {saved ? "Saved to Liked Songs" : saving ? "Saving…" : "Save all to Spotify"}
+                </Text>
+              </TouchableOpacity>
+            )
+          )}
+          <TouchableOpacity style={sumStyles.doneBtn} activeOpacity={0.85} onPress={onClose}>
+            <Text style={sumStyles.doneBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const sumStyles = StyleSheet.create({
+  root: { backgroundColor: "#0D0D0D" },
+  header: { alignItems: "center", paddingTop: 24, paddingBottom: 8, gap: 6 },
+  title: { fontSize: 26, fontWeight: "900", color: "#fff" },
+  sub: { fontSize: 14, color: "rgba(255,255,255,0.5)" },
+  empty: { fontSize: 14, color: "rgba(255,255,255,0.4)", textAlign: "center", marginTop: 40 },
+  trackRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 12, padding: 10 },
+  art: { width: 44, height: 44, borderRadius: 8 },
+  trackName: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  trackArtist: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 },
+  rowSaveBtn: { width: 32, alignItems: "center", justifyContent: "center" },
+  footer: { padding: 16, gap: 10 },
+  saveBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#1DB954", borderRadius: 26, paddingVertical: 15 },
+  saveBtnDone: { backgroundColor: "rgba(29,185,84,0.45)" },
+  saveBtnText: { fontSize: 15, fontWeight: "800", color: "#fff" },
+  doneBtn: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 26, paddingVertical: 15 },
+  doneBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+});
+
+function MeetLiveScreen({
+  visible, onClose, meetId, meetName, accessToken, userId, minimized = false, onMinimize,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  meetId: string | null;
+  meetName?: string;
+  accessToken: string | null;
+  userId: string | null;
+  minimized?: boolean;
+  onMinimize?: () => void;
+}) {
+  const { track, liveProgressMs } = useNowPlayingCtx();
+
+  // ── Live meet state (host) ────────────────────────────────────────────────
+  const [listenerCount, setListenerCount] = useState(1);
+  const [messages,      setMessages]      = useState<MeetMessage[]>([]);
+  const [chatInput,     setChatInput]     = useState('');
+  const [talkOn,        setTalkOn]        = useState(false);
+  const [ending,        setEnding]        = useState(false);
+  const [summary,       setSummary]       = useState<MeetTrack[] | null>(null);
+  const lastWrittenRef  = useRef<string | null>(null);
+
+  // Refs that always hold the freshest track + position so the heartbeat
+  // interval below reads LIVE values instead of stale closure snapshots.
+  const trackRef    = useRef(track);
+  const progressRef = useRef(liveProgressMs);
+  trackRef.current    = track;
+  progressRef.current = liveProgressMs;
+
+  // Load + subscribe to chat and participant count while the meet is open.
+  useEffect(() => {
+    if (!visible || !meetId) return;
+    let active = true;
+
+    getMeetMessages(meetId).then((m) => { if (active) setMessages(m); });
+    getActiveListenerCount(meetId).then((c) => { if (active) setListenerCount(Math.max(c, 1)); });
+
+    const channel = supabase
+      .channel(`meet-host-${meetId}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'meet_messages', filter: `meet_id=eq.${meetId}` },
+        async ({ new: row }: any) => {
+          // Realtime payload lacks the joined author — fetch the display fields.
+          const { data: author } = await supabase
+            .from('users').select('username, display_name, avatar_url').eq('id', row.user_id).single();
+          if (active) setMessages((prev) =>
+            prev.some((x) => x.id === row.id) ? prev : [...prev, { ...row, author: author ?? undefined }]);
+        })
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'meet_participants', filter: `meet_id=eq.${meetId}` },
+        () => { getActiveListenerCount(meetId).then((c) => { if (active) setListenerCount(Math.max(c, 1)); }); })
+      .subscribe();
+
+    return () => { active = false; supabase.removeChannel(channel); };
+  }, [visible, meetId]);
+
+  // Host broadcasts the currently-playing track + live position into the meet
+  // row so listeners can sync. A 2s heartbeat reads the LIVE track/position from
+  // refs (not a stale closure) so every write carries the true position with a
+  // matching position_updated_at — listeners extrapolate from there.
+  useEffect(() => {
+    // Stop broadcasting once the meet has ended (summary shown) — otherwise the
+    // host continuing to play would keep dragging listeners back into playback.
+    if (!visible || !meetId || summary) return;
+    const write = () => {
+      const t = trackRef.current;
+      if (!t) return;
+      updateMeetTrack(meetId, {
+        id:         t.id,
+        name:       t.name,
+        artist:     t.artist,
+        albumArt:   t.albumArt,
+        durationMs: t.durationMs,
+        positionMs: progressRef.current,
+        isPlaying:  t.isPlaying,
+      });
+    };
+    const id = setInterval(write, 2_000);
+    return () => clearInterval(id);
+  }, [visible, meetId, summary]);
+
+  // Immediate broadcast + tracklist record whenever the song or play state
+  // changes, so listeners react instantly instead of waiting for the heartbeat.
+  useEffect(() => {
+    if (!visible || !meetId || summary || !track) return;
+    updateMeetTrack(meetId, {
+      id:         track.id,
+      name:       track.name,
+      artist:     track.artist,
+      albumArt:   track.albumArt,
+      durationMs: track.durationMs,
+      positionMs: liveProgressMs,
+      isPlaying:  track.isPlaying,
+    });
+    if (track.isPlaying && lastWrittenRef.current !== track.id) {
+      lastWrittenRef.current = track.id;
+      recordMeetTrack(meetId, { id: track.id, name: track.name, artist: track.artist, albumArt: track.albumArt });
+    }
+  }, [visible, meetId, summary, track?.id, track?.isPlaying]);
+
+  const handleSendChat = async () => {
+    const body = chatInput.trim();
+    if (!body || !meetId) return;
+    setChatInput('');
+    const sent = await sendMeetMessage(meetId, body);
+    // Optimistically append in case realtime echo is delayed.
+    if (sent) setMessages((prev) => prev.some((x) => x.id === sent.id) ? prev : [...prev, sent]);
+  };
+
+  const handleToggleTalk = async () => {
+    if (!meetId) return;
+    const next = !talkOn;
+    setTalkOn(next);
+    await setTalkMode(meetId, next);
+  };
+
+  const handleEndMeet = async () => {
+    if (!meetId || ending) return;
+    setEnding(true);
+    const tracks = await getMeetTracks(meetId);
+    await endMeet(meetId);
+    // Stop the host's own music when the meet wraps, if it's still playing.
+    const endTok = apiToken ?? accessToken;
+    if (endTok && track?.isPlaying) await setPlayback(endTok, false);
+    setSummary(tracks);
+    setEnding(false);
+  };
+
+  const closeAll = () => {
+    setSummary(null);
+    setTalkOn(false);
+    setMessages([]);
+    onClose();
+  };
+  const slideAnim   = useRef(new Animated.Value(SH)).current;
+  const musicSlideX = useRef(new Animated.Value(SW)).current;  // slides in from right
+
+  // ── Page 1 state ──────────────────────────────────────────────────────────
+  const [canvasUrl,   setCanvasUrl]   = useState<string | null>(null);
+  const [ctrlLoading, setCtrlLoading] = useState(false);
+  const [pickerOpen,  setPickerOpen]  = useState(false);
+
+  // ── Page 2 state ──────────────────────────────────────────────────────────
+  // apiToken is always a refreshed, valid token — used for all Spotify API calls
+  const [apiToken,         setApiToken]         = useState<string | null>(null);
+  const [playlists,        setPlaylists]        = useState<SpotifyPlaylist[]>([]);
+  const [playlistsLoading, setPlaylistsLoading] = useState(false);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<SpotifyPlaylist | null>(null);
+  const [playlistTracks,   setPlaylistTracks]   = useState<SpotifyTrackResult[]>([]);
+  const [tracksLoading,    setTracksLoading]    = useState(false);
+  const [tracksError,      setTracksError]      = useState<number | null>(null);
+  const [searchQuery,      setSearchQuery]      = useState('');
+  const [searchResults,    setSearchResults]    = useState<SpotifyTrackResult[]>([]);
+  const [searchLoading,    setSearchLoading]    = useState(false);
+  const [playingId,        setPlayingId]        = useState<string | null>(null);
+
+  // Canvas video player — always created at hook level; source swapped when found
+  const player = useVideoPlayer(null, (p) => { p.loop = true; });
+
+  // Fetch a guaranteed-valid token whenever the screen opens
+  useEffect(() => {
+    if (!visible || !userId) return;
+    getValidSpotifyToken(userId).then((t) => { if (t) setApiToken(t); });
+  }, [visible, userId]);
+
+  // Keep playingId in sync with the currently playing track
+  useEffect(() => { if (track?.id) setPlayingId(track.id); }, [track?.id]);
+
+  // ── Music picker open / close ─────────────────────────────────────────────
+  const openMusicPicker = () => {
+    setPickerOpen(true);
+    Animated.spring(musicSlideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start();
+  };
+  const closeMusicPicker = (instant = false) => {
+    const done = () => {
+      setPickerOpen(false);
+      setSelectedPlaylist(null);
+      setPlaylistTracks([]);
+      setTracksLoading(false);
+      setTracksError(null);
+      setSearchQuery('');
+      setSearchResults([]);
+    };
+    if (instant) { musicSlideX.setValue(SW); done(); }
+    else Animated.timing(musicSlideX, { toValue: SW, useNativeDriver: true, duration: 240 }).start(done);
+  };
+
+  // ── Modal slide animation ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (visible) {
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 180 }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: SH, useNativeDriver: true, duration: 280 }).start();
+      setCanvasUrl(null);
+      player.pause();
+      closeMusicPicker(true);
+      setPlaylists([]);
+      setApiToken(null);
+    }
+  }, [visible]);
+
+  // ── Canvas fetch ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!visible || !track?.id || !accessToken) { setCanvasUrl(null); return; }
+    let cancelled = false;
+    fetchSpotifyCanvas(track.id, accessToken).then((url) => {
+      if (cancelled) return;
+      setCanvasUrl(url);
+      if (url) { player.replace(url); player.loop = true; player.play(); }
+      else      { player.pause(); }
+    });
+    return () => { cancelled = true; };
+  }, [track?.id, accessToken, visible]);
+
+  // ── Load playlists once apiToken is ready ────────────────────────────────
+  useEffect(() => {
+    if (!apiToken || playlists.length > 0) return;
+    setPlaylistsLoading(true);
+    getUserPlaylists(apiToken).then((list) => {
+      setPlaylists(list);
+      setPlaylistsLoading(false);
+    });
+  }, [apiToken]);
+
+  // ── Search debounce ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) { setSearchResults([]); return; }
+    const t = setTimeout(async () => {
+      if (!apiToken) return;
+      setSearchLoading(true);
+      const res = await searchSpotifyTracks(apiToken, q);
+      setSearchResults(res);
+      setSearchLoading(false);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchQuery, apiToken]);
+
+  // ── Playlist drill-down ──────────────────────────────────────────────────
+  // tracksLoading is set to true synchronously by selectPlaylist() before this fires.
+  // We always call getValidSpotifyToken fresh here to guarantee a non-stale token —
+  // the apiToken state is good for playlists list but a playlist tap may come later.
+  useEffect(() => {
+    if (!selectedPlaylist || !userId) return;
+    let cancelled = false;
+    (async () => {
+      // Refresh token on every drill-down so we never hit a stale 401
+      const freshToken = await getValidSpotifyToken(userId);
+      if (!freshToken || cancelled) { setTracksLoading(false); return; }
+      const { tracks, httpError } = await getPlaylistTracks(freshToken, selectedPlaylist.id);
+      if (cancelled) return;
+      setPlaylistTracks(tracks);
+      setTracksError(httpError ?? null);
+      setTracksLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPlaylist?.id]);
+
+  // ── Playlist selection (sets loading immediately to avoid empty flicker) ──
+  const selectPlaylist = (pl: SpotifyPlaylist) => {
+    setSelectedPlaylist(pl);
+    setPlaylistTracks([]);
+    setTracksError(null);
+    setTracksLoading(true);
+  };
+
+  // ── Playback helpers ─────────────────────────────────────────────────────
+  // Prefer apiToken (auto-refreshed) over the raw accessToken prop (may be stale)
+  const tok = apiToken ?? accessToken;
+
+  const handlePrev = async () => {
+    if (!tok || ctrlLoading) return;
+    setCtrlLoading(true);
+    await skipPrevious(tok);
+    setTimeout(() => setCtrlLoading(false), 800);
+  };
+  const handleNext = async () => {
+    if (!tok || ctrlLoading) return;
+    setCtrlLoading(true);
+    await skipNext(tok);
+    setTimeout(() => setCtrlLoading(false), 800);
+  };
+  const handlePlayPause = async () => {
+    if (!tok || ctrlLoading || !track) return;
+    setCtrlLoading(true);
+    await setPlayback(tok, !track.isPlaying);
+    setTimeout(() => setCtrlLoading(false), 600);
+  };
+  const handlePlayTrack = async (t: SpotifyTrackResult) => {
+    if (!tok) return;
+    setPlayingId(t.id);
+    await playTrack(tok, `spotify:track:${t.id}`);
+  };
+
+  // ── Progress ─────────────────────────────────────────────────────────────
+  const fmtMs = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+  const progressPct = track?.durationMs ? Math.min(liveProgressMs / track.durationMs, 1) : 0;
+
+  // ── Page 2 content ───────────────────────────────────────────────────────
+  const isSearching  = searchQuery.trim().length > 0;
+  const showTracks   = !isSearching && selectedPlaylist !== null;
+  const p2Loading    = isSearching ? searchLoading : showTracks ? tracksLoading : playlistsLoading;
+  const p2Title      = isSearching ? "Search" : showTracks ? (selectedPlaylist?.name ?? "Playlist") : "Your Music";
+
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} animationType="none" transparent statusBarTranslucent onRequestClose={onClose}>
-      <Animated.View style={[mlStyles.container, { transform: [{ translateY: slideAnim }] }]}>
+    <Modal visible={visible && !minimized} animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? onClose}>
+      <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]}>
 
-        {/* ── Background gradient ── */}
-        <LinearGradient
-          colors={["#0e001f", "#1c0040", "#12003a", "#060011"]}
-          locations={[0, 0.3, 0.65, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-        {/* Subtle radial-style highlight in the middle */}
-        <View style={mlStyles.bgGlow} pointerEvents="none" />
+        {/* ══ PAGE 1 — NOW PLAYING (always rendered, full screen) ══════════ */}
+        {canvasUrl ? (
+          <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} allowsFullscreen={false} />
+        ) : track?.albumArt ? (
+          <Image source={{ uri: track.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
+        )}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.42)" }]} pointerEvents="none" />
+        <LinearGradient colors={["transparent", "rgba(0,0,0,0.55)", "rgba(0,0,0,0.92)"]} locations={[0.30, 0.62, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
 
-        {/* ── Top bar ── */}
+        {/* Top bar — ♫ opens picker */}
         <View style={mlStyles.topBar}>
-          {/* Host info */}
           <View style={mlStyles.topLeft}>
-            <LinearGradient colors={["#AB00FF", "#FF6C1A"]} style={mlStyles.hostRing}>
-              <View style={mlStyles.hostAvatarInner}>
-                <Text style={mlStyles.hostInitials}>ME</Text>
+            <LinearGradient colors={["#AB00FF", "#FF6C1A"]} style={mlStyles.avatarRing}>
+              <View style={mlStyles.avatarInner}>
+                <Text style={mlStyles.avatarInitial}>{(meetName ?? "M").slice(0, 1).toUpperCase()}</Text>
               </View>
             </LinearGradient>
             <View>
               <Text style={mlStyles.hostName}>{meetName ?? "My Meet"}</Text>
-              <View style={mlStyles.liveRow}>
-                <View style={mlStyles.liveDot} />
-                <Text style={mlStyles.liveLabel}>LIVE</Text>
-                <Text style={mlStyles.viewerCount}>  ·  124 watching</Text>
+              <View style={mlStyles.listenerRow}>
+                <View style={mlStyles.liveDotSm} />
+                <Text style={mlStyles.listenerText}>{listenerCount} listening</Text>
               </View>
             </View>
           </View>
-
-          {/* Action buttons */}
           <View style={mlStyles.topRight}>
-            <TouchableOpacity style={mlStyles.topBtn} activeOpacity={0.75}>
-              <Ionicons name="share-outline" size={18} color="#fff" />
+            <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={openMusicPicker}>
+              <Ionicons name="musical-notes" size={17} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity style={[mlStyles.topBtn, mlStyles.endBtn]} activeOpacity={0.8} onPress={onClose}>
-              <Text style={mlStyles.endBtnText}>End</Text>
+            <TouchableOpacity style={mlStyles.endBtn} activeOpacity={0.8} onPress={handleEndMeet} disabled={ending}>
+              <Text style={mlStyles.endBtnText}>{ending ? "Ending…" : "End"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={onMinimize ?? onClose}>
+              <Ionicons name="chevron-down" size={19} color="#fff" />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── Viewer bar (pinned below top bar) ── */}
-        <View style={mlStyles.viewerBar}>
-          {["#AB00FF","#FF6C1A","#1DB954","#FF3CAC","#FFD700"].map((c, i) => (
-            <View key={i} style={[mlStyles.viewerDot, { backgroundColor: c, marginLeft: i === 0 ? 0 : -6 }]} />
-          ))}
-          <Text style={mlStyles.viewerBarText}>  Maria, Chris, and 122 others</Text>
+        {/* Track info + playback controls */}
+        <View style={mlStyles.trackSection}>
+          <Text style={mlStyles.trackName} numberOfLines={1}>{track?.name ?? "—"}</Text>
+          <Text style={mlStyles.trackArtist} numberOfLines={1}>{track?.artist ?? ""}</Text>
+          <View style={mlStyles.progressTrack}>
+            <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
+          </View>
+          <View style={mlStyles.progressTimes}>
+            <Text style={mlStyles.progressTime}>{fmtMs(liveProgressMs)}</Text>
+            <Text style={mlStyles.progressTime}>{fmtMs(track?.durationMs ?? 0)}</Text>
+          </View>
+          <View style={mlStyles.controls}>
+            <TouchableOpacity activeOpacity={0.7} onPress={handlePrev} disabled={ctrlLoading}>
+              <Ionicons name="play-skip-back" size={34} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={mlStyles.playBtn} activeOpacity={0.8} onPress={handlePlayPause} disabled={ctrlLoading}>
+              <Ionicons name={track?.isPlaying ? "pause" : "play"} size={30} color="#fff" style={track?.isPlaying ? undefined : { marginLeft: 3 }} />
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.7} onPress={handleNext} disabled={ctrlLoading}>
+              <Ionicons name="play-skip-forward" size={34} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* ── Floating right-side reactions ── */}
-        <View style={mlStyles.reactionsCol} pointerEvents="none">
-          {["#FF3CAC","#AB00FF","#FF6C1A","#FF3CAC","#1DB954"].map((c, i) => (
-            <FontAwesome5
-              key={i}
-              name={i % 3 === 0 ? "heart" : i % 3 === 1 ? "star" : "music"}
-              size={14 + (i % 3) * 4}
-              color={c}
-              style={{ opacity: 0.55 + (i % 2) * 0.3, marginBottom: 16 }}
-            />
-          ))}
+        {/* Live chat */}
+        <View style={mlStyles.commentSection}>
+          <MeetChatList messages={messages} />
         </View>
 
-        {/* ── Chat bubbles (bottom-left) ── */}
-        <View style={mlStyles.chatArea} pointerEvents="none">
-          {LIVE_DUMMY_CHAT.map((msg) => (
-            <View key={msg.id} style={mlStyles.chatBubble}>
-              <View style={[mlStyles.chatAvatar, { backgroundColor: msg.color + "30", borderColor: msg.color + "60" }]}>
-                <Text style={[mlStyles.chatAvatarText, { color: msg.color }]}>{msg.initials}</Text>
-              </View>
-              <View style={mlStyles.chatTextWrap}>
-                <Text style={mlStyles.chatName}>{msg.name}</Text>
-                <Text style={mlStyles.chatText}>{msg.text}</Text>
-              </View>
+        {/* Bottom bar — real chat input + mic (talk) */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={mlStyles.bottomBarWrap}
+        >
+          <View style={mlStyles.bottomBar}>
+            <View style={mlStyles.inputPill}>
+              <TextInput
+                style={mlStyles.inputField}
+                placeholder="Send a message"
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                value={chatInput}
+                onChangeText={setChatInput}
+                onSubmitEditing={handleSendChat}
+                returnKeyType="send"
+              />
+              <TouchableOpacity onPress={handleSendChat} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="send" size={20} color="#E91E8C" />
+              </TouchableOpacity>
             </View>
-          ))}
-        </View>
-
-        {/* ── Bottom input bar ── */}
-        <View style={mlStyles.bottomBar}>
-          <View style={mlStyles.inputPill}>
-            <Ionicons name="musical-note" size={15} color="rgba(0,0,0,0.35)" style={{ marginRight: 6 }} />
-            <Text style={mlStyles.inputPlaceholder}>Send a message…</Text>
-            <TouchableOpacity style={mlStyles.sendBtn} activeOpacity={0.8}>
-              <Ionicons name="send" size={15} color="#fff" />
+            <TouchableOpacity
+              style={[mlStyles.micBtn, talkOn && mlStyles.micBtnOn]}
+              activeOpacity={0.8}
+              onPress={handleToggleTalk}
+            >
+              <Ionicons name={talkOn ? "mic" : "mic-outline"} size={24} color="#fff" />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity style={mlStyles.bottomIconBtn} activeOpacity={0.8}>
-            <Ionicons name="heart" size={24} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={[mlStyles.bottomIconBtn, { backgroundColor: "rgba(255,60,172,0.22)", borderColor: "rgba(255,60,172,0.35)" }]} activeOpacity={0.8}>
-            <FontAwesome5 name="gift" size={20} color="#FF3CAC" />
-          </TouchableOpacity>
-        </View>
+        </KeyboardAvoidingView>
+
+        {/* End-of-meet summary */}
+        {summary && (
+          <MeetSummaryScreen
+            tracks={summary}
+            listenerCount={listenerCount}
+            accessToken={apiToken ?? accessToken}
+            onClose={closeAll}
+            role="host"
+            meetId={meetId}
+          />
+        )}
+
+        {/* ══ MUSIC PICKER — absolute panel, slides in from the right ══════════ */}
+        {pickerOpen && (
+          <Animated.View style={[mlStyles.musicPage, { transform: [{ translateX: musicSlideX }] }]}>
+
+            {/* Header */}
+            <View style={mlStyles.musicHeader}>
+              <TouchableOpacity
+                style={mlStyles.musicBackBtn}
+                activeOpacity={0.7}
+                onPress={showTracks
+                  ? () => { setSelectedPlaylist(null); setPlaylistTracks([]); setTracksLoading(false); }
+                  : () => closeMusicPicker()
+                }
+              >
+                <Ionicons name="chevron-back" size={22} color="#fff" />
+              </TouchableOpacity>
+              <Text style={mlStyles.musicTitle}>{p2Title}</Text>
+              <View style={{ width: 36 }} />
+            </View>
+
+            {/* Search bar */}
+            <View style={mlStyles.musicSearchRow}>
+              <Ionicons name="search" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
+              <TextInput
+                style={mlStyles.musicSearchInput}
+                placeholder="Search songs, artists..."
+                placeholderTextColor="rgba(255,255,255,0.32)"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                returnKeyType="search"
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => { setSearchQuery(''); setSearchResults([]); }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={17} color="rgba(255,255,255,0.35)" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* List — musicPage is absoluteFill, so flex:1 here = remaining height */}
+            <View style={{ flex: 1 }}>
+              {p2Loading ? (
+                <ActivityIndicator color="#AB00FF" style={{ marginTop: 48 }} />
+              ) : isSearching ? (
+                <FlatList
+                  style={{ flex: 1 }}
+                  data={searchResults}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <MusicTrackRow track={item} playing={playingId === item.id} onPlay={handlePlayTrack} />
+                  )}
+                  contentContainerStyle={mlStyles.musicListContent}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  ListEmptyComponent={<Text style={mlStyles.musicEmpty}>No results for "{searchQuery}"</Text>}
+                />
+              ) : showTracks ? (
+                <FlatList
+                  style={{ flex: 1 }}
+                  data={playlistTracks}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <MusicTrackRow track={item} playing={playingId === item.id} onPlay={handlePlayTrack} />
+                  )}
+                  contentContainerStyle={mlStyles.musicListContent}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  ListEmptyComponent={
+                    tracksError === 401 || tracksError === 403
+                      ? (
+                        <View style={{ alignItems: 'center', paddingHorizontal: 24, marginTop: 48, gap: 8 }}>
+                          <Ionicons name="lock-closed-outline" size={32} color="rgba(255,255,255,0.25)" />
+                          <Text style={[mlStyles.musicEmpty, { marginTop: 8 }]}>
+                            Spotify access error ({tracksError})
+                          </Text>
+                          <Text style={[mlStyles.musicEmpty, { fontSize: 11, marginTop: 0 }]}>
+                            Go to Settings → Connected Apps and reconnect Spotify to grant playlist access.
+                          </Text>
+                        </View>
+                      )
+                      : tracksError
+                        ? <Text style={mlStyles.musicEmpty}>Could not load tracks (HTTP {tracksError})</Text>
+                        : <Text style={mlStyles.musicEmpty}>No tracks in this playlist</Text>
+                  }
+                />
+              ) : (
+                <FlatList
+                  style={{ flex: 1 }}
+                  data={playlists}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <MusicPlaylistRow playlist={item} onPress={() => selectPlaylist(item)} />
+                  )}
+                  contentContainerStyle={mlStyles.musicListContent}
+                  showsVerticalScrollIndicator={false}
+                  ListEmptyComponent={<Text style={mlStyles.musicEmpty}>No playlists found</Text>}
+                />
+              )}
+            </View>
+
+          </Animated.View>
+        )}
 
       </Animated.View>
     </Modal>
+  );
+}
+
+// ── Page 2 row components ─────────────────────────────────────────────────────
+
+function MusicTrackRow({
+  track, playing, onPlay,
+}: {
+  track: SpotifyTrackResult;
+  playing: boolean;
+  onPlay: (t: SpotifyTrackResult) => void;
+}) {
+  const fmtDur = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+  return (
+    <TouchableOpacity style={mlStyles.musicRow} activeOpacity={0.75} onPress={() => onPlay(track)}>
+      {track.albumArt ? (
+        <Image source={{ uri: track.albumArt }} style={mlStyles.musicRowArt} />
+      ) : (
+        <View style={[mlStyles.musicRowArt, { backgroundColor: "#2a2a2e", alignItems: "center", justifyContent: "center" }]}>
+          <Ionicons name="musical-note" size={18} color="rgba(255,255,255,0.25)" />
+        </View>
+      )}
+      <View style={{ flex: 1, marginRight: 10 }}>
+        <Text style={[mlStyles.musicRowName, playing && { color: "#AB00FF" }]} numberOfLines={1}>{track.name}</Text>
+        <Text style={mlStyles.musicRowSub} numberOfLines={1}>{track.artist}  ·  {fmtDur(track.durationMs)}</Text>
+      </View>
+      {playing
+        ? <Ionicons name="musical-notes" size={17} color="#AB00FF" />
+        : <Ionicons name="play-circle-outline" size={26} color="rgba(255,255,255,0.35)" />
+      }
+    </TouchableOpacity>
+  );
+}
+
+function MusicPlaylistRow({
+  playlist, onPress,
+}: {
+  playlist: SpotifyPlaylist;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={mlStyles.musicRow} activeOpacity={0.75} onPress={onPress}>
+      {playlist.imageUrl ? (
+        <Image source={{ uri: playlist.imageUrl }} style={mlStyles.musicRowArt} />
+      ) : (
+        <View style={[mlStyles.musicRowArt, { backgroundColor: playlist.isLiked ? "#1c4d2e" : "#1e1e22", alignItems: "center", justifyContent: "center" }]}>
+          <Ionicons name={playlist.isLiked ? "heart" : "musical-notes"} size={18} color={playlist.isLiked ? "#1DB954" : "rgba(255,255,255,0.3)"} />
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text style={mlStyles.musicRowName} numberOfLines={1}>{playlist.name}</Text>
+        <Text style={mlStyles.musicRowSub} numberOfLines={1}>{playlist.trackCount} songs</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={17} color="rgba(255,255,255,0.25)" />
+    </TouchableOpacity>
   );
 }
 
@@ -6659,8 +9117,24 @@ function ProfileView() {
   const [userId,         setUserId]         = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [meetOverlayVisible, setMeetOverlayVisible] = useState(false);
-  const [meetLiveVisible,    setMeetLiveVisible]    = useState(false);
-  const [activeMeetName,     setActiveMeetName]     = useState("");
+  const [activeMeet, setActiveMeet] = useState<ActiveMeetForUser | null>(null);
+  const openHostMeet = useOpenHostMeet();
+  const openMeet = useOpenMeet();
+
+  // Track whether *we* are currently in a meet, so the now-playing card can show
+  // the "in [host]" variant instead of the ordinary solo card. Polled lightly
+  // since join/leave happens elsewhere in the tree.
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    const load = async () => {
+      const m = await getActiveMeetForUser(userId, false);
+      if (active) setActiveMeet(m);
+    };
+    load();
+    const id = setInterval(load, 8_000);
+    return () => { active = false; clearInterval(id); };
+  }, [userId]);
 
   const fetchProfile = async (force = false) => {
     try {
@@ -6912,13 +9386,33 @@ function ProfileView() {
           const s = Math.floor(ms / 1000);
           return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
         };
+        // You're a participant of your own meet too — distinguish hosting from
+        // listening so "Return" goes to the right room (host vs listener).
+        const isHosting = !!activeMeet && activeMeet.meet.host_id === userId;
+        const meetHost  = activeMeet && !isHosting ? (activeMeet.host.display_name || activeMeet.host.username) : null;
+        const inMeet    = isHosting || !!meetHost;
         return (
           <LinearGradient
-            colors={gradient}
+            colors={inMeet ? ["#2A0C3D", "#1A0820", "#0E070F"] : gradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={profileStyles.nowPlayingCard}
+            style={[profileStyles.nowPlayingCard, inMeet && profileStyles.nowPlayingCardMeet]}
           >
+            {/* In-a-meet banner — distinguishes synced listening / hosting from solo */}
+            {inMeet && (
+              <View style={profileStyles.npMeetBadge}>
+                <FontAwesome5 name="broadcast-tower" size={11} color="#D9A8FF" />
+                {isHosting ? (
+                  <Text style={profileStyles.npMeetBadgeText} numberOfLines={1}>
+                    Hosting <Text style={profileStyles.npMeetBadgeHost}>your Meet</Text>
+                  </Text>
+                ) : (
+                  <Text style={profileStyles.npMeetBadgeText} numberOfLines={1}>
+                    Listening in <Text style={profileStyles.npMeetBadgeHost}>{meetHost}</Text>&apos;s Meet
+                  </Text>
+                )}
+              </View>
+            )}
             {/* Album art + song info row */}
             <View style={profileStyles.npTopRow}>
               {track.albumArt ? (
@@ -6958,18 +9452,39 @@ function ProfileView() {
               </View>
             </View>
 
-            {/* Broadcast row */}
-            <BroadcastRow />
+            {/* Broadcast row — hidden while in a meet (your output is the host's) */}
+            {!inMeet && <BroadcastRow />}
 
-            {/* Start Meet button — nested inside now playing card */}
-            <TouchableOpacity
-              style={profileStyles.startMeetBtn}
-              activeOpacity={0.85}
-              onPress={() => setMeetOverlayVisible(true)}
-            >
-              <FontAwesome5 name="broadcast-tower" size={14} color="#fff" />
-              <Text style={profileStyles.startMeetBtnText}>Start Meet</Text>
-            </TouchableOpacity>
+            {/* Hosting → back to host room. Listening → back to listener room.
+                Otherwise → start a new meet. */}
+            {isHosting ? (
+              <TouchableOpacity
+                style={profileStyles.startMeetBtn}
+                activeOpacity={0.85}
+                onPress={() => activeMeet && openHostMeet?.(activeMeet.meet.id, activeMeet.meet.name)}
+              >
+                <Ionicons name="headset" size={15} color="#fff" />
+                <Text style={profileStyles.startMeetBtnText}>Return to your Meet</Text>
+              </TouchableOpacity>
+            ) : meetHost ? (
+              <TouchableOpacity
+                style={profileStyles.startMeetBtn}
+                activeOpacity={0.85}
+                onPress={() => activeMeet && openMeet?.(activeMeet.meet.id, activeMeet.isPublic)}
+              >
+                <Ionicons name="headset" size={15} color="#fff" />
+                <Text style={profileStyles.startMeetBtnText}>Return to Meet</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={profileStyles.startMeetBtn}
+                activeOpacity={0.85}
+                onPress={() => setMeetOverlayVisible(true)}
+              >
+                <FontAwesome5 name="broadcast-tower" size={14} color="#fff" />
+                <Text style={profileStyles.startMeetBtnText}>Start Meet</Text>
+              </TouchableOpacity>
+            )}
           </LinearGradient>
         );
       })()}
@@ -7046,7 +9561,9 @@ function ProfileView() {
     {settingsOpen && (
       <SettingsOverlay
         profile={profile}
+        userId={userId}
         onClose={() => setSettingsOpen(false)}
+        onProfileRefresh={() => { _profileCache = null; fetchProfile(true); }}
       />
     )}
 
@@ -7070,13 +9587,7 @@ function ProfileView() {
     <StartMeetOverlay
       visible={meetOverlayVisible}
       onClose={() => setMeetOverlayVisible(false)}
-      onStarted={(name) => { setActiveMeetName(name); setMeetLiveVisible(true); }}
-    />
-
-    <MeetLiveScreen
-      visible={meetLiveVisible}
-      onClose={() => setMeetLiveVisible(false)}
-      meetName={activeMeetName}
+      onStarted={(meetId, name) => { setMeetOverlayVisible(false); openHostMeet?.(meetId, name); }}
     />
     </View>
   );
@@ -7181,6 +9692,16 @@ const profileStyles = StyleSheet.create({
     padding: 16,
     gap: 14,
   },
+  nowPlayingCardMeet: { borderColor: "rgba(171,0,255,0.45)" },
+  npMeetBadge: {
+    flexDirection: "row", alignItems: "center", gap: 7,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(171,0,255,0.22)",
+    borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12,
+    marginBottom: 2,
+  },
+  npMeetBadgeText: { fontSize: 12, fontWeight: "700", color: "#E7CBFF", flexShrink: 1 },
+  npMeetBadgeHost: { fontWeight: "800", color: "#fff" },
   npTopRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   npArt: {
     width: 68,
@@ -7468,146 +9989,302 @@ const mmStyles = StyleSheet.create({
 // ─── Meet Live Screen styles ──────────────────────────────────────────────────
 
 const mlStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#060011",
-  },
-  bgGlow: {
-    position: "absolute",
-    top: SH * 0.15,
-    left: SW * 0.1,
-    width: SW * 0.8,
-    height: SH * 0.5,
-    borderRadius: SW * 0.4,
-    backgroundColor: "rgba(171,0,255,0.08)",
-  },
+  root: { flex: 1, backgroundColor: "#000" },
 
-  // Top bar
+  // ── Top bar ───────────────────────────────────────────────────────────────
   topBar: {
+    position: "absolute",
+    top: 0, left: 0, right: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingTop: 54,   // below status bar
-    paddingBottom: 12,
+    paddingHorizontal: 14,
+    paddingTop: 52,
+    paddingBottom: 10,
   },
-  topLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  hostRing: {
-    width: 46, height: 46, borderRadius: 23,
-    padding: 2,
-    alignItems: "center", justifyContent: "center",
-  },
-  hostAvatarInner: {
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: "#1a0040",
-    alignItems: "center", justifyContent: "center",
-  },
-  hostInitials: { fontSize: 15, fontWeight: "800", color: "#fff" },
-  hostName: { fontSize: 15, fontWeight: "700", color: "#fff" },
-  liveRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#FF3CAC" },
-  liveLabel: { fontSize: 11, fontWeight: "800", color: "#FF3CAC", marginLeft: 5, letterSpacing: 0.8 },
-  viewerCount: { fontSize: 11, color: "rgba(255,255,255,0.45)" },
-
+  topLeft:  { flexDirection: "row", alignItems: "center", gap: 10 },
   topRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  topBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.10)",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+
+  // Gradient-ring avatar (like in image)
+  avatarRing: {
+    width: 44, height: 44, borderRadius: 22,
+    padding: 2.5,
+    alignItems: "center", justifyContent: "center",
+  },
+  avatarInner: {
+    flex: 1, width: "100%", borderRadius: 18,
+    backgroundColor: "#1c0030",
+    alignItems: "center", justifyContent: "center",
+  },
+  avatarInitial: { fontSize: 15, fontWeight: "800", color: "#fff" },
+  hostName:      { fontSize: 16, fontWeight: "700", color: "#fff" },
+  listenerRow:   { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
+  liveDotSm:     { width: 6, height: 6, borderRadius: 3, backgroundColor: "#FF3B30" },
+  listenerText:  { fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: "600" },
+
+  // Dark circular buttons — exactly as in image
+  topCircle: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: "rgba(45,45,45,0.82)",
     alignItems: "center", justifyContent: "center",
   },
   endBtn: {
-    width: "auto",
-    paddingHorizontal: 16,
-    backgroundColor: "rgba(255,60,172,0.18)",
-    borderColor: "rgba(255,60,172,0.40)",
+    paddingHorizontal: 16, height: 38, borderRadius: 19,
+    backgroundColor: "#E8000F",
+    alignItems: "center", justifyContent: "center",
   },
-  endBtnText: { fontSize: 13, fontWeight: "700", color: "#FF3CAC" },
-
-  // Viewer avatar strip
-  viewerBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 18,
-    marginBottom: 12,
+  endBtnText: { fontSize: 13, fontWeight: "800", color: "#fff" },
+  micBtn: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: "rgba(45,45,45,0.82)",
+    alignItems: "center", justifyContent: "center",
   },
-  viewerDot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: "#060011" },
-  viewerBarText: { fontSize: 11, color: "rgba(255,255,255,0.38)", flex: 1 },
+  micBtnOn: { backgroundColor: "#AB00FF" },
 
-  reactionsCol: {
+  // ── Comments + hearts row ────────────────────────────────────────────────
+  commentSection: {
     position: "absolute",
-    right: 16,
-    bottom: 140,
-    alignItems: "center",
-  },
-
-  chatArea: {
-    position: "absolute",
-    bottom: 100,
-    left: 0,
-    right: 80,
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  chatBubble: {
+    left: 0, right: 0,
+    bottom: BOTTOM_INSET + 76,   // sits above bottom bar
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 8,
-    maxWidth: "85%",
-    marginBottom: 15,
+    paddingLeft: 14,
+    paddingRight: 10,
   },
-  chatAvatar: {
-    width: 28, height: 28, borderRadius: 14,
-    borderWidth: 1,
+  commentCol: { flex: 1, gap: 9 },
+
+  msgRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+
+  msgAvatar: {
+    width: 34, height: 34, borderRadius: 17,
     alignItems: "center", justifyContent: "center",
     flexShrink: 0,
   },
-  chatAvatarText: { fontSize: 10, fontWeight: "800" },
-  chatTextWrap: {
-    backgroundColor: "rgba(255,255,255,0.20)",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backdropFilter: "blur(8px)",
-  },
-  chatName: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.55)", marginBottom: 2 },
-  chatText:  { fontSize: 15, color: "#fff", lineHeight: 17 },
+  msgAvatarLetter: { fontSize: 13, fontWeight: "800", color: "#fff" },
 
-  bottomBar: {
+  msgBubble: {
+    backgroundColor: "rgba(255,255,255,0.78)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    flexShrink: 1,
+  },
+  msgName: { fontSize: 12, fontWeight: "700", color: "#fff",                   marginBottom: 2 },
+  msgText: { fontSize: 13, fontWeight: "400", color: "rgba(255,255,255,0.88)" },
+
+  // Hearts aligned to bottom-right of the comment stack
+  heartsCol: {
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingBottom: 4,
+    paddingLeft: 4,
+    gap: 8,
+  },
+  heartLg: { fontSize: 26 },
+  heartSm: { fontSize: 18, opacity: 0.70 },
+
+  // ── Bottom bar ────────────────────────────────────────────────────────────
+  bottomBarWrap: {
     position: "absolute",
-    bottom: 0,
-    left: 0, right: 0,
+    bottom: 0, left: 0, right: 0,
+  },
+  bottomBar: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingBottom: BOTTOM_INSET + 12,
-    paddingTop: 12,
-    gap: 10,
-    backgroundColor: "rgba(0,0,0,0.38)",
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    paddingTop: 10,
+    paddingBottom: BOTTOM_INSET + 16,
+    gap: 14,
   },
+  // White pill — exactly as in image
   inputPill: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderRadius: 16,
+    justifyContent: "space-between",
+    backgroundColor: "#fff",
+    borderRadius: 30,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    gap: 10,
+  },
+  inputPlaceholder: { fontSize: 15, color: "rgba(0,0,0,0.32)" },
+  inputField: { flex: 1, fontSize: 15, color: "#000", padding: 0 },
+  // Icons are standalone — no container — matching the image
+
+  // ── Swipe hint (right edge of page 1) ────────────────────────────────────
+  swipeHint: {
+    position: "absolute",
+    right: 12,
+    top: SH * 0.52,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    opacity: 0.5,
+  },
+  swipeHintText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "rgb(255,255,255)",
+    letterSpacing: 0.5,
+  },
+
+  // ── Page 2 — Music picker ─────────────────────────────────────────────────
+  musicPage: {
+    width: SW,
+    height: SH,
+    backgroundColor: "#0e0e11",
+    flexDirection: "column",   // explicit — children stack vertically
+  },
+  musicHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 56,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.07)",
+  },
+  musicBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  musicTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  musicSearchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderRadius: 14,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 8,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
   },
-  inputPlaceholder: { flex: 1, fontSize: 14, color: "rgba(0,0,0,0.38)" },
-  sendBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: "#AB00FF",
-    alignItems: "center", justifyContent: "center",
+  musicSearchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: "#fff",
+    paddingVertical: 0,
   },
-  bottomIconBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.10)",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
-    alignItems: "center", justifyContent: "center",
+  musicListContent: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: BOTTOM_INSET + 24,
+  },
+  musicRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  musicRowArt: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    flexShrink: 0,
+  },
+  musicRowName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#fff",
+    marginBottom: 3,
+  },
+  musicRowSub: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.45)",
+  },
+  musicEmpty: {
+    textAlign: "center",
+    marginTop: 48,
+    fontSize: 14,
+    color: "rgba(255,255,255,0.3)",
+  },
+
+  // ── Track info + playback controls ───────────────────────────────────────
+  trackSection: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    // Sits between top bar and comments; centres in the usable space
+    top: SH * 0.30,
+    alignItems: "center",
+    paddingHorizontal: 32,
+  },
+  trackName: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#fff",
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+    marginBottom: 4,
+  },
+  trackArtist: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "rgba(255,255,255,0.72)",
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+    marginBottom: 20,
+  },
+  // Thin progress bar (full width of section)
+  progressTrack: {
+    width: "100%",
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.22)",
+    overflow: "hidden",
+    marginBottom: 6,
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 2,
+    backgroundColor: "#fff",
+  },
+  progressTimes: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 28,
+  },
+  progressTime: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.55)",
+  },
+  // Prev / Play-Pause / Next row
+  controls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 36,
+  },
+  // Circular play/pause button
+  playBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
 
@@ -8213,13 +10890,14 @@ export default function FeedScreen() {
   const nowPlaying = useNowPlaying();
 
   // Allow other screens (e.g. user-profile DM button) to open a specific tab / conversation
-  const { openTab, openConvId, openConvUserId, openConvUserName, openConvAvatar } =
+  const { openTab, openConvId, openConvUserId, openConvUserName, openConvAvatar, openMeetId } =
     useLocalSearchParams<{
       openTab?: string;
       openConvId?: string;
       openConvUserId?: string;
       openConvUserName?: string;
       openConvAvatar?: string;
+      openMeetId?: string;
     }>();
 
   const [menuVisible, setMenuVisible] = useState(false);
@@ -8227,6 +10905,39 @@ export default function FeedScreen() {
   const [quickReplyPost, setQuickReplyPost] = useState<Post | null>(null);
   const [detailPost, setDetailPost] = useState<Post | null>(null);
   const [openConv, setOpenConv]     = useState<ConversationInfo | null>(null);
+  const [listenerMeetId, setListenerMeetId] = useState<string | null>(null);
+  const [listenerMinimized, setListenerMinimized] = useState(false);
+  const [listenerInfo, setListenerInfo] = useState<{ name: string; trackName: string | null; albumArt: string | null } | null>(null);
+  const [listenerIsPublic, setListenerIsPublic] = useState(false);
+  // Meet awaiting a public/private choice before the listener room opens.
+  const [joinPromptMeetId, setJoinPromptMeetId] = useState<string | null>(null);
+
+  // Host meet session — hoisted here (out of ProfileView) so the room and its
+  // minimized mini-bar survive tab switches.
+  const [hostMeetId,    setHostMeetId]    = useState<string | null>(null);
+  const [hostMeetName,  setHostMeetName]  = useState("");
+  const [hostMeetToken, setHostMeetToken] = useState<string | null>(null);
+  const [hostMinimized, setHostMinimized] = useState(false);
+
+  const openListenerMeet = (id: string, isPublic?: boolean) => {
+    // Already in this room (e.g. minimized) → just restore it to fullscreen.
+    // Never re-join or re-show the join prompt/guide for a room we're in.
+    if (listenerMeetId === id) { setListenerMinimized(false); return; }
+    // No choice yet → ask the joiner whether to join publicly or privately.
+    if (isPublic === undefined) { setJoinPromptMeetId(id); return; }
+    setListenerIsPublic(isPublic);
+    setListenerMeetId(id);
+    setListenerMinimized(false);
+  };
+  const openHostMeet = (meetId: string, name: string) => {
+    setHostMeetId(meetId); setHostMeetName(name); setHostMinimized(false);
+    if (currentUser?.id) getValidSpotifyToken(currentUser.id).then(setHostMeetToken);
+  };
+
+  // Auto-open the listener room when navigated here from a meet-incoming push
+  useEffect(() => {
+    if (openMeetId) openListenerMeet(String(openMeetId));
+  }, [openMeetId]);
 
   // Auto-open a conversation when navigated here from user-profile DM button
   useEffect(() => {
@@ -8423,6 +11134,8 @@ useEffect(() => {
   return (
     <NowPlayingCtx.Provider value={nowPlaying}>
     <FeedUserCtx.Provider value={{ currentUserId: currentUser?.id ?? null, likedPostIds, onToggleLike }}>
+    <OpenMeetCtx.Provider value={openListenerMeet}>
+    <HostMeetCtx.Provider value={openHostMeet}>
     <View style={styles.container}>
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         {activeNav === "Profile" ? (
@@ -8572,7 +11285,63 @@ useEffect(() => {
       {openConv && (
         <ChatDetailView conv={openConv} onClose={() => setOpenConv(null)} />
       )}
+
+      {/* Join confirmation — pick public (shown on your profile) or private */}
+      <JoinMeetPrompt
+        visible={!!joinPromptMeetId}
+        onCancel={() => setJoinPromptMeetId(null)}
+        onChoose={(isPublic) => {
+          const id = joinPromptMeetId;
+          setJoinPromptMeetId(null);
+          if (id) openListenerMeet(id, isPublic);
+        }}
+      />
+
+      {/* Listener Meet room — opened from Meets tab Join or a meet-incoming push */}
+      <MeetListenerScreen
+        visible={!!listenerMeetId}
+        meetId={listenerMeetId}
+        userId={currentUser?.id ?? null}
+        isPublic={listenerIsPublic}
+        minimized={listenerMinimized}
+        onMinimize={() => setListenerMinimized(true)}
+        onExpand={() => setListenerMinimized(false)}
+        onInfo={setListenerInfo}
+        onClose={() => { setListenerMeetId(null); setListenerMinimized(false); setListenerInfo(null); }}
+      />
+
+      {/* Host Meet room — hoisted here so it (and the mini-bar) survives tab switches */}
+      <MeetLiveScreen
+        visible={!!hostMeetId}
+        meetId={hostMeetId}
+        meetName={hostMeetName}
+        accessToken={hostMeetToken}
+        userId={currentUser?.id ?? null}
+        minimized={hostMinimized}
+        onMinimize={() => setHostMinimized(true)}
+        onClose={() => { setHostMeetId(null); setHostMinimized(false); setHostMeetToken(null); }}
+      />
+
+      {/* Persistent minimized-meet bar — shows on every tab while a meet runs */}
+      {hostMeetId && hostMinimized && (
+        <MeetMiniBar
+          albumArt={nowPlaying.track?.albumArt ?? null}
+          title={hostMeetName || "Your Meet"}
+          subtitle={nowPlaying.track?.name ?? "Hosting"}
+          onExpand={() => setHostMinimized(false)}
+        />
+      )}
+      {listenerMeetId && listenerMinimized && (
+        <MeetMiniBar
+          albumArt={listenerInfo?.albumArt ?? null}
+          title={listenerInfo?.name || "Meet"}
+          subtitle={listenerInfo?.trackName ?? "Listening"}
+          onExpand={() => setListenerMinimized(false)}
+        />
+      )}
     </View>
+    </HostMeetCtx.Provider>
+    </OpenMeetCtx.Provider>
     </FeedUserCtx.Provider>
     </NowPlayingCtx.Provider>
   );

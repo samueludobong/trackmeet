@@ -23,8 +23,25 @@ Notifications.setNotificationHandler({
   }),
 })
 
+// Register the "incoming call" notification category so meet-start pushes show
+// Join / Decline action buttons (the closest Expo-managed approximation of a
+// call-style alert without CallKit). Safe to call repeatedly.
+export async function setupMeetNotificationCategory(): Promise<void> {
+  if (Platform.OS === 'web') return
+  try {
+    await Notifications.setNotificationCategoryAsync('meet-incoming', [
+      { identifier: 'join',    buttonTitle: 'Join',    options: { opensAppToForeground: true } },
+      { identifier: 'decline', buttonTitle: 'Decline', options: { opensAppToForeground: false, isDestructive: true } },
+    ])
+  } catch (e) {
+    console.log('[Push] setupMeetNotificationCategory error:', e)
+  }
+}
+
 export async function registerForPushNotifications(): Promise<string | null> {
   if (Platform.OS === 'web') return null
+
+  await setupMeetNotificationCategory()
 
   // Request permission
   const { status: existing } = await Notifications.getPermissionsAsync()
@@ -60,5 +77,58 @@ export async function registerForPushNotifications(): Promise<string | null> {
     // Simulator or missing projectId — not fatal
     console.log('[Push] could not get token:', e)
     return null
+  }
+}
+
+// Notify all of the current user's followers that they started a Meet.
+// Styled as an incoming call (high-priority, ringtone-like) so it grabs
+// attention. Sends directly via the Expo push API — the followers' tokens are
+// readable under the "Anyone can read users" RLS policy. The `meet-incoming`
+// category + interruptionLevel let the client render a call-style UI.
+export async function notifyFollowersOfMeet(meetId: string, meetName: string): Promise<void> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const [{ data: host }, { data: followers }] = await Promise.all([
+      supabase.from('users').select('username, display_name').eq('id', user.id).single(),
+      supabase.from('follows').select('follower_id').eq('following_id', user.id),
+    ])
+
+    const followerIds = (followers ?? []).map(f => f.follower_id)
+    if (followerIds.length === 0) return
+
+    const { data: tokenRows } = await supabase
+      .from('users')
+      .select('push_token')
+      .in('id', followerIds)
+      .not('push_token', 'is', null)
+
+    const tokens = (tokenRows ?? []).map(r => r.push_token).filter(Boolean)
+    if (tokens.length === 0) return
+
+    const hostName = host?.display_name || host?.username || 'Someone'
+
+    // Expo accepts an array of up to 100 messages per request.
+    const messages = tokens.map(to => ({
+      to,
+      title: `${hostName} is live`,
+      body: `Tap to join "${meetName}"`,
+      sound: 'default',
+      priority: 'high',
+      categoryId: 'meet-incoming',
+      interruptionLevel: 'time-sensitive',
+      data: { type: 'meet-incoming', meetId, hostName, meetName },
+    }))
+
+    for (let i = 0; i < messages.length; i += 100) {
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(messages.slice(i, i + 100)),
+      })
+    }
+  } catch (e) {
+    console.log('[Push] notifyFollowersOfMeet error:', e)
   }
 }

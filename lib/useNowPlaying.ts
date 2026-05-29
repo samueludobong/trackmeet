@@ -205,9 +205,22 @@ export function useNowPlaying() {
     setNeedsReconnect(false)
   }
 
+  // Call after a Spotify connect/disconnect to wipe stale cache and reset all
+  // track state so every screen that reads the context reflects the change instantly.
+  const resetSpotify = () => {
+    tokenCache.current      = null
+    lastBroadcastId.current = null
+    fetchedAt.current       = Date.now()
+    baseProgress.current    = 0
+    setTrack(null)
+    setLiveProgressMs(0)
+    setNeedsReconnect(false)
+    setBroadcastingEnabled(false)
+  }
+
   return {
     track, liveProgressMs, gradient: DEFAULT_GRADIENT, loading,
-    needsReconnect, refresh: poll, reconnect,
+    needsReconnect, refresh: poll, reconnect, resetSpotify,
     broadcastingEnabled, broadcastLoading, toggleBroadcasting,
   }
 }

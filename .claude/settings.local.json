@@ -6,7 +6,10 @@
       "Bash(npx tsc *)",
       "Bash(powershell -Command \"Get-ChildItem -Path app,components,lib -Recurse -Include *.tsx,*.ts | Select-Object FullName\")",
       "Bash(cd \"/c/Users/samue/Track Meet/trackmeet\" && ls -la app/)",
-      "Bash(npx supabase *)"
+      "Bash(npx supabase *)",
+      "Bash(ls '/mnt/c/Users/samue/Track Meet/trackmeet/supabase/migrations/')",
+      "Bash(node -e \"const p=require\\('./package.json'\\); const d={...p.dependencies,...p.devDependencies}; console.log\\('async-storage:', d['@react-native-async-storage/async-storage']||'NONE'\\); console.log\\('expo:', d['expo']\\);\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\); const d={...p.dependencies,...p.devDependencies}; console.log\\('expo-secure-store:', d['expo-secure-store']||'NONE'\\); console.log\\('expo-linking:', d['expo-linking']||'NONE'\\);\")"
     ]
   }
 }

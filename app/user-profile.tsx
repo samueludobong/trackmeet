@@ -19,6 +19,7 @@ import { followUser, unfollowUser, checkIsFollowing } from "../lib/follows";
 import { getOrCreateConversation } from "../lib/messages";
 import { openSpotifyLink, saveTrackToLiked, getValidSpotifyToken } from "../lib/spotify";
 import { SongPreviewSheet } from "../components/SongPreviewSheet";
+import { getActiveMeetForUser, type ActiveMeetForUser } from "../lib/meets";
 
 const BANNER_H = 172;
 const AVATAR_SIZE = 86;
@@ -107,6 +108,8 @@ type OtherUserProfile = {
 function NowListeningCard({
   song,
   viewerToken,
+  meet,
+  onJoinMeet,
 }: {
   song: {
     name: string;
@@ -118,6 +121,10 @@ function NowListeningCard({
     updatedAt: string | null;
   };
   viewerToken: string | null;
+  // When set, this user is publicly in a meet (or hosting one) — render the
+  // meet variant with a Join affordance.
+  meet?: { hostName: string; isHost: boolean } | null;
+  onJoinMeet?: () => void;
 }) {
   const pulse = useRef(new Animated.Value(1)).current;
   const [liveProgress, setLiveProgress] = useState(0);
@@ -168,11 +175,27 @@ function NowListeningCard({
 
   return (
     <LinearGradient
-      colors={["#3D1A0C", "#1E0D08", "#0E0907"]}
+      colors={meet ? ["#2A0C3D", "#1A0820", "#0E070F"] : ["#3D1A0C", "#1E0D08", "#0E0907"]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={s.nowPlayingCard}
+      style={[s.nowPlayingCard, meet && s.nowPlayingCardMeet]}
     >
+      {/* Meet banner — shows this user is hosting / in a synced listening room */}
+      {meet && (
+        <View style={s.npMeetBadge}>
+          <View style={s.npLiveDot} />
+          {meet.isHost ? (
+            <Text style={s.npMeetBadgeText} numberOfLines={1}>
+              <Text style={s.npMeetBadgeHost}>Hosting</Text> a live Meet
+            </Text>
+          ) : (
+            <Text style={s.npMeetBadgeText} numberOfLines={1}>
+              In <Text style={s.npMeetBadgeHost}>{meet.hostName}</Text>&apos;s Meet
+            </Text>
+          )}
+        </View>
+      )}
+
       <View style={s.npBody}>
         {song.albumArt ? (
           <Image source={{ uri: song.albumArt }} style={s.npAlbumArt} />
@@ -230,6 +253,14 @@ function NowListeningCard({
           </View>
         </View>
       </View>
+
+      {/* Join the same meet — only when the user is publicly in one */}
+      {meet && (
+        <TouchableOpacity style={s.npJoinBtn} activeOpacity={0.85} onPress={onJoinMeet}>
+          <Ionicons name="headset" size={15} color="#fff" />
+          <Text style={s.npJoinBtnText}>Join Meet</Text>
+        </TouchableOpacity>
+      )}
     </LinearGradient>
   );
 }
@@ -247,6 +278,8 @@ export default function UserProfileScreen() {
   const [currentUserId,     setCurrentUserId]     = useState<string | null>(null);
   const [viewerToken,       setViewerToken]       = useState<string | null>(null);
   const [pinnedPreviewOpen, setPinnedPreviewOpen] = useState(false);
+  // The viewed user's active *public* meet, if any (private ones stay hidden).
+  const [publicMeet,        setPublicMeet]        = useState<ActiveMeetForUser | null>(null);
 
   useEffect(() => { loadProfile(); }, [userId]);
 
@@ -282,6 +315,26 @@ export default function UserProfileScreen() {
     const pollId = setInterval(syncSong, 5_000);
     return () => { supabase.removeChannel(ch); clearInterval(pollId); };
   }, [userId]);
+
+  // Whether the viewed user is publicly in a meet — drives the meet now-playing
+  // variant + Join button. Private participation is excluded (publicOnly).
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    const load = async () => {
+      const m = await getActiveMeetForUser(userId, true);
+      if (active) setPublicMeet(m);
+    };
+    load();
+    const id = setInterval(load, 8_000);
+    return () => { active = false; clearInterval(id); };
+  }, [userId]);
+
+  // Open the feed and let it prompt the viewer to join publicly/privately.
+  const handleJoinMeet = () => {
+    if (!publicMeet) return;
+    router.replace({ pathname: "/feed", params: { openMeetId: publicMeet.meet.id } });
+  };
 
   const loadProfile = async () => {
     if (!userId) return;
@@ -464,9 +517,30 @@ export default function UserProfileScreen() {
               )}
             </View>
 
-            {/* Avatar — overlaps banner bottom */}
+            {/* Avatar — overlaps banner bottom. A live ring + LIVE pill appear
+                while this user is hosting / in a meet. */}
             <View style={[s.avatarRow, { marginTop: -AVATAR_OVERLAP }]}>
-              {profile.avatar_url ? (
+              {publicMeet && !isOwnProfile ? (
+                <View style={s.avatarLiveWrap}>
+                  <LinearGradient
+                    colors={["#FF3B5C", "#AB00FF"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={s.avatarLiveRing}
+                  >
+                    {profile.avatar_url ? (
+                      <Image source={{ uri: profile.avatar_url }} style={s.avatarRingImg} />
+                    ) : (
+                      <View style={[s.avatarRingImg, s.avatarRingFallback]}>
+                        <Text style={s.avatarInitials}>{getInitials(profile.display_name)}</Text>
+                      </View>
+                    )}
+                  </LinearGradient>
+                  <View style={s.liveBadge}>
+                    <Text style={s.liveBadgeText}>LIVE</Text>
+                  </View>
+                </View>
+              ) : profile.avatar_url ? (
                 <Image source={{ uri: profile.avatar_url }} style={s.avatarImg} />
               ) : (
                 <View style={s.avatar}>
@@ -546,20 +620,46 @@ export default function UserProfileScreen() {
           </View>
 
           {/* ── Now Playing card ──────────────────────────────── */}
-          {!!profile.current_song_name && (
-            <NowListeningCard
-              song={{
-                name:       profile.current_song_name,
-                artist:     profile.current_song_artist,
-                id:         profile.current_song_id,
-                albumArt:   profile.current_song_album_art,
-                durationMs: profile.current_song_duration_ms,
-                progressMs: profile.current_song_progress_ms,
-                updatedAt:  profile.current_song_updated_at,
-              }}
-              viewerToken={viewerToken}
-            />
-          )}
+          {/* When publicly in a meet, show the meet's synced track (+ Join);
+              otherwise fall back to the user's own broadcast now-playing. */}
+          {(() => {
+            // Don't surface the meet/join variant when viewing your own profile.
+            const inMeet = publicMeet && !isOwnProfile;
+            const m = inMeet ? publicMeet!.meet : null;
+            const song = m
+              ? {
+                  name:       m.current_track_name ?? "Waiting for host…",
+                  artist:     m.current_track_artist,
+                  id:         m.current_track_id,
+                  albumArt:   m.current_track_album_art,
+                  durationMs: m.current_track_duration_ms,
+                  progressMs: m.current_track_position_ms,
+                  updatedAt:  m.position_updated_at,
+                }
+              : profile.current_song_name
+              ? {
+                  name:       profile.current_song_name,
+                  artist:     profile.current_song_artist,
+                  id:         profile.current_song_id,
+                  albumArt:   profile.current_song_album_art,
+                  durationMs: profile.current_song_duration_ms,
+                  progressMs: profile.current_song_progress_ms,
+                  updatedAt:  profile.current_song_updated_at,
+                }
+              : null;
+            if (!song) return null;
+            const hostName = inMeet
+              ? (publicMeet!.host.display_name || publicMeet!.host.username)
+              : null;
+            return (
+              <NowListeningCard
+                song={song}
+                viewerToken={viewerToken}
+                meet={hostName ? { hostName, isHost: publicMeet!.isHost } : null}
+                onJoinMeet={handleJoinMeet}
+              />
+            );
+          })()}
 
 
         </ScrollView>
@@ -659,6 +759,19 @@ const s = StyleSheet.create({
   },
   avatarInitials: { fontSize: 28, fontWeight: "800", color: "#fff" },
 
+  // ── Live ring (hosting / in a meet) ───────────────────────
+  avatarLiveWrap:   { width: AVATAR_SIZE + 8, height: AVATAR_SIZE + 8, alignItems: "center", justifyContent: "center" },
+  avatarLiveRing:   { width: AVATAR_SIZE + 8, height: AVATAR_SIZE + 8, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  avatarRingImg:    { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: 18, borderWidth: 3, borderColor: "#161618" },
+  avatarRingFallback: { backgroundColor: "#FF6B35", alignItems: "center", justifyContent: "center" },
+  liveBadge: {
+    position: "absolute", bottom: -4, alignSelf: "center",
+    backgroundColor: "#FF3B5C", borderRadius: 6,
+    paddingHorizontal: 7, paddingVertical: 2,
+    borderWidth: 2, borderColor: "#161618",
+  },
+  liveBadgeText: { fontSize: 9, fontWeight: "900", color: "#fff", letterSpacing: 0.6 },
+
   // ── Info ──────────────────────────────────────────────────
   infoSection: { paddingHorizontal: 20, paddingBottom: 26 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" },
@@ -716,6 +829,21 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
     padding: 16, gap: 14,
   },
+  nowPlayingCardMeet: { borderColor: "rgba(171,0,255,0.45)" },
+  npMeetBadge: {
+    flexDirection: "row", alignItems: "center", gap: 7,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(171,0,255,0.22)",
+    borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12,
+  },
+  npMeetBadgeText: { fontSize: 12, fontWeight: "700", color: "#E7CBFF", flexShrink: 1 },
+  npMeetBadgeHost: { fontWeight: "800", color: "#fff" },
+  npLiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#FF3B5C" },
+  npJoinBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "#AB00FF", borderRadius: 24, paddingVertical: 12,
+  },
+  npJoinBtnText: { fontSize: 14, fontWeight: "800", color: "#fff" },
   npBody:            { flexDirection: "row", gap: 14, alignItems: "center" },
   npAlbumArt:        { width: 58, height: 58, borderRadius: 10 },
   npAlbumArtFallback:{ backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center" },
