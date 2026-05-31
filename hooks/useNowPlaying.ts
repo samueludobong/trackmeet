@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
-import { supabase } from './supabase'
-import { getCurrentlyPlaying, refreshSpotifyToken, reconnectSpotify } from './spotify'
-import { registerBackgroundSync, unregisterBackgroundSync } from './backgroundSync'
+import { useEffect, useRef, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import { getCurrentlyPlaying, refreshSpotifyToken, reconnectSpotify } from '../lib/spotify';
+import { registerBackgroundSync, unregisterBackgroundSync } from '../lib/backgroundSync';
+import { gradientFromArt, accentFromArt, DEFAULT_ACCENT } from './albumColors';
 
 export type NowPlayingTrack = {
   id: string
@@ -25,6 +26,8 @@ export function useNowPlaying() {
   const [needsReconnect,      setNeedsReconnect]      = useState(false)
   const [broadcastingEnabled, setBroadcastingEnabled] = useState(false)
   const [broadcastLoading,    setBroadcastLoading]    = useState(true)
+  const [gradient,            setGradient]            = useState<[string, string, string]>(DEFAULT_GRADIENT)
+  const [accent,              setAccent]              = useState<[string, string, string]>(DEFAULT_ACCENT)
 
   const tokenCache      = useRef<{ token: string; expiresAt: string } | null>(null)
   const fetchedAt       = useRef<number>(Date.now())
@@ -178,6 +181,17 @@ export function useNowPlaying() {
     return () => clearInterval(id)
   }, [needsReconnect])
 
+  // Derive the now-playing gradient from the album art (Expo Go-safe, pure JS).
+  // Falls back to DEFAULT_GRADIENT while computing or if extraction fails.
+  useEffect(() => {
+    const art = track?.albumArt
+    if (!art) { setGradient(DEFAULT_GRADIENT); setAccent(DEFAULT_ACCENT); return }
+    let active = true
+    gradientFromArt(art).then((g) => { if (active) setGradient(g) })
+    accentFromArt(art).then((a) => { if (active) setAccent(a) })
+    return () => { active = false }
+  }, [track?.albumArt])
+
   // 1-second local ticker for smooth progress
   useEffect(() => {
     if (!track?.isPlaying) return
@@ -214,12 +228,14 @@ export function useNowPlaying() {
     baseProgress.current    = 0
     setTrack(null)
     setLiveProgressMs(0)
+    setGradient(DEFAULT_GRADIENT)
+    setAccent(DEFAULT_ACCENT)
     setNeedsReconnect(false)
     setBroadcastingEnabled(false)
   }
 
   return {
-    track, liveProgressMs, gradient: DEFAULT_GRADIENT, loading,
+    track, liveProgressMs, gradient, accent, loading,
     needsReconnect, refresh: poll, reconnect, resetSpotify,
     broadcastingEnabled, broadcastLoading, toggleBroadcasting,
   }

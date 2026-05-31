@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { useNowPlaying } from "../useNowPlaying";
+import { useNowPlaying } from "../../hooks/useNowPlaying";
 
 // Lets any component inside a post card open the detail view without prop-drilling through card types
 export const OpenDetailCtx = createContext<(() => void) | undefined>(undefined);

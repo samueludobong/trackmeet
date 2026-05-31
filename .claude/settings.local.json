@@ -9,7 +9,23 @@
       "Bash(npx supabase *)",
       "Bash(ls '/mnt/c/Users/samue/Track Meet/trackmeet/supabase/migrations/')",
       "Bash(node -e \"const p=require\\('./package.json'\\); const d={...p.dependencies,...p.devDependencies}; console.log\\('async-storage:', d['@react-native-async-storage/async-storage']||'NONE'\\); console.log\\('expo:', d['expo']\\);\")",
-      "Bash(node -e \"const p=require\\('./package.json'\\); const d={...p.dependencies,...p.devDependencies}; console.log\\('expo-secure-store:', d['expo-secure-store']||'NONE'\\); console.log\\('expo-linking:', d['expo-linking']||'NONE'\\);\")"
+      "Bash(node -e \"const p=require\\('./package.json'\\); const d={...p.dependencies,...p.devDependencies}; console.log\\('expo-secure-store:', d['expo-secure-store']||'NONE'\\); console.log\\('expo-linking:', d['expo-linking']||'NONE'\\);\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('file-system:', \\(p.dependencies||{}\\)['expo-file-system']\\); console.log\\('image-manipulator:', \\(p.dependencies||{}\\)['expo-image-manipulator']\\)\")",
+      "PowerShell(npx tsc --noEmit)",
+      "Read(//c/c/Users/samue/Track Meet/trackmeet/**)",
+      "Read(//c/c/Users/samue/Track Meet/trackmeet/app/**)",
+      "Bash(cd \"/c/Users/samue/Track Meet/trackmeet\" && cat package.json)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(grep -rno \"from ['\\\\\"].*feed['\\\\\"]\" app components lib --include=*.tsx --include=*.ts)",
+      "Bash(grep -rn \"feed\" app/_layout.tsx app/\\\\\\(tabs\\\\\\)/_layout.tsx)",
+      "Bash(cd \"/c/Users/samue/Track Meet/trackmeet\" && cp .feed.new app/feed.tsx && echo \"applied $\\(wc -l < app/feed.tsx\\) lines\")",
+      "Bash(xargs wc -l)",
+      "Bash(node -e ' *)",
+      "Bash(node --check scripts/registry.mjs)",
+      "Bash(export LC_ALL=C)",
+      "Bash(cp components/profile/SettingsOverlay.tsx .so.bak)",
+      "Bash(node scripts/exhook.mjs components/profile/SettingsOverlay.tsx useSettingsOverlay \"{ profile, userId, onClose, onProfileRefresh }: { profile: UserProfile | null; userId: string | null; onClose: \\(\\) => void; onProfileRefresh: \\(\\) => void }\" \"{ profile, userId, onClose, onProfileRefresh }\")",
+      "Bash(node scripts/rmunused.mjs components/profile/SettingsOverlay.tsx hooks/useSettingsOverlay.ts)"
     ]
   }
 }

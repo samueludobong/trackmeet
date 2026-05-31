@@ -1014,3 +1014,55 @@ export const fetchSpotifyCanvas = async (
     return null
   }
 }
+
+/** Fetch a Spotify artist object by id (parsed JSON, or null on error). */
+export async function fetchSpotifyArtistById(token: string, artistId: string): Promise<any | null> {
+  const res = await fetch(`https://api.spotify.com/v1/artists/${artistId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.ok ? res.json() : null;
+}
+
+/** Fetch a Spotify track object by id (parsed JSON, or null on error). */
+export async function fetchSpotifyTrackById(token: string, trackId: string): Promise<any | null> {
+  const res = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.ok ? res.json() : null;
+}
+
+
+// ─── Spotify link parsing / metadata (moved from lib/feed/helpers) ──────────
+export function parseSpotifyUrl(url: string): { type: string; id: string } | null {
+  const m = url.match(/open\.spotify\.com\/(track|artist|album|playlist)\/([A-Za-z0-9]+)/);
+  return m ? { type: m[1], id: m[2] } : null;
+}
+
+export type SpotifyLinkInfo = {
+  resourceType: string;
+  name: string;
+  subtitle: string | null;
+  imageUrl: string | null;
+};
+
+export async function fetchSpotifyLinkInfo(
+  token: string,
+  type: string,
+  id: string,
+): Promise<SpotifyLinkInfo | null> {
+  try {
+    const ep = type === "playlist"
+      ? `https://api.spotify.com/v1/playlists/${id}?fields=name,images,owner`
+      : `https://api.spotify.com/v1/${type}s/${id}`;
+    const res = await fetch(ep, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    const d = await res.json();
+    switch (type) {
+      case "track":    return { resourceType: "track",    name: d.name, subtitle: d.artists?.[0]?.name ?? null, imageUrl: d.album?.images?.[0]?.url ?? null };
+      case "artist":   return { resourceType: "artist",   name: d.name, subtitle: null,                         imageUrl: d.images?.[0]?.url ?? null };
+      case "album":    return { resourceType: "album",    name: d.name, subtitle: d.artists?.[0]?.name ?? null, imageUrl: d.images?.[0]?.url ?? null };
+      case "playlist": return { resourceType: "playlist", name: d.name, subtitle: `by ${d.owner?.display_name ?? "Spotify"}`, imageUrl: d.images?.[0]?.url ?? null };
+      default:         return null;
+    }
+  } catch { return null; }
+}

@@ -18,7 +18,7 @@ import {
   playTrackAt, seekPlayback, setPlayback,
   getPlaybackVolume, setVolume,
 } from './spotify'
-import { meetRowToTrackState, type MeetRow, type MeetTrackState } from './meets'
+import { meetRowToTrackState, type MeetRow, type MeetTrackState } from '../services/meets'
 
 export const MEET_SYNC_TASK = 'trackmeet-meet-listener-sync'
 

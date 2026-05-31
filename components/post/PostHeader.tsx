@@ -1,0 +1,48 @@
+import React from "react";
+import { View, Text, TouchableOpacity, Image } from "react-native";
+import { useRouter } from "expo-router";
+import { styles } from "../../lib/feed/styles";
+import { AVATAR_MAP, type Post } from "../../app/data/mock";
+
+export function PostHeader({ post }: { post: Post }) {
+  const photo = AVATAR_MAP[post.user];
+  const router = useRouter();
+
+  const handleAuthorPress = () => {
+    if (post.authorId) {
+      router.push({ pathname: "/user-profile", params: { userId: post.authorId } });
+    }
+  };
+
+  const avatarEl = post.avatarUrl ? (
+    <Image source={{ uri: post.avatarUrl }} style={styles.postAvatar} />
+  ) : photo ? (
+    <Image source={photo} style={styles.postAvatar} />
+  ) : (
+    <View style={[styles.postAvatar, { backgroundColor: post.avatarColor + "22" }]}>
+      <Text style={[styles.postAvatarText, { color: post.avatarColor }]}>{post.initials}</Text>
+    </View>
+  );
+
+  return (
+    <View style={styles.postHeader}>
+      {/* Avatar → opens author profile */}
+      <TouchableOpacity activeOpacity={0.72} onPress={handleAuthorPress} disabled={!post.authorId}>
+        {avatarEl}
+      </TouchableOpacity>
+
+      <View style={{ flex: 1 }}>
+        {/* Display name → opens author profile */}
+        <TouchableOpacity activeOpacity={0.72} onPress={handleAuthorPress} disabled={!post.authorId}>
+          <Text style={styles.postUser}>{post.bio}</Text>
+        </TouchableOpacity>
+        {/* Handle → also opens author profile */}
+        <TouchableOpacity activeOpacity={0.6} onPress={handleAuthorPress} disabled={!post.authorId}>
+          <Text style={styles.postBio} numberOfLines={1}>{post.handle} · {post.time}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+// ─── Tappable post text — opens detail view ────────────────────────────────────

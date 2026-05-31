@@ -1,5 +1,5 @@
-import { supabase } from './supabase'
-import { notifyFollowersOfMeet } from './notifications'
+import { supabase } from '../lib/supabase';
+import { notifyFollowersOfMeet } from '../lib/notifications';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

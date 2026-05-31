@@ -1,0 +1,188 @@
+import React from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { FontAwesome5 } from "@expo/vector-icons";
+import { csStyles } from "../../lib/feed/localStyles";
+import { type ComposerUser } from "../../types/composer";
+import { type Post } from "../../app/data/mock";
+
+import { usePostComposer } from "../../hooks/usePostComposer";
+
+export function PostComposerSheet({
+  visible,
+  onClose,
+  currentUser,
+  onPosted,
+  initialText,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  currentUser: ComposerUser | null;
+  onPosted: (post: Post) => void;
+  initialText?: string;
+}) {
+  const {
+    text, setText, images, setImages, pollMode, setPollMode, pollQuestion, setPollQuestion, pollOptions, setPollOptions, posting, setPosting, mediaPickerOpen, setMediaPickerOpen, slideAnim, backdropAnim, pickFromCamera, pickFromLibrary, pickVideo, removeImage, canPost, handlePost, initials
+  } = usePostComposer({ visible, onClose, currentUser, onPosted, initialText });
+
+  return (
+    <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <Animated.View style={[StyleSheet.absoluteFill, csStyles.backdrop, { opacity: backdropAnim }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      </Animated.View>
+
+      <Animated.View style={[csStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>          <View style={csStyles.header}>
+            <TouchableOpacity onPress={onClose} hitSlop={12}>
+              <Text style={csStyles.cancelBtn}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={csStyles.title}>New Post</Text>
+            <TouchableOpacity
+              style={[csStyles.postBtn, !canPost && { opacity: 0.4 }]}
+              disabled={!canPost || posting}
+              onPress={handlePost}
+            >
+              {posting
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={csStyles.postBtnText}>Post</Text>}
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 20 }}
+          >            <View style={csStyles.composeRow}>
+              {currentUser?.avatar_url ? (
+                <Image source={{ uri: currentUser.avatar_url }} style={csStyles.avatar} />
+              ) : (
+                <View style={csStyles.avatar}>
+                  <Text style={csStyles.avatarInitials}>{initials}</Text>
+                </View>
+              )}
+              <TextInput
+                style={csStyles.textInput}
+                placeholder="What's on your mind?"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                value={text}
+                onChangeText={setText}
+                multiline
+                autoFocus
+              />
+            </View>            {images.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={csStyles.imageStrip}
+              >
+                {images.map((uri, idx) => (
+                  <TouchableOpacity key={idx} onPress={() => removeImage(idx)} activeOpacity={0.8} style={{ position: "relative" }}>
+                    <Image source={{ uri }} style={csStyles.thumbImage} />
+                    <View style={csStyles.thumbRemove}>
+                      <Text style={csStyles.thumbRemoveText}>✕</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+                {images.length < 4 && (
+                  <TouchableOpacity style={csStyles.thumbAdd} onPress={() => setMediaPickerOpen(true)}>
+                    <FontAwesome5 name="plus" size={18} color="rgba(255,255,255,0.4)" />
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            )}            {pollMode && (
+              <View style={csStyles.pollSection}>
+                <TextInput
+                  style={csStyles.pollQuestion}
+                  placeholder="Ask a question…"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={pollQuestion}
+                  onChangeText={setPollQuestion}
+                />
+                {pollOptions.map((opt, idx) => (
+                  <View key={idx} style={csStyles.pollOptionRow}>
+                    <TextInput
+                      style={csStyles.pollOptionInput}
+                      placeholder={`Option ${idx + 1}${idx < 2 ? "" : " (optional)"}`}
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      value={opt}
+                      onChangeText={(t) =>
+                        setPollOptions((prev) => prev.map((o, i) => (i === idx ? t : o)))
+                      }
+                    />
+                    {idx > 1 && (
+                      <TouchableOpacity
+                        onPress={() => setPollOptions((prev) => prev.filter((_, i) => i !== idx))}
+                        hitSlop={8}
+                        style={{ marginLeft: 8 }}
+                      >
+                        <FontAwesome5 name="times" size={14} color="rgba(255,100,100,0.7)" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+                {pollOptions.length < 4 && (
+                  <TouchableOpacity style={csStyles.addOptionBtn} onPress={() => setPollOptions((p) => [...p, ""])}>
+                    <FontAwesome5 name="plus" size={11} color="#AB00FF" style={{ marginRight: 6 }} />
+                    <Text style={csStyles.addOptionText}>Add option</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </ScrollView>          {mediaPickerOpen && (
+            <View style={csStyles.mediaPicker}>
+              <TouchableOpacity style={csStyles.mediaPickerBtn} onPress={pickFromCamera} activeOpacity={0.75}>
+                <FontAwesome5 name="camera" size={20} color="#fff" />
+                <Text style={csStyles.mediaPickerLabel}>Camera</Text>
+              </TouchableOpacity>
+              <View style={csStyles.mediaPickerDivider} />
+              <TouchableOpacity style={csStyles.mediaPickerBtn} onPress={pickFromLibrary} activeOpacity={0.75}>
+                <FontAwesome5 name="images" size={20} color="#fff" />
+                <Text style={csStyles.mediaPickerLabel}>Photos</Text>
+              </TouchableOpacity>
+              <View style={csStyles.mediaPickerDivider} />
+              <TouchableOpacity style={csStyles.mediaPickerBtn} onPress={pickVideo} activeOpacity={0.75}>
+                <FontAwesome5 name="film" size={20} color="#fff" />
+                <Text style={csStyles.mediaPickerLabel}>Video</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={csStyles.mediaPickerClose}
+                onPress={() => setMediaPickerOpen(false)}
+                hitSlop={12}
+              >
+                <FontAwesome5 name="times" size={16} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
+            </View>
+          )}          <View style={csStyles.toolbar}>
+            <TouchableOpacity
+              style={[csStyles.toolBtn, (images.length > 0 || mediaPickerOpen) && csStyles.toolBtnActive]}
+              onPress={() => { setMediaPickerOpen((o) => !o); setPollMode(false); }}
+              activeOpacity={0.7}
+            >
+              <FontAwesome5
+                name="images"
+                size={19}
+                color={(images.length > 0 || mediaPickerOpen) ? "#AB00FF" : "rgba(255,255,255,0.45)"}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[csStyles.toolBtn, pollMode && csStyles.toolBtnActive]}
+              onPress={() => { setPollMode((p) => !p); setImages([]); }}
+              disabled={images.length > 0}
+              activeOpacity={0.7}
+            >
+              <FontAwesome5 name="poll-h" size={19} color={pollMode ? "#AB00FF" : "rgba(255,255,255,0.45)"} />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }} />
+            <View style={csStyles.audienceChip}>
+              <FontAwesome5 name="globe" size={11} color="rgba(255,255,255,0.5)" style={{ marginRight: 5 }} />
+              <Text style={csStyles.audienceText}>Public</Text>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────

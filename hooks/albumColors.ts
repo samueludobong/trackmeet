@@ -10,8 +10,8 @@
  * Results are cached by URI and in-flight requests are de-duped, so a given
  * album art is only ever decoded once per session.
  */
-import { useEffect, useState } from 'react'
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator'
+import { useEffect, useState } from 'react';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy'
 import jpeg from 'jpeg-js'
 

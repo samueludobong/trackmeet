@@ -13,7 +13,7 @@ import * as BackgroundFetch from 'expo-background-fetch'
 import * as TaskManager from 'expo-task-manager'
 import { supabase } from './supabase'
 import { getCurrentlyPlaying, refreshSpotifyToken } from './spotify'
-import type { NowPlayingTrack } from './useNowPlaying'
+import type { NowPlayingTrack } from '../hooks/useNowPlaying'
 
 export const BG_SYNC_TASK = 'trackmeet-bg-spotify-sync'
 

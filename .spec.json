@@ -1,0 +1,6 @@
+{
+  "out": "components/post/Lightbox.tsx",
+  "rel": "../../",
+  "comps": [["function MediaLightbox(", "function PostHeader("]],
+  "styles": ["lbStyles"]
+}
