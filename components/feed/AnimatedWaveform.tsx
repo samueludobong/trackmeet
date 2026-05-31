@@ -24,13 +24,17 @@ export function AnimatedWaveform({ color }: { color: string }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 3, height: 20 }}>
       {waveAnims.map((v, i) => (
+        // Bars use a fixed full height and animate `scaleY` (a transform), so the
+        // animation can run on the native driver. `height` is a layout prop and
+        // is NOT supported by the native animated module.
         <Animated.View
           key={i}
           style={{
             width: 3,
+            height: WAVE_H[i] * 2,
             borderRadius: 2,
             backgroundColor: color,
-            height: v.interpolate({ inputRange: [0, 1], outputRange: [WAVE_H[i], WAVE_H[i] * 2] }),
+            transform: [{ scaleY: v.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }],
           }}
         />
       ))}

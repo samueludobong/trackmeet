@@ -25,7 +25,8 @@
       "Bash(export LC_ALL=C)",
       "Bash(cp components/profile/SettingsOverlay.tsx .so.bak)",
       "Bash(node scripts/exhook.mjs components/profile/SettingsOverlay.tsx useSettingsOverlay \"{ profile, userId, onClose, onProfileRefresh }: { profile: UserProfile | null; userId: string | null; onClose: \\(\\) => void; onProfileRefresh: \\(\\) => void }\" \"{ profile, userId, onClose, onProfileRefresh }\")",
-      "Bash(node scripts/rmunused.mjs components/profile/SettingsOverlay.tsx hooks/useSettingsOverlay.ts)"
+      "Bash(node scripts/rmunused.mjs components/profile/SettingsOverlay.tsx hooks/useSettingsOverlay.ts)",
+      "Bash(xargs grep -lE \"\\\\.interpolate\")"
     ]
   }
 }
