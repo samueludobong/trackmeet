@@ -405,7 +405,7 @@ export const msgStyles = StyleSheet.create({
   },
   dmContent: { flex: 1 },
   dmTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
-  dmName: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.5)" },
+  dmName: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.5)", paddingTop: 8 },
   dmNameUnread: { color: "#fff", fontWeight: "800" },
   dmTime: { fontSize: 12, color: "rgba(255,255,255,0.28)" },
   dmBottomRow: { flexDirection: "row", alignItems: "center" },
@@ -559,12 +559,12 @@ export const chatStyles = StyleSheet.create({
 
   // Messages list
   messagesContent: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 16 },
-  msgWrap: { alignSelf: "flex-start", maxWidth: SW * 0.74 },
+  msgWrap: { alignSelf: "flex-start", maxWidth: SW * 0.74, gap: 14 },
   msgWrapMe: { alignSelf: "flex-end" },
   bubble: { paddingHorizontal: 14, paddingTop: 9, paddingBottom: 7, borderRadius: 18 },
   bubbleThem: { backgroundColor: "#1C1C1E" },
   bubbleMe:   { backgroundColor: "#AB00FF" },
-  bubbleText: { fontSize: 15, color: "rgba(255,255,255,0.82)", lineHeight: 21 },
+  bubbleText: { fontSize: 16, color: "rgba(255,255,255,0.82)", lineHeight: 21, fontWeight: "700" },
   bubbleTextMe: { color: "#fff" },
   bubbleTime: { fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "right", marginTop: 3 },
   bubbleTimeMe: { color: "rgba(255,255,255,0.55)" },
@@ -581,7 +581,7 @@ export const chatStyles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.07)",
   },
-  inputPlusBtn: { paddingBottom: 4 },
+  inputPlusBtn: { paddingBottom: 7 },
   inputWrap: {
     flex: 1,
     flexDirection: "row",
@@ -594,7 +594,7 @@ export const chatStyles = StyleSheet.create({
     paddingVertical: 8,
     gap: 8,
   },
-  input: { flex: 1, fontSize: 15, color: "#fff", maxHeight: 100, paddingVertical: 0 },
+  input: { flex: 1, fontSize: 15, color: "#fff", maxHeight: 100, paddingVertical: 7 },
   inputAction: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
   sendBtn: { backgroundColor: "#AB00FF", borderRadius: 15 },
 
@@ -1100,8 +1100,8 @@ export const mcStyles = StyleSheet.create({
   avatar: { width: 30, height: 30, borderRadius: 15, flexShrink: 0, backgroundColor: "#222" },
   avatarFallback: { backgroundColor: "rgba(171,0,255,0.4)", alignItems: "center", justifyContent: "center" },
   avatarLetter: { fontSize: 12, fontWeight: "800", color: "#fff" },
-  bubble: { backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7, flexShrink: 1 },
-  name: { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.6)", marginBottom: 1 },
+  bubble: { backgroundColor: "rgba(243, 243, 243, 0.1)", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7, flexShrink: 1 },
+  name: { fontSize: 13, fontWeight: "700", color: "rgba(255, 255, 255, 0.73)", marginBottom: 1 },
   text: { fontSize: 13, color: "#fff" },
 });
 
@@ -1676,14 +1676,14 @@ export const mlStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#fff",
+    backgroundColor: "rgba(45,45,45,0.70)",
     borderRadius: 30,
     paddingHorizontal: 18,
     paddingVertical: 14,
     gap: 10,
   },
-  inputPlaceholder: { fontSize: 15, color: "rgba(0,0,0,0.32)" },
-  inputField: { flex: 1, fontSize: 15, color: "#000", padding: 0 },
+  inputPlaceholder: { fontSize: 15, color: "rgba(255,255,255,0.32)" },
+  inputField: { flex: 1, fontSize: 15, color: "#fff", padding: 0 },
   // Icons are standalone — no container — matching the image
 
   // ── Swipe hint (right edge of page 1) ────────────────────────────────────

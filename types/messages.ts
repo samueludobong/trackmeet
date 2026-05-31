@@ -1,3 +1,3 @@
 // Types for the Messages feature.
 
-export type MessagesTab = "Messages" | "Group Chats" | "Community";
+export type MessagesTab = "Messages" | "Group Chats" | "Communities";

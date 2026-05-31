@@ -25,7 +25,8 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
       }]}
       {...pan.panHandlers}
     >
-      <SafeAreaView style={{ flex: 1 }} edges={["top"]}>        <View style={chatStyles.header}>
+      <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+        <View style={chatStyles.header}>
           <TouchableOpacity onPress={handleClose} style={chatStyles.backBtn} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={26} color="#fff" />
           </TouchableOpacity>
@@ -65,6 +66,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
             <FlatList
               ref={flatRef}
               data={msgs}
+              style={{ gap: 14 }}
               keyExtractor={(m) => m.id}
               contentContainerStyle={chatStyles.messagesContent}
               showsVerticalScrollIndicator={false}
@@ -109,7 +111,8 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                     preview: msg.body ?? "",
                     senderName,
                   })}>
-                    <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: firstInGroup ? 12 : 3 }]}>                      {!!msg.reply_to_preview && (
+                    <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: firstInGroup ? 12 : 3 }]}>
+                      {!!msg.reply_to_preview && (
                         <View style={[chatStyles.replyQuote, fromMe && chatStyles.replyQuoteMe]}>
                           <View style={chatStyles.replyQuoteAccent} />
                           <Text style={chatStyles.replyQuoteText} numberOfLines={2}>{msg.reply_to_preview}</Text>
@@ -124,7 +127,9 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                 );
               }}
             />
-          )}          {isOtherTyping && <TypingBubble name={otherName} />}          <View style={{ paddingHorizontal: 12 }}>
+          )}
+          {isOtherTyping && <TypingBubble name={otherName} />}
+          <View style={{ paddingHorizontal: 12 }}>
             <NowPlayingBanner onShare={async (t) => {
               const tempId = `pending-sp-${Date.now()}`;
               const optimistic: DbMessage = {
@@ -142,7 +147,8 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
               });
               if (result) setMsgs(prev => [...prev.filter(m => m.id !== tempId), result]);
             }} />
-          </View>          {!!replyTo && (
+          </View>
+          {!!replyTo && (
             <View style={chatStyles.replyBar}>
               <View style={chatStyles.replyBarAccent} />
               <View style={{ flex: 1 }}>
@@ -153,9 +159,10 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                 <Ionicons name="close" size={16} color="rgba(255,255,255,0.4)" />
               </TouchableOpacity>
             </View>
-          )}          <View style={chatStyles.inputBar}>
+          )}
+          <View style={chatStyles.inputBar}>
             <TouchableOpacity style={chatStyles.inputPlusBtn} activeOpacity={0.7}>
-              <Ionicons name="add-circle-outline" size={28} color="rgba(255,255,255,0.38)" />
+              <Ionicons name="add-circle-outline" size={35} color="rgba(255,255,255,0.38)" />
             </TouchableOpacity>
             <View style={chatStyles.inputWrap}>
               <TextInput

@@ -113,9 +113,9 @@ export function MeetLiveScreen({
 
         {!pickerOpen && (
           <View style={mlStyles.swipeHint} pointerEvents="none">
-            <Ionicons name="chevron-back" size={14} color="#fff" />
-            <Text style={mlStyles.swipeHintText}>SWIPE</Text>
-            <Ionicons name="musical-notes" size={13} color="#fff" />
+            <Ionicons name="musical-notes" size={13} color="#ffffff70" />
+            <Text style={mlStyles.swipeHintText}>Tracks</Text>
+            <Ionicons name="chevron-forward" size={14} color="#ffffff5d" />
           </View>
         )}
 
