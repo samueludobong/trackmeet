@@ -47,7 +47,7 @@ export default function ArtistProfileScreen() {
 
   return (
     <View style={s.screen}>
-      <ScrollView showsVerticalScrollIndicator={false} bounces>
+      <ScrollView showsVerticalScrollIndicator={false} >
         <View style={{ height: HERO_H }}>
           {heroImageUrl ? (
             <Image source={{ uri: heroImageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />

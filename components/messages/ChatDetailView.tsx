@@ -15,6 +15,8 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
     slideX, msgText, setMsgText, msgs, setMsgs, currentUserId, setCurUid, loading, setLoading, isOtherTyping, setOtherTyping, replyTo, setReplyTo, flatRef, channelRef, userIdRef, typingOutRef, otherTypingOutRef, broadcastTyping, handleTextChange, handleClose, pan, sendMessage, fmtTime, otherName, otherInitials
   } = useChatDetail(conv, onClose);
 
+  
+
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, {

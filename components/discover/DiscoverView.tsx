@@ -60,6 +60,9 @@ export function DiscoverView() {
   const showPeople      = q.length >= 2;
   const noResults       = q && !userLoading && userResults.length === 0 && filteredArtists.length === 0 && filteredMeets.length === 0 && filteredRecs.length === 0;
 
+  console.log("ARTIST RESULT CARD MAPPED", artistResults);
+
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScrollView
@@ -115,8 +118,11 @@ export function DiscoverView() {
                 <ArtistResultCard key={a.id} artist={a} onPress={() => router.push({ pathname: "/artist-profile", params: { artistId: a.id } })} />
               ))
             )}
+            
           </View>
+          
         )}
+        
 
         {showPeople && (
           <View style={{ marginBottom: 28, marginHorizontal: 16 }}>

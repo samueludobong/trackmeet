@@ -35,10 +35,13 @@ export function MeetLiveScreen({
   } = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs });
   apiTokenRef.current = apiToken;
 
-  if (!visible) return null;
+  // When minimized the hooks above keep running (realtime, audio, sync) but we
+  // don't render the Modal at all. A Modal with visible={false} still creates a
+  // native overlay on some platforms and consumes touches, blocking the MiniBar.
+  if (!visible || minimized) return null;
 
   return (
-    <Modal visible={visible && !minimized} animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? onClose}>
+    <Modal visible animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? onClose}>
       <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]} {...musicPan.panHandlers}>
 
         {canvasUrl ? (

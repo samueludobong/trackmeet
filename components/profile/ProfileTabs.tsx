@@ -27,7 +27,7 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
         );
       }
       return (
-        <View style={{ gap: 12, paddingTop: 12 }}>
+        <View style={{ gap: 7, paddingTop: 12, padding: 0 }}>
           {myPosts.map((post) => <PostCard key={post.id} item={post} />)}
         </View>
       );
@@ -58,7 +58,8 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
   };
 
   return (
-    <View style={profileStyles.tabsWrap} {...swipePan.panHandlers}>      <View style={profileStyles.tabRow}>
+    <View style={profileStyles.tabsWrap} {...swipePan.panHandlers}>
+      <View style={profileStyles.tabRow}>
         <Animated.View
           style={[profileStyles.tabIndicator, { width: tabWidth, transform: [{ translateX: indicatorAnim }] }]}
         >
@@ -81,9 +82,11 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
             </Text>
           </TouchableOpacity>
         ))}
-      </View>      <Animated.View style={{ opacity: contentAnim }}>
+      </View>
+      <Animated.View style={{ opacity: contentAnim }}>
         {renderContent()}
-      </Animated.View>      {showCreatePlaylist && userId && (
+      </Animated.View>
+      {showCreatePlaylist && userId && (
         <CreatePlaylistDialog
           userId={userId}
           onClose={() => setShowCreatePlaylist(false)}

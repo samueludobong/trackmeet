@@ -1080,12 +1080,12 @@ export const llStyles = StyleSheet.create({
   },
   talkBannerText: { fontSize: 13, fontWeight: "700", color: "#fff" },
   saveSongBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    backgroundColor: "rgba(29,185,84,0.92)", borderRadius: 24, paddingVertical: 12, marginTop: 18,
+    justifyContent: "center", gap: 12, flexDirection: "row", alignItems: "center", 
+    backgroundColor: "rgba(29,185,84,0.92)", borderRadius: 24, paddingVertical: 13, paddingHorizontal: 24, marginTop: 20,
   },
   saveSongBtnDone: { backgroundColor: "rgba(29,185,84,0.4)" },
   saveSongText: { fontSize: 14, fontWeight: "800", color: "#fff" },
-  syncRow: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 8 },
+  syncRow: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 8, paddingBottom: 20 },
   syncDotOk: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#1DB954" },
   syncTextOk: { fontSize: 12, fontWeight: "600", color: "rgba(255,255,255,0.6)" },
   syncTextBusy: { fontSize: 12, fontWeight: "600", color: "#FFB020" },
@@ -1125,7 +1125,7 @@ export const sumStyles = StyleSheet.create({
 });
 
 export const profileStyles = StyleSheet.create({
-  scrollContent: { padding: 16, paddingBottom: NAVBAR_H + BOTTOM_INSET + 32 },
+  scrollContent: { padding: 10, paddingBottom: NAVBAR_H + BOTTOM_INSET + 32 },
 
   // Top bar — flat, no border radius
   topBar: {
@@ -1255,7 +1255,7 @@ export const profileStyles = StyleSheet.create({
   npTime: { fontSize: 11, color: "rgba(255,255,255,0.35)" },
 
   // Section tabs
-  tabsWrap: { marginTop: 12 },
+  tabsWrap: { marginTop: 10 },
   tabRow: {
     flexDirection: "row",
     position: "relative",
@@ -1274,7 +1274,7 @@ export const profileStyles = StyleSheet.create({
     alignItems: "center",
   },
   tabLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "600",
     color: "rgba(255,255,255,0.32)",
     letterSpacing: 0.2,

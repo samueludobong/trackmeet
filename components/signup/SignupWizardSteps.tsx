@@ -6,6 +6,7 @@ import { TOTAL_STEPS } from "../../constants/signup";
 import { PasswordField, UsernameField } from "./SignupFields";
 import { BirthdayDrumPicker } from "./SignupPickers";
 import { StreamingGrid, ArtistsGrid } from "./SignupGrids";
+import { SignupEmailVerification } from "./SignupEmailVerification";
 
 /** Renders the active signup wizard step (2–6) plus the Next/Back navigation. */
 export function SignupWizardSteps({
@@ -14,18 +15,19 @@ export function SignupWizardSteps({
 }: any) {
   return (
     <>
-      {step === 2 && <PasswordField value={password} onChange={setPassword} />}
-      {step === 3 && (
+      {step === 2 && <SignupEmailVerification goToStep={goToStep} />}
+      {step === 3 && <PasswordField value={password} onChange={setPassword} />}
+      {step === 4 && (
         <>
           <UsernameField value={username} onChange={setUsername} />
           <Text style={styles.usernameHint}>Letters, numbers and underscores only.</Text>
         </>
       )}
-      {step === 4 && <BirthdayDrumPicker onChange={setBirthday} />}
-      {step === 5 && (
+      {step === 5 && <BirthdayDrumPicker onChange={setBirthday} />}
+      {step === 6 && (
         <StreamingGrid connected={streaming} onToggle={toggleStreaming} onSpotifyConnect={handleConnectSpotify} spotifyConnecting={loading} />
       )}
-      {step === 6 && <ArtistsGrid followed={followed} onToggle={toggleFollowed} />}
+      {step === 7 && <ArtistsGrid followed={followed} onToggle={toggleFollowed} />}
       {!!error && (
         <View style={styles.errorBox}>
           <Ionicons name="alert-circle-outline" size={15} color="#E8000F" />

@@ -4,7 +4,7 @@ const { width: SW, height: SH } = Dimensions.get("window");
 
 export const SAVED_ACCOUNTS_KEY = "trackmeet_saved_accounts";
 
-export const TOTAL_STEPS = 6;
+export const TOTAL_STEPS = 7;
 export const DRUM_H = 58;
 export const SAFE_BOTTOM = Platform.OS === "ios" ? 34 : 16;
 // Expanded card starts this many px from the top of the screen
@@ -102,6 +102,7 @@ export const DUMMY_ARTISTS = [
 
 export const STEP_TITLES = [
   "Email",
+  "Verification",
   "Strong Password",
   "Your Username",
   "Birthday",
@@ -110,6 +111,7 @@ export const STEP_TITLES = [
 ];
 export const STEP_SUBS = [
   "",
+  "Check your inbox for a verification email.",
   "Make it something you won't forget.",
   "This is how the world finds you.",
   "You must be 16 or older to join.",

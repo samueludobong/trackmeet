@@ -88,7 +88,7 @@ export function useProfileTabsData(userId: string | null, readOnly: boolean) {
   const switchTo = (tab: ProfileTab, index: number) => {
     activeRef.current = tab;
     setActive(tab);
-    contentAnim.setValue(0.5);
+    contentAnim.setValue(1);
     Animated.timing(contentAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
     Animated.spring(indicatorAnim, { toValue: index * tabWidth, useNativeDriver: true, damping: 22, stiffness: 280 }).start();
   };

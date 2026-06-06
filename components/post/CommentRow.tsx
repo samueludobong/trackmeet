@@ -114,7 +114,7 @@ export function CommentRow({
                 <Text style={styles.commentSongName} numberOfLines={1}>{comment.songName}</Text>
                 {comment.songArtist ? <Text style={styles.commentSongArtist} numberOfLines={1}>{comment.songArtist}</Text> : null}
               </View>
-              <FontAwesome5 name="spotify" size={11} color="#1DB954" />
+              <FontAwesome5 name="spotify" size={19} color="#1DB954" />
             </TouchableOpacity>
           )}
         </TouchableOpacity>

@@ -7,6 +7,12 @@ import { openSpotifyLink } from "../../lib/spotify";
 import { isTrackInAnyPlaylist } from "../../services/playlists";
 import { useArtGradient } from "../../hooks/albumColors";
 import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
+import { LyricsOverlay } from "./LyricsOverlay";
+
+// Grace window past a song's end before we treat the broadcast as stale and hide
+// the card. Comfortably covers the broadcaster's ~3s poll + realtime delivery, so
+// a normal track→track transition never flickers the card away.
+const STALE_GRACE_MS = 12_000;
 
 export function NowListeningCard({
   song,
@@ -35,6 +41,10 @@ export function NowListeningCard({
   const [liveProgress, setLiveProgress] = useState(0);
   const [saved, setSaved]   = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  // True when the broadcaster's sync has gone silent and the song has run past
+  // its end with no fresh update (e.g. their app was killed / lost connection).
+  const [stale, setStale] = useState(false);
   // Gradient derived from the album art (Expo Go-safe). Meet variant keeps its
   // purple identity so "in a meet" stays visually distinct.
   const artGradient = useArtGradient(song.albumArt);
@@ -51,12 +61,17 @@ export function NowListeningCard({
   }, []);
 
   useEffect(() => {
-    if (!song.durationMs || !song.updatedAt) { setLiveProgress(0); return; }
+    if (!song.durationMs || !song.updatedAt) { setLiveProgress(0); setStale(false); return; }
     const updatedAtMs  = new Date(song.updatedAt).getTime();
     const baseProgress = song.progressMs ?? 0;
-    const calcProgress = () => Math.min(baseProgress + (Date.now() - updatedAtMs), song.durationMs!);
-    setLiveProgress(calcProgress());
-    const id = setInterval(() => setLiveProgress(calcProgress()), 1_000);
+    const apply = () => {
+      const raw = baseProgress + (Date.now() - updatedAtMs);
+      setLiveProgress(Math.min(raw, song.durationMs!));
+      // Past the end by more than the grace window → sync has stalled.
+      setStale(raw - song.durationMs! > STALE_GRACE_MS);
+    };
+    apply();
+    const id = setInterval(apply, 1_000);
     return () => clearInterval(id);
   }, [song.id, song.updatedAt]);
 
@@ -85,6 +100,10 @@ export function NowListeningCard({
     if (!song.id || !viewerId) return;
     setPickerOpen(true);
   };
+
+  // Sync has stalled and the song has ended — vanish until a fresh update lands.
+  // (Meets stay visible: the room is still live/joinable even if position lags.)
+  if (stale && !meet) return null;
 
   return (
     <LinearGradient
@@ -124,6 +143,13 @@ export function NowListeningCard({
               <Text style={s.npTrack} numberOfLines={1}>{song.name}</Text>
               <Text style={s.npArtist} numberOfLines={1}>{song.artist ?? ""}</Text>
             </View>
+            <TouchableOpacity
+              onPress={() => setLyricsOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="expand-outline" size={16} color="rgba(255,255,255,0.7)" />
+            </TouchableOpacity>
             <FontAwesome5 name="spotify" size={13} color="#1DB954" />
           </View>
 
@@ -144,6 +170,13 @@ export function NowListeningCard({
               <TouchableOpacity style={s.npOpenBtn} activeOpacity={0.8} onPress={handleOpen}>
                 <Ionicons name="open-outline" size={12} color="#1DB954" />
                 <Text style={s.npOpenBtnText}>Open</Text>
+              </TouchableOpacity>
+            )}
+
+            {!!song.id && (
+              <TouchableOpacity style={[s.npOpenBtn, { backgroundColor: "#fbff092d", borderColor: "#fbff09" }]} activeOpacity={0.8} onPress={handleOpen}>
+                <Ionicons name="add" size={12} color="#fbff09" />
+                <Text style={[s.npOpenBtnText, { color: "#fbff09" }]}>Post</Text>
               </TouchableOpacity>
             )}
             {!!song.id && !!viewerId && (
@@ -175,6 +208,13 @@ export function NowListeningCard({
           albumArt: song.albumArt, durationMs: song.durationMs,
         } : null}
         onSavedChange={setSaved}
+      />
+
+      <LyricsOverlay
+        visible={lyricsOpen}
+        onClose={() => setLyricsOpen(false)}
+        song={song}
+        viewerId={viewerId}
       />
 
       {/* Join the same meet — only when the user is publicly in one */}

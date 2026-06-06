@@ -5,6 +5,7 @@ import { SignupWizardSteps } from "../components/signup/SignupWizardSteps";
 import { SignupLoginForm } from "../components/signup/SignupLoginForm";
 import { SignupAccountsList } from "../components/signup/SignupAccountsList";
 import { StepDots } from "../components/signup/SignupGrids";
+import StartUpVideo  from "../assets/videos/loop.mp4";
 import { Field } from "../components/signup/SignupFields";
 import { TOTAL_STEPS, STEP_TITLES, STEP_SUBS } from "../constants/signup";
 import { styles } from "./signup.styles";
@@ -25,6 +26,7 @@ import ReAnimated, {
 // ─── Shared field ─────────────────────────────────────────────────────────────
 
 import { useSignup } from "../hooks/useSignup";
+import { SignupEmailVerification } from "@/components/signup/SignupEmailVerification";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
@@ -39,7 +41,7 @@ export default function SignupScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <Video
-        source={require("./loop.mp4")}
+        source={StartUpVideo}
         style={StyleSheet.absoluteFill}
         resizeMode={ResizeMode.COVER}
         isLooping
@@ -55,7 +57,7 @@ export default function SignupScreen() {
           ]}
         >
           <SignupHeroTitle mode={mode} step={step} />
-          {mode === "login" && <SignupLoginForm email={email} setEmail={setEmail} password={password} setPassword={setPassword} error={error} loginBtnRef={loginBtnRef} handleLogin={handleLogin} loading={loading} switchMode={switchMode} />}
+          {/* {mode === "login" && <SignupLoginForm email={email} setEmail={setEmail} password={password} setPassword={setPassword} error={error} loginBtnRef={loginBtnRef} handleLogin={handleLogin} loading={loading} switchMode={switchMode} />} */}
         </Animated.View>
         <Animated.View
           pointerEvents={expanded ? "none" : "box-none"}
@@ -78,6 +80,7 @@ export default function SignupScreen() {
                 )}
                 {mode === "idle" && <SignupIdleActions switchMode={switchMode} />}
                 {mode === "signup" && step === 1 && <SignupEmailStep email={email} setEmail={setEmail} goToStep={goToStep} switchMode={switchMode} />}
+                {mode === "signup" && step === 2 && <SignupEmailVerification email={email} setEmail={setEmail} goToStep={goToStep} switchMode={switchMode} />}
                 {mode === "login" && (
                   <>
                     <Field

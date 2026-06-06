@@ -8,7 +8,7 @@ import { NowPlayingBanner } from "./NowPlayingBanner";
 /** The floating quick-post field shown on the Feed tab (text + now-playing attach). */
 export function QuickComposer({
   composerBottom, keyboardVisible, attachedTrack, setAttachedTrack,
-  setMenuVisible, quickText, setQuickText, handleQuickPost,
+  setMenuVisible, quickText, setQuickText, handleQuickPost, onMeasure,
 }: {
   composerBottom: Animated.AnimatedInterpolation<number> | Animated.Value | number;
   keyboardVisible: boolean;
@@ -18,9 +18,15 @@ export function QuickComposer({
   quickText: string;
   setQuickText: (v: string) => void;
   handleQuickPost: () => void;
+  // Reports the rendered height of the whole composer stack (input + optional
+  // now-playing banner) so the MeetMiniBar can be positioned directly above it.
+  onMeasure?: (height: number) => void;
 }) {
   return (
-    <Animated.View style={[styles.composerWrap, { bottom: composerBottom as any }]}>
+    <Animated.View
+      style={[styles.composerWrap, { bottom: composerBottom as any }]}
+      onLayout={(e) => onMeasure?.(e.nativeEvent.layout.height)}
+    >
       {keyboardVisible && (
         <View style={{ paddingHorizontal: 12 }}>
           <NowPlayingBanner onAttach={(t) => setAttachedTrack((prev) => (prev?.id === t.id ? null : t))} />

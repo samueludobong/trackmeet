@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { View, Text, TouchableOpacity, Image } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -8,6 +8,7 @@ import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
 import { type Gradient } from "../../hooks/albumColors";
 import { type ActiveMeetForUser } from "../../services/meets";
 import { BroadcastRow } from "../../components/feed/BroadcastRow";
+import { LyricsOverlay } from "./LyricsOverlay";
 
 const fmt = (ms: number) => {
   const s = Math.floor(ms / 1000);
@@ -16,18 +17,20 @@ const fmt = (ms: number) => {
 
 /** The signed-in user's now-playing card on their profile, with meet-aware variants. */
 export function ProfileNowPlayingCard({
-  track, liveProgressMs, gradient, activeMeet, userId, openHostMeet, openMeet, onStartMeet,
+  track, liveProgressMs, gradient, activeMeet, userId, accessToken, openHostMeet, openMeet, onStartMeet,
 }: {
   track: NowPlayingTrack;
   liveProgressMs: number;
   gradient: Gradient;
   activeMeet: ActiveMeetForUser | null;
   userId: string | null;
+  accessToken: string | null;
   openHostMeet?: ((id: string, name: string) => void) | null;
   openMeet?: ((id: string, isPublic?: boolean) => void) | null;
   onStartMeet: () => void;
 }) {
   const progress = track.durationMs > 0 ? liveProgressMs / track.durationMs : 0;
+  const [lyricsOpen, setLyricsOpen] = useState(false);
   const isHosting = !!activeMeet && activeMeet.meet.host_id === userId;
   const meetHost = activeMeet && !isHosting ? (activeMeet.host.display_name || activeMeet.host.username) : null;
   const inMeet = isHosting || !!meetHost;
@@ -62,7 +65,16 @@ export function ProfileNowPlayingCard({
           </View>
         )}
         <View style={profileStyles.npInfo}>
-          <Text style={profileStyles.npTitle} numberOfLines={1}>{track.name}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={[profileStyles.npTitle, { flex: 1 }]} numberOfLines={1}>{track.name}</Text>
+            <TouchableOpacity
+              onPress={() => setLyricsOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="expand-outline" size={16} color="rgba(255,255,255,0.7)" />
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={() => openSpotifyLink(`spotify:artist:${track.artistId}`, `https://open.spotify.com/artist/${track.artistId}`)}
@@ -99,6 +111,23 @@ export function ProfileNowPlayingCard({
           <Text style={profileStyles.startMeetBtnText}>Start Meet</Text>
         </TouchableOpacity>
       )}
+
+      <LyricsOverlay
+        visible={lyricsOpen}
+        onClose={() => setLyricsOpen(false)}
+        isOwner
+        accessToken={accessToken}
+        viewerId={userId}
+        song={{
+          id: track.id,
+          name: track.name,
+          artist: track.artist,
+          albumArt: track.albumArt,
+          durationMs: track.durationMs,
+          progressMs: liveProgressMs,
+          updatedAt: new Date().toISOString(),
+        }}
+      />
     </LinearGradient>
   );
 }

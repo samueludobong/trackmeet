@@ -28,7 +28,10 @@ export function MeetListenerScreen({
     slideAnim, accessToken, setAccessToken, meet, setMeet, trackState, setTrackState, host, setHost, listenerCount, setListenerCount, messages, setMessages, chatInput, setChatInput, livePos, setLivePos, savedId, setSavedId, pickerOpen, setPickerOpen, ended, setEnded, summary, setSummary, reactions, setReactions, reactChannelRef, spawnReaction, sendReaction, showGuide, setShowGuide, dontShowGuide, setDontShowGuide, launched, setLaunched, openedOnceRef, handleGotIt, syncTokenRef, syncStateRef, inSync, setInSync, isHostViewer, handleSendChat, handleSaveSong, handleLeave
   } = useMeetListener({ visible, onClose, meetId, userId, isPublic, minimized, onInfo, onExpand });
 
-  if (!visible) return null;
+  // When minimized the hooks above keep running (realtime, sync) but we don't
+  // render the Modal at all. A Modal with visible={false} still creates a native
+  // overlay on some platforms and consumes touches, blocking the MiniBar.
+  if (!visible || minimized) return null;
 
   const fmtMs = (ms: number) => {
     const s = Math.floor(ms / 1000);
@@ -39,7 +42,7 @@ export function MeetListenerScreen({
   const isSaved  = savedId === trackState?.id;
 
   return (
-    <Modal visible={visible && !minimized} animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? handleLeave}>
+    <Modal visible animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? handleLeave}>
       <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]}>
         {trackState?.albumArt ? (
           <Image source={{ uri: trackState.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
@@ -134,7 +137,8 @@ export function MeetListenerScreen({
             </View>
             <ReactionButton onReact={sendReaction} />
           </View>
-        </KeyboardAvoidingView>        {ended && (summary ? (
+        </KeyboardAvoidingView>
+        {ended && (summary ? (
           <MeetSummaryScreen
             tracks={summary}
             listenerCount={listenerCount}
@@ -152,9 +156,11 @@ export function MeetListenerScreen({
               <Text style={llStyles.endedBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
-        ))}        {showGuide && !ended && (
+        ))}
+        {showGuide && !ended && (
           <MeetGuideOverlay dontShowGuide={dontShowGuide} setDontShowGuide={setDontShowGuide} onGotIt={handleGotIt} />
-        )}        <View style={mlStyles.topBar}>
+        )}
+        <View style={mlStyles.topBar}>
           <View style={mlStyles.topLeft}>
             {host?.avatar_url ? (
               <Image source={{ uri: host.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />

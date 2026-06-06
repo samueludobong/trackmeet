@@ -182,7 +182,7 @@ export const s = StyleSheet.create({
   npProgressFill:    { height: 3, backgroundColor: "#ffffff", borderRadius: 2 },
   npProgressTimes:   { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
   npTimeText:        { fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: "600" },
-  npBtnRow:          { flexDirection: "row", gap: 8, marginTop: 10 },
+  npBtnRow:          { flexDirection: "row", gap: 8, marginTop: 10},
   npOpenBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
     paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10,

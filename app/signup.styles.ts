@@ -1,9 +1,80 @@
+
 import { StyleSheet, Dimensions, Platform } from "react-native";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 const DRUM_H = 58;
 const SAFE_BOTTOM = Platform.OS === "ios" ? 34 : 16;
 const EXPANDED_TOP = SH * 0.13;
+
+
+
+export const otpStyles = StyleSheet.create({
+  label: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  sublabel: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 32,
+  },
+  row: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 10,
+    marginBottom: 24,
+  },
+  box: {
+    width: 48,
+    height: 56,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  boxFilled: {
+    borderColor: "#AB00FF",
+    backgroundColor: "rgba(171,0,255,0.12)",
+  },
+  boxActive: {
+    borderColor: "rgba(255,255,255,0.4)",
+  },
+  continueBtn: {
+    backgroundColor: "rgba(171,0,255,0.3)",
+    borderRadius: 16,
+    padding: 18,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  continueBtnActive: {
+    backgroundColor: "#AB00FF",
+  },
+  continueBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 16,
+  },
+  resendRow: {
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  resendText: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 14,
+  },
+  resendLink: {
+    color: "#AB00FF",
+    fontWeight: "600",
+  },
+});
 
 export const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#1a0030" },
@@ -12,6 +83,8 @@ export const styles = StyleSheet.create({
     backgroundColor: "rgba(10,0,25,0.35)",
   },
   safeArea: { flex: 1, justifyContent: "flex-end" },
+
+  
 
   // Title (above normal card)
   titleArea: { paddingHorizontal: 32, paddingBottom: 28 },

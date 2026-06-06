@@ -1,14 +1,28 @@
 import React from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import { View, Text, TouchableOpacity, Alert } from "react-native";
 import { styles } from "../../app/signup.styles";
 import { Field } from "./SignupFields";
+import { useSignup } from "@/hooks/useSignup";
 
 /** Step 1 of signup: email entry + social options + switch-to-login. */
-export function SignupEmailStep({ email, setEmail, goToStep, switchMode }: any) {
+export function SignupEmailStep({ email, setEmail, goToStep, switchMode, alertTitle = "Invalid Email" }: any) {
+
+  const error = useSignup();
   return (
     <>
       <Field placeholder="Email address" keyboardType="email-address" value={email} onChangeText={setEmail} />
-      <TouchableOpacity style={styles.primaryBtn} activeOpacity={0.88} onPress={() => goToStep(2)}>
+      <TouchableOpacity
+        style={styles.primaryBtn}
+        activeOpacity={0.88}
+        onPress={() => {
+          const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (validEmail.test(email)) {
+            goToStep(2);
+          } else {
+            Alert.alert(alertTitle, "Please enter a valid email address.");
+          }
+        }}
+      >
         <Text style={styles.primaryBtnText}>Next →</Text>
       </TouchableOpacity>
       <View style={styles.dividerRow}>

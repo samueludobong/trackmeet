@@ -5,14 +5,14 @@ const { width: SW } = Dimensions.get("window");
 // ─── Avatar map ───────────────────────────────────────────────────────────────
 
 export const AVATAR_MAP: Record<string, any> = {
-  maya_v:  require("../../assets/avatars/maya_v.jpg"),
-  jaykay:  require("../../assets/avatars/jaykay.jpg"),
-  tolu:    require("../../assets/avatars/tolu.jpg"),
-  seren:   require("../../assets/avatars/seren.jpg"),
-  nate_x:  require("../../assets/avatars/nate_x.jpg"),
-  ayo:     require("../../assets/avatars/ayo.jpg"),
-  priya:   require("../../assets/avatars/priya.jpg"),
-  "dan.b": require("../../assets/avatars/dan.jpg"),
+  // maya_v:  require("../../assets/avatars/maya_v.jpg"),
+  // jaykay:  require("../../assets/avatars/jaykay.jpg"),
+  // tolu:    require("../../assets/avatars/tolu.jpg"),
+  // seren:   require("../../assets/avatars/seren.jpg"),
+  // nate_x:  require("../../assets/avatars/nate_x.jpg"),
+  // ayo:     require("../../assets/avatars/ayo.jpg"),
+  // priya:   require("../../assets/avatars/priya.jpg"),
+  // "dan.b": require("../../assets/avatars/dan.jpg"),
 };
 
 export type UserProfile = {

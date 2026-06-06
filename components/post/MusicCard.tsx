@@ -71,7 +71,7 @@ export function MusicCard({ post }: { post: Post }) {
           {/* Top-right: open in Spotify + save to Liked Songs */}
           <View style={styles.musicTopRight}>
             <TouchableOpacity
-              style={styles.musicGlassBtn}
+              style={[styles.musicGlassBtn, { backgroundColor: "rgb(0, 0, 0)", borderColor: "rgba(255, 255, 255, 0.93)" }]}
               activeOpacity={0.8}
               onPress={handleSave}
             >

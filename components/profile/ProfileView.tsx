@@ -101,6 +101,7 @@ export function ProfileView() {
           gradient={gradient}
           activeMeet={activeMeet}
           userId={userId}
+          accessToken={accessToken}
           openHostMeet={openHostMeet}
           openMeet={openMeet}
           onStartMeet={() => setMeetOverlayVisible(true)}

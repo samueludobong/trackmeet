@@ -19,6 +19,11 @@ export type NowPlayingTrack = {
 
 export const DEFAULT_GRADIENT: [string, string, string] = ['#3D1A0C', '#1E0D08', '#0E0907']
 
+// How far actual playback position may diverge from the expected (continuous)
+// position before we treat it as a seek and re-broadcast. Comfortably above
+// normal poll jitter so steady playback never triggers an extra write.
+const SEEK_DRIFT_MS = 3500
+
 export function useNowPlaying() {
   const [track,               setTrack]               = useState<NowPlayingTrack | null>(null)
   const [liveProgressMs,      setLiveProgressMs]      = useState(0)
@@ -34,6 +39,11 @@ export function useNowPlaying() {
   const baseProgress    = useRef<number>(0)
   const lastBroadcastId = useRef<string | null>(null)  // track id last written to DB
   const broadcastingRef = useRef(false)                // sync ref so poll() closure reads current value
+  // Baseline of the last position we broadcast, so we can detect seeks (actual
+  // position diverging from where continuous playback would have reached).
+  const lastBroadcastProgress = useRef(0)
+  const lastBroadcastAt       = useRef(0)
+  const lastBroadcastPlaying  = useRef(false)
 
   // Keep ref in sync with state so the poll closure always reads the latest value
   useEffect(() => { broadcastingRef.current = broadcastingEnabled }, [broadcastingEnabled])
@@ -152,19 +162,32 @@ export function useNowPlaying() {
     baseProgress.current = result?.progressMs ?? 0
 
     // Only broadcast to other profiles when broadcasting is enabled.
-    // Only write when the track actually changes (not every 3s poll).
+    // Write on track change, play/pause change, OR a seek — but not on every
+    // routine 3s poll (normal playback advances predictably, so we skip those).
     if (broadcastingRef.current) {
-      const broadcastId = result?.isPlaying ? result.id : null
-      if (broadcastId !== lastBroadcastId.current) {
-        lastBroadcastId.current = broadcastId
+      const playing     = !!result?.isPlaying
+      const broadcastId = playing ? result!.id : null
+      const actualMs    = playing ? (result!.progressMs ?? 0) : 0
+
+      const trackChanged = broadcastId !== lastBroadcastId.current
+      // Where continuous playback would be by now from the last broadcast point.
+      const expectedMs = lastBroadcastProgress.current +
+        (lastBroadcastPlaying.current ? Date.now() - lastBroadcastAt.current : 0)
+      const seeked = playing && Math.abs(actualMs - expectedMs) > SEEK_DRIFT_MS
+
+      if (trackChanged || seeked) {
+        lastBroadcastId.current       = broadcastId
+        lastBroadcastProgress.current = actualMs
+        lastBroadcastAt.current       = Date.now()
+        lastBroadcastPlaying.current  = playing
         supabase.from('users').update({
-          current_song_name:        result?.isPlaying ? result.name       : null,
-          current_song_artist:      result?.isPlaying ? result.artist     : null,
-          current_song_id:          result?.isPlaying ? result.id         : null,
-          current_song_album_art:   result?.isPlaying ? result.albumArt   : null,
-          current_song_duration_ms: result?.isPlaying ? result.durationMs : null,
-          current_song_progress_ms: result?.isPlaying ? result.progressMs : null,
-          current_song_updated_at:  result?.isPlaying ? new Date().toISOString() : null,
+          current_song_name:        playing ? result!.name       : null,
+          current_song_artist:      playing ? result!.artist     : null,
+          current_song_id:          playing ? result!.id         : null,
+          current_song_album_art:   playing ? result!.albumArt   : null,
+          current_song_duration_ms: playing ? result!.durationMs : null,
+          current_song_progress_ms: playing ? result!.progressMs : null,
+          current_song_updated_at:  playing ? new Date().toISOString() : null,
         }).eq('id', user.id).then(() => {})  // fire-and-forget
       }
     }

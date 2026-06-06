@@ -1,4 +1,5 @@
-import { View } from "react-native";
+import { useMemo } from "react";
+import { View, Animated } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -33,8 +34,18 @@ export { FeedUserCtx }
 export default function FeedScreen() {
   // Instantiate once at the top level so token cache + needsReconnect survive tab switches
   const {
-    nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, fetchFeedPosts, onToggleLike, handleQuickPost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible
+    nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, fetchFeedPosts, onToggleLike, handleQuickPost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight
   } = useFeedScreen();
+
+  // On the Feed tab, stack the minimized MeetMiniBar directly above the floating
+  // quick-post composer: its bottom = composer bottom + composer height + gap.
+  // Riding the same animated value means it rises with the composer (above the
+  // now-playing banner) when the keyboard opens.
+  const onFeed = activeNav === "Feed";
+  const meetBarBottom = useMemo(
+    () => Animated.add(composerBottom, composerHeight + 10),
+    [composerBottom, composerHeight]
+  );
 
   return (
     <NowPlayingCtx.Provider value={nowPlaying}>
@@ -73,6 +84,7 @@ export default function FeedScreen() {
           quickText={quickText}
           setQuickText={setQuickText}
           handleQuickPost={handleQuickPost}
+          onMeasure={setComposerHeight}
         />
       )}
       {!keyboardUp && <BottomNav active={activeNav} onPress={setActiveNav} />}      <PostComposerSheet
@@ -133,6 +145,7 @@ export default function FeedScreen() {
           title={hostMeetName || "Your Meet"}
           subtitle={nowPlaying.track?.name ?? "Hosting"}
           onExpand={() => setHostMinimized(false)}
+          bottom={onFeed ? meetBarBottom : undefined}
         />
       )}
       {listenerMeetId && listenerMinimized && (
@@ -142,6 +155,7 @@ export default function FeedScreen() {
           title={listenerInfo?.name || "Meet"}
           subtitle={listenerInfo?.trackName ?? "Listening"}
           onExpand={() => setListenerMinimized(false)}
+          bottom={onFeed ? meetBarBottom : undefined}
         />
       )}
     </View>
