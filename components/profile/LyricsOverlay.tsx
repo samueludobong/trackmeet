@@ -11,7 +11,7 @@ import { getLyricsForTrack, peekLyrics, claimFirstDiscovery, hasCelebrated, mark
 import { useArtAccent } from "../../hooks/albumColors";
 import { Confetti } from "./Confetti";
 import { CelebrationBanner, DiscoveryLoader } from "./LyricsCelebration";
-import { detectLanguage, translateLyrics, languageName, LANGUAGES } from "../../services/translate";
+import { translateLyrics, languageName, LANGUAGES } from "../../services/translate";
 import {
   getCurrentlyPlaying, setPlayback, skipNext, skipPrevious, seekPlayback, openSpotifyLink,
 } from "../../lib/spotify";
@@ -236,34 +236,35 @@ export function LyricsOverlay({
   }, [shown]);
   const firstLyricMs = displayLines?.[0]?.intro ? displayLines[1]?.timeMs ?? 0 : 0;
 
-  // ── Translation: detect source language when new lyrics arrive ──────────────
+  // ── Translation: reset when new lyrics arrive (the source language is learned
+  //     lazily from the first translation, so there's no upfront detect call). ──
   useEffect(() => {
     setTargetLang(null);
     setTranslated(null);
     setDetectedLang(null);
     transCache.current.clear();
-    if (!lyrics) return;
-    const sample = lyrics.synced ? lyrics.synced.map((l) => l.text).join(" ") : (lyrics.plain ?? "");
-    let active = true;
-    detectLanguage(sample).then((code) => { if (active) setDetectedLang(code); });
-    return () => { active = false; };
   }, [lyrics]);
 
   // ── Translation: (re)translate when the target language changes ─────────────
   useEffect(() => {
     const tgt = targetLang;
-    // null / same-as-source ⇒ show the original.
+    // null / known-to-be-the-source ⇒ show the original.
     if (!lyrics || !tgt || tgt === detectedLang) { setTranslated(null); return; }
     const cached = transCache.current.get(tgt);
     if (cached) { setTranslated(cached); return; }
     let active = true;
     setTranslating(true);
     setTransError(false);
-    translateLyrics(lyrics, tgt, detectedLang ?? "auto")
+    translateLyrics(track.id, lyrics, tgt)
       .then((t) => {
         if (!active) return;
-        if (t) { transCache.current.set(tgt, t); setTranslated(t); }
-        else { setTranslated(null); setTargetLang(null); setTransError(true); } // failed → revert + notify
+        if (!t) { setTranslated(null); setTargetLang(null); setTransError(true); return; } // failed → revert + notify
+        // Learn the song's own language from the result.
+        if (t.source) setDetectedLang(t.source);
+        // If the chosen language IS the song's language, just show the original.
+        if (t.source && t.source === tgt) { setTargetLang(null); setTranslated(null); return; }
+        transCache.current.set(tgt, t.result);
+        setTranslated(t.result);
       })
       .finally(() => { if (active) setTranslating(false); });
     return () => { active = false; };
@@ -435,7 +436,7 @@ export function LyricsOverlay({
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Text style={styles.langPillText} numberOfLines={1}>
-                  {translated ? languageName(targetLang) : detectedLang ? languageName(detectedLang) : "Translate"}
+                  {translated ? languageName(targetLang) : "Original"}
                 </Text>
               )}
               <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.7)" />
