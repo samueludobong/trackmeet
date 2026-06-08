@@ -41,7 +41,7 @@ export type UserProfile = {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type PostType = "text" | "image" | "video" | "music" | "poll";
+export type PostType = "text" | "image" | "video" | "music" | "poll" | "voice";
 
 export type PollOption = { id: string; label: string; votes: number };
 
@@ -72,6 +72,12 @@ export type Post = {
   pollQuestion?: string;
   pollOptions?: PollOption[];
   totalVotes?: number;
+  communityId?: string | null;
+  communityName?: string | null;
+  communitySlug?: string | null;
+  voiceUrl?: string | null;
+  voiceDurationMs?: number | null;
+  voiceWaveform?: number[] | null;
 };
 
 export type DummyComment = {

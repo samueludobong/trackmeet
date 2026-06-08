@@ -39,3 +39,10 @@ export const FeedUserCtx = createContext<FeedUserCtxValue>({
   likedPostIds: new Set(),
   onToggleLike: () => {},
 });
+
+// ─── Post actions context ─────────────────────────────────────────────────────
+// Lets the per-post "···" menu remove a post from the feed (delete / not
+// interested) without prop-drilling a callback through every card layer.
+export type PostActionsCtxValue = { onRemovePost: (postId: string) => void };
+export const PostActionsCtx = createContext<PostActionsCtxValue>({ onRemovePost: () => {} });
+export const usePostActions = () => useContext(PostActionsCtx);

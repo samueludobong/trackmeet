@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity, Image, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { styles } from "../../lib/feed/styles";
 import { AVATAR_MAP, type Post } from "../../app/data/mock";
@@ -24,7 +25,19 @@ export function PostHeader({ post }: { post: Post }) {
     </View>
   );
 
+  const openCommunity = () => {
+    if (!post.communityId) return;
+    router.push({ pathname: "/community", params: { id: post.communityId } });
+  };
+
   return (
+    <View>
+      {post.communityId && (post.communitySlug || post.communityName) && (
+        <TouchableOpacity style={ph.communityTag} activeOpacity={0.7} onPress={openCommunity}>
+          <Ionicons name="people" size={12} color="rgba(255,255,255,0.5)" />
+          <Text style={ph.communityTagText}>From /{post.communitySlug ?? post.communityName}</Text>
+        </TouchableOpacity>
+      )}
     <View style={styles.postHeader}>
       {/* Avatar → opens author profile */}
       <TouchableOpacity activeOpacity={0.72} onPress={handleAuthorPress} disabled={!post.authorId}>
@@ -42,7 +55,16 @@ export function PostHeader({ post }: { post: Post }) {
         </TouchableOpacity>
       </View>
     </View>
+    </View>
   );
 }
+
+const ph = StyleSheet.create({
+  communityTag: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    marginBottom: 6,
+  },
+  communityTagText: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.55)" },
+});
 
 // ─── Tappable post text — opens detail view ────────────────────────────────────

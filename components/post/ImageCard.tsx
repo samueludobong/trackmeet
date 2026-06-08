@@ -2,10 +2,11 @@ import React, { useState } from "react";
 import { View, Text, TouchableOpacity, Image } from "react-native";
 import { styles } from "../../lib/feed/styles";
 import { COLLAGE_W, COLLAGE_GAP } from "../../lib/feed/dimensions";
-import { MediaLightbox } from "../../components/post/Lightbox";
+import { MediaViewer } from "../../components/post/MediaViewer";
 import { ActionRow } from "../../components/post/ActionRow";
 import { PostHeader } from "../../components/post/PostHeader";
 import { PostText } from "../../components/post/TextCard";
+import { AttachedSongChip } from "../../components/post/AttachedSongChip";
 import { type Post } from "../../app/data/mock";
 
 export function ImageCollage({
@@ -106,10 +107,19 @@ export function ImageCard({ post }: { post: Post }) {
           <Text style={styles.mediaPlaceholder}>🖼</Text>
         </View>
       )}
+      {post.song && (
+        <AttachedSongChip
+          songId={post.songId}
+          songName={post.song}
+          songArtist={post.artist}
+          albumArt={post.albumArt}
+        />
+      )}
       <ActionRow post={post} />
       {lightboxIdx !== null && (
-        <MediaLightbox
-          urls={urls}
+        <MediaViewer
+          post={post}
+          media={urls.map((u) => ({ type: "image", uri: u }))}
           startIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
         />

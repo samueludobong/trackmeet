@@ -425,7 +425,7 @@ export const getCurrentlyPlaying = async (accessToken: string) => {
     }
 
   } catch (error) {
-    console.log('Currently playing error:', error)
+    // console.log('Currently playing error:', error)
     return null
   }
 }

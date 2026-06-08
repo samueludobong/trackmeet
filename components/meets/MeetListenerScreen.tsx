@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState, useRef } from "react";
 import { MeetGuideOverlay } from "../../components/meets/MeetGuideOverlay";
+import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
 import { useMeetListener } from "../../hooks/useMeetListener";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, Image, KeyboardAvoidingView, ActivityIndicator, PanResponder } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -10,6 +11,9 @@ import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 import { FloatingReactionLayer, ReactionButton } from "../../components/meets/FloatingReaction";
 import { MeetChatList } from "../../components/meets/MeetChatList";
 import { MeetSummaryScreen } from "../../components/meets/MeetSummaryScreen";
+
+// Center band for the lyrics view — between the top bar and the chat bar.
+const lyricsBand = { position: "absolute" as const, top: 96, left: 0, right: 0, bottom: 104 };
 
 export function MeetListenerScreen({
   visible, onClose, meetId, userId, isPublic = false, minimized = false, onMinimize, onExpand, onInfo,
@@ -28,6 +32,20 @@ export function MeetListenerScreen({
     slideAnim, accessToken, setAccessToken, meet, setMeet, trackState, setTrackState, host, setHost, listenerCount, setListenerCount, messages, setMessages, chatInput, setChatInput, livePos, setLivePos, savedId, setSavedId, pickerOpen, setPickerOpen, ended, setEnded, summary, setSummary, reactions, setReactions, reactChannelRef, spawnReaction, sendReaction, showGuide, setShowGuide, dontShowGuide, setDontShowGuide, launched, setLaunched, openedOnceRef, handleGotIt, syncTokenRef, syncStateRef, inSync, setInSync, isHostViewer, handleSendChat, handleSaveSong, handleLeave
   } = useMeetListener({ visible, onClose, meetId, userId, isPublic, minimized, onInfo, onExpand });
 
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+
+  // Swipe right → open lyrics, swipe left → back. Only claims clearly-horizontal
+  // gestures so vertical scrolls (chat list, lyrics) aren't hijacked.
+  const lyricsPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 28 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderRelease: (_e, g) => {
+        if (g.dx > 60) setLyricsOpen(true);
+        else if (g.dx < -60) setLyricsOpen(false);
+      },
+    }),
+  ).current;
+
   // When minimized the hooks above keep running (realtime, sync) but we don't
   // render the Modal at all. A Modal with visible={false} still creates a native
   // overlay on some platforms and consumes touches, blocking the MiniBar.
@@ -43,7 +61,7 @@ export function MeetListenerScreen({
 
   return (
     <Modal visible animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? handleLeave}>
-      <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]}>
+      <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]} {...lyricsPan.panHandlers}>
         {trackState?.albumArt ? (
           <Image source={{ uri: trackState.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : (
@@ -61,6 +79,7 @@ export function MeetListenerScreen({
           </View>
         )}
 
+        {!lyricsOpen && (
         <View style={mlStyles.trackSection}>
           <Text style={mlStyles.trackName} numberOfLines={1}>{trackState?.name ?? "Waiting for host…"}</Text>
           <Text style={mlStyles.trackArtist} numberOfLines={1}>{trackState?.artist ?? ""}</Text>
@@ -109,10 +128,23 @@ export function MeetListenerScreen({
             onSavedChange={(v) => { if (v && trackState?.id) setSavedId(trackState.id); }}
           />
         </View>
+        )}
 
+        {!lyricsOpen && (
         <View style={mlStyles.commentSection}>
           <MeetChatList messages={messages} />
         </View>
+        )}
+
+        {lyricsOpen && (
+          <View style={lyricsBand}>
+            <MeetLyricsView
+              track={trackState ? { id: trackState.id, name: trackState.name, artist: trackState.artist, durationMs: trackState.durationMs } : null}
+              positionMs={livePos}
+              onClose={() => setLyricsOpen(false)}
+            />
+          </View>
+        )}
 
         <FloatingReactionLayer items={reactions} onItemDone={(id) => setReactions((prev) => prev.filter((r) => r.id !== id))} />
 
@@ -180,6 +212,9 @@ export function MeetListenerScreen({
             </View>
           </View>
           <View style={mlStyles.topRight}>
+            <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={() => setLyricsOpen((v) => !v)}>
+              <Ionicons name={lyricsOpen ? "musical-note" : "document-text-outline"} size={17} color="#fff" />
+            </TouchableOpacity>
             <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={onMinimize ?? handleLeave}>
               <Ionicons name="chevron-down" size={19} color="#fff" />
             </TouchableOpacity>

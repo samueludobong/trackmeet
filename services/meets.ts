@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { notifyFollowersOfMeet } from '../lib/notifications';
+import { notifyFollowersOfMeet, notifyCommunityOfMeet } from '../lib/notifications';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,6 +72,8 @@ export const startMeet = async (opts: {
   tags?: string[]
   allowComments?: boolean
   allowReactions?: boolean
+  /** If set, scopes the Meet to a community and notifies every member. */
+  communityId?: string | null
 }): Promise<{ meetId?: string; error?: string }> => {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
@@ -86,6 +88,7 @@ export const startMeet = async (opts: {
       allow_comments:  opts.allowComments ?? true,
       allow_reactions: opts.allowReactions ?? true,
       is_live:         true,
+      community_id:    opts.communityId ?? null,
     })
     .select('id')
     .single()
@@ -100,6 +103,22 @@ export const startMeet = async (opts: {
 
   // Fire-and-forget — never block starting the meet on notification delivery.
   notifyFollowersOfMeet(data.id, opts.name.trim()).catch(() => {})
+
+  // Goal #10: community Meets push to *every* member, not just followers.
+  if (opts.communityId) {
+    // Best-effort: include caller's currently broadcasting song if available.
+    supabase
+      .from('users')
+      .select('current_song_name, current_song_artist')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data: row }) => {
+        const song = row?.current_song_name
+          ? `${row.current_song_name}${row.current_song_artist ? ` · ${row.current_song_artist}` : ''}`
+          : null
+        notifyCommunityOfMeet(data.id, opts.name.trim(), opts.communityId as string, song).catch(() => {})
+      }, () => {})
+  }
 
   return { meetId: data.id }
 }

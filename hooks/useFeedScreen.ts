@@ -160,6 +160,32 @@ export function useFeedScreen() {
     }
   };
 
+  /** Post a voice note (uploads the local recording, then creates a 'voice' post). */
+  const handleVoicePost = async ({ uri, durationMs }: { uri: string; durationMs: number }) => {
+    if (!currentUser) return;
+    try {
+      const { uploadImageToStorage } = await import("../services/storage");
+      const ext = uri.split(".").pop()?.toLowerCase() || "m4a";
+      const publicUrl = await uploadImageToStorage(
+        "post-media",
+        `${currentUser.id}/voice-${Date.now()}.${ext}`,
+        uri,
+        `audio/${ext === "m4a" ? "m4a" : ext}`,
+      );
+      const newPost = await createPost({
+        user_id: currentUser.id,
+        type: "voice",
+        text: quickText.trim() || null,
+        voice_url: publicUrl,
+        voice_duration_ms: Math.min(30_000, durationMs),
+      });
+      setQuickText("");
+      setFeedPosts((prev) => [newPost, ...prev]);
+    } catch (e: any) {
+      Alert.alert("Voice post failed", e?.message ?? "Could not upload.");
+    }
+  };
+
   // Load current user + initial posts on mount
   useEffect(() => {
     (async () => {
@@ -234,5 +260,5 @@ useEffect(() => {
 }, []);
 
 
-  return { nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, fetchFeedPosts, onToggleLike, handleQuickPost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight };
+  return { nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, fetchFeedPosts, onToggleLike, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight };
 }

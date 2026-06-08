@@ -1,5 +1,6 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { MeetMusicPanel } from "../../components/meets/MeetMusicPanel";
+import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
 import { useMeetMusicControl } from "../../hooks/useMeetMusicControl";
 import { useMeetHost } from "../../hooks/useMeetHost";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, Image, KeyboardAvoidingView } from "react-native";
@@ -10,6 +11,10 @@ import { mlStyles } from "../../lib/feed/localStyles";
 import { FloatingReactionLayer, ReactionButton } from "../../components/meets/FloatingReaction";
 import { MeetChatList } from "../../components/meets/MeetChatList";
 import { MeetSummaryScreen } from "../../components/meets/MeetSummaryScreen";
+
+// The center band for the lyrics view — sits between the top bar and the chat
+// bar so the bottom chat input stays usable and the album-art background shows.
+const lyricsBand = { position: "absolute" as const, top: 96, left: 0, right: 0, bottom: 104 };
 
 export function MeetLiveScreen({
   visible, onClose, meetId, meetName, accessToken, userId, minimized = false, onMinimize,
@@ -34,6 +39,8 @@ export function MeetLiveScreen({
     slideAnim, musicSlideX, canvasUrl, setCanvasUrl, ctrlLoading, setCtrlLoading, pickerOpen, setPickerOpen, apiToken, setApiToken, playlists, setPlaylists, playlistsLoading, setPlaylistsLoading, selectedPlaylist, setSelectedPlaylist, playlistTracks, setPlaylistTracks, tracksLoading, setTracksLoading, tracksError, setTracksError, searchQuery, setSearchQuery, searchResults, setSearchResults, searchLoading, setSearchLoading, playingId, setPlayingId, player, openMusicPicker, closeMusicPicker, pickerOpenRef, musicPan, selectPlaylist, tok, handlePrev, handleNext, handlePlayPause, handlePlayTrack, fmtMs, progressPct, isSearching, showTracks, p2Loading, p2Title
   } = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs });
   apiTokenRef.current = apiToken;
+
+  const [lyricsOpen, setLyricsOpen] = useState(false);
 
   // When minimized the hooks above keep running (realtime, audio, sync) but we
   // don't render the Modal at all. A Modal with visible={false} still creates a
@@ -75,6 +82,9 @@ export function MeetLiveScreen({
             </View>
           </View>
           <View style={mlStyles.topRight}>
+            <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={() => setLyricsOpen((v) => !v)}>
+              <Ionicons name={lyricsOpen ? "musical-note" : "document-text-outline"} size={17} color="#fff" />
+            </TouchableOpacity>
             <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={openMusicPicker}>
               <Ionicons name="musical-notes" size={17} color="#fff" />
             </TouchableOpacity>
@@ -87,34 +97,46 @@ export function MeetLiveScreen({
           </View>
         </View>
 
-        <View style={mlStyles.trackSection}>
-          <Text style={mlStyles.trackName} numberOfLines={1}>{track?.name ?? "—"}</Text>
-          <Text style={mlStyles.trackArtist} numberOfLines={1}>{track?.artist ?? ""}</Text>
-          <View style={mlStyles.progressTrack}>
-            <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
+        {lyricsOpen ? (
+          <View style={lyricsBand}>
+            <MeetLyricsView
+              track={track ? { id: track.id, name: track.name, artist: track.artist, durationMs: track.durationMs } : null}
+              positionMs={liveProgressMs}
+              onClose={() => setLyricsOpen(false)}
+            />
           </View>
-          <View style={mlStyles.progressTimes}>
-            <Text style={mlStyles.progressTime}>{fmtMs(liveProgressMs)}</Text>
-            <Text style={mlStyles.progressTime}>{fmtMs(track?.durationMs ?? 0)}</Text>
-          </View>
-          <View style={mlStyles.controls}>
-            <TouchableOpacity activeOpacity={0.7} onPress={handlePrev} disabled={ctrlLoading}>
-              <Ionicons name="play-skip-back" size={34} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity style={mlStyles.playBtn} activeOpacity={0.8} onPress={handlePlayPause} disabled={ctrlLoading}>
-              <Ionicons name={track?.isPlaying ? "pause" : "play"} size={30} color="#fff" style={track?.isPlaying ? undefined : { marginLeft: 3 }} />
-            </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.7} onPress={handleNext} disabled={ctrlLoading}>
-              <Ionicons name="play-skip-forward" size={34} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
+        ) : (
+          <>
+            <View style={mlStyles.trackSection}>
+              <Text style={mlStyles.trackName} numberOfLines={1}>{track?.name ?? "—"}</Text>
+              <Text style={mlStyles.trackArtist} numberOfLines={1}>{track?.artist ?? ""}</Text>
+              <View style={mlStyles.progressTrack}>
+                <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
+              </View>
+              <View style={mlStyles.progressTimes}>
+                <Text style={mlStyles.progressTime}>{fmtMs(liveProgressMs)}</Text>
+                <Text style={mlStyles.progressTime}>{fmtMs(track?.durationMs ?? 0)}</Text>
+              </View>
+              <View style={mlStyles.controls}>
+                <TouchableOpacity activeOpacity={0.7} onPress={handlePrev} disabled={ctrlLoading}>
+                  <Ionicons name="play-skip-back" size={34} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={mlStyles.playBtn} activeOpacity={0.8} onPress={handlePlayPause} disabled={ctrlLoading}>
+                  <Ionicons name={track?.isPlaying ? "pause" : "play"} size={30} color="#fff" style={track?.isPlaying ? undefined : { marginLeft: 3 }} />
+                </TouchableOpacity>
+                <TouchableOpacity activeOpacity={0.7} onPress={handleNext} disabled={ctrlLoading}>
+                  <Ionicons name="play-skip-forward" size={34} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
 
-        <View style={mlStyles.commentSection}>
-          <MeetChatList messages={messages} />
-        </View>
+            <View style={mlStyles.commentSection}>
+              <MeetChatList messages={messages} />
+            </View>
+          </>
+        )}
 
-        {!pickerOpen && (
+        {!pickerOpen && !lyricsOpen && (
           <View style={mlStyles.swipeHint} pointerEvents="none">
             <Ionicons name="musical-notes" size={13} color="#ffffff70" />
             <Text style={mlStyles.swipeHintText}>Tracks</Text>

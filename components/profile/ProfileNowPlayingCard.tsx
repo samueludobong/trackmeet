@@ -72,7 +72,7 @@ export function ProfileNowPlayingCard({
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               activeOpacity={0.7}
             >
-              <Ionicons name="expand-outline" size={16} color="rgba(255,255,255,0.7)" />
+              <Ionicons name="chevron-expand-outline" size={20} color="rgba(255,255,255,0.7)" />
             </TouchableOpacity>
           </View>
           <TouchableOpacity

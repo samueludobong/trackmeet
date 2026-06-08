@@ -5,6 +5,7 @@ import { ImageCard } from "../../components/post/ImageCard";
 import { VideoCard } from "../../components/post/VideoCard";
 import { MusicCard } from "../../components/post/MusicCard";
 import { PollCard } from "../../components/post/PollCard";
+import { VoiceCard } from "../../components/post/VoiceCard";
 import { type Post } from "../../app/data/mock";
 
 export function PostCard({ item }: { item: Post }) {
@@ -13,6 +14,7 @@ export function PostCard({ item }: { item: Post }) {
   if (item.type === "video") return <VideoCard post={item} />;
   if (item.type === "music") return <MusicCard post={item} />;
   if (item.type === "poll") return <PollCard post={item} />;
+  if (item.type === "voice") return <VoiceCard post={item} />;
   return null;
 }
 

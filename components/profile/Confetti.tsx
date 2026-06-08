@@ -53,7 +53,12 @@ export function Confetti({ trigger }: { trigger: number }) {
     }),
   ).current;
 
+  // Only fire on a genuine increment — never on mount with an already-non-zero
+  // trigger (which would replay the burst with no new celebration).
+  const prevTrigger = useRef(trigger);
   useEffect(() => {
+    if (trigger === prevTrigger.current) return;
+    prevTrigger.current = trigger;
     if (!trigger) return;
     setActive(true);
     t.setValue(0);

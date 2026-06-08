@@ -8,12 +8,17 @@ import {
   UIManager,
   findNodeHandle,
   Dimensions,
+  Alert,
 } from "react-native";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { styles, profileSStyles } from "../../lib/feed/styles";
-import { OpenDetailCtx, FeedUserCtx } from "../../lib/feed/contexts";
+import { OpenDetailCtx, FeedUserCtx, usePostActions } from "../../lib/feed/contexts";
 import { type Post } from "../../app/data/mock";
-import { getPostComments } from "../../services/posts";
+import { getPostComments, deletePost } from "../../services/posts";
+import { followUser, unfollowUser, checkIsFollowing } from "../../services/follows";
+import { openSpotifyLink } from "../../lib/spotify";
+import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 
 export function ActionRow({ post }: { post: Post }) {
   const { currentUserId, likedPostIds, onToggleLike } = useContext(FeedUserCtx);
@@ -32,6 +37,57 @@ export function ActionRow({ post }: { post: Post }) {
   const [commentsCount, setCommentsCount] = useState(post.comments);
 
   const openDetail = useContext(OpenDetailCtx);
+  const { onRemovePost } = usePostActions();
+  const router = useRouter();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const isOwnPost = !!post.authorId && post.authorId === currentUserId;
+
+  // Refresh follow state when the menu opens.
+  useEffect(() => {
+    if (fabMenuOpen && post.authorId && !isOwnPost) {
+      checkIsFollowing(post.authorId).then(setIsFollowing).catch(() => {});
+    }
+  }, [fabMenuOpen]);
+
+  // ── Menu action handlers ────────────────────────────────────────────────────
+  const openInSpotify = () => {
+    closeMenu();
+    if (post.songId) openSpotifyLink(`spotify:track:${post.songId}`, `https://open.spotify.com/track/${post.songId}`);
+  };
+  const searchArtistOnSpotify = () => {
+    closeMenu();
+    const q = encodeURIComponent(post.artist ?? post.user ?? "");
+    openSpotifyLink(`spotify:search:${q}`, `https://open.spotify.com/search/${encodeURIComponent(q)}`);
+  };
+  const addToPlaylist = () => { closeMenu(); setPickerOpen(true); };
+  const viewPollResults = () => { closeMenu(); openDetail?.(); };
+  const viewUserProfile = () => {
+    closeMenu();
+    if (post.authorId) router.push({ pathname: "/user-profile", params: { userId: post.authorId } });
+  };
+  const toggleFollowUser = async () => {
+    closeMenu();
+    if (!post.authorId) return;
+    if (isFollowing) { setIsFollowing(false); await unfollowUser(post.authorId); }
+    else { setIsFollowing(true); const r = await followUser(post.authorId); if (r.error) setIsFollowing(false); }
+  };
+  const notInterested = () => { closeMenu(); onRemovePost(post.id); };
+  const confirmDelete = () => {
+    closeMenu();
+    Alert.alert("Delete post?", "This can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete", style: "destructive",
+        onPress: async () => {
+          try { await deletePost(post.id); onRemovePost(post.id); }
+          catch (e: any) { Alert.alert("Couldn't delete", e?.message ?? "Try again."); }
+        },
+      },
+    ]);
+  };
+  const reportPost = () => { closeMenu(); Alert.alert("Reported", "Thanks — we'll review this post."); };
+  const comingSoon = (what: string) => () => { closeMenu(); Alert.alert("Coming soon", `${what} isn't available yet.`); };
 
   useEffect(() => {
     setLikeCount(post.likes);
@@ -154,7 +210,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={() => setFabMenuOpen(false)}
+                  onPress={addToPlaylist}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>
@@ -168,7 +224,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={() => setFabMenuOpen(false)}
+                  onPress={openInSpotify}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>
@@ -182,7 +238,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
               style={profileSStyles.fabMenuItem}
               activeOpacity={0.8}
-              onPress={() => setFabMenuOpen(false)}
+              onPress={searchArtistOnSpotify}
             >
               <View style={{ flex: 1 }}>
                 <Text style={profileSStyles.fabMenuTitle}>View Artist Profile</Text>
@@ -193,7 +249,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={() => setFabMenuOpen(false)}
+                  onPress={comingSoon("Starting a Meet from a post")}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>
@@ -215,7 +271,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={() => setFabMenuOpen(false)}
+                  onPress={comingSoon("Saving media")}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>Save Video</Text>
@@ -231,7 +287,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={() => setFabMenuOpen(false)}
+                  onPress={comingSoon("Saving media")}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>Save Image</Text>
@@ -247,7 +303,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={() => setFabMenuOpen(false)}
+                  onPress={viewPollResults}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>
@@ -268,7 +324,7 @@ export function ActionRow({ post }: { post: Post }) {
             <TouchableOpacity
               style={profileSStyles.fabMenuItem}
               activeOpacity={0.8}
-              onPress={() => setFabMenuOpen(false)}
+              onPress={comingSoon("Collections")}
             >
               <View style={{ flex: 1 }}>
                 <Text style={profileSStyles.fabMenuTitle}>
@@ -326,7 +382,7 @@ export function ActionRow({ post }: { post: Post }) {
                     <TouchableOpacity
                       style={profileSStyles.fabMenuItem}
                       activeOpacity={0.8}
-                      onPress={closeMenu}
+                      onPress={searchArtistOnSpotify}
                     >
                       <View style={{ flex: 1 }}>
                         <Text style={profileSStyles.fabMenuTitle}>
@@ -343,15 +399,15 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={closeMenu}
+                  onPress={toggleFollowUser}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>
-                      Follow {post.user}
+                      {isFollowing ? "Following" : "Follow"} {post.user}
                     </Text>
                   </View>
                   <Ionicons
-                    name="person-add-outline"
+                    name={isFollowing ? "checkmark" : "person-add-outline"}
                     size={18}
                     color="#AB00FF"
                   />
@@ -363,7 +419,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={closeMenu}
+                  onPress={notInterested}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>
@@ -384,7 +440,7 @@ export function ActionRow({ post }: { post: Post }) {
                 <TouchableOpacity
                   style={profileSStyles.fabMenuItem}
                   activeOpacity={0.8}
-                  onPress={closeMenu}
+                  onPress={reportPost}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={profileSStyles.fabMenuTitle}>Report Post</Text>
@@ -404,7 +460,7 @@ export function ActionRow({ post }: { post: Post }) {
                     <TouchableOpacity
                       style={profileSStyles.fabMenuItem}
                       activeOpacity={0.8}
-                      onPress={closeMenu}
+                      onPress={comingSoon("Editing posts")}
                     >
                       <View style={{ flex: 1 }}>
                         <Text style={profileSStyles.fabMenuTitle}>
@@ -421,7 +477,7 @@ export function ActionRow({ post }: { post: Post }) {
                     <TouchableOpacity
                       style={profileSStyles.fabMenuItem}
                       activeOpacity={0.8}
-                      onPress={closeMenu}
+                      onPress={confirmDelete}
                     >
                       <View style={{ flex: 1 }}>
                         <Text
@@ -484,6 +540,19 @@ export function ActionRow({ post }: { post: Post }) {
       >
         <Text style={styles.moreIcon}>···</Text>
       </TouchableOpacity>
+
+      <AddToPlaylistSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        userId={currentUserId}
+        track={post.songId ? {
+          id: post.songId,
+          name: post.song ?? "",
+          artist: post.artist ?? null,
+          albumArt: post.albumArt ?? null,
+          durationMs: null,
+        } : null}
+      />
     </View>
   );
 }

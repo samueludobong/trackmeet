@@ -1,12 +1,12 @@
-import { useMemo } from "react";
-import { View, Animated } from "react-native";
+import { useMemo, useState, useEffect, type ReactNode } from "react";
+import { View, Animated, StyleSheet } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import * as SecureStore from 'expo-secure-store'
 
 // ─── Extracted shared foundation (see lib/feed/*) ─────────────────────────────
-import { OpenMeetCtx, HostMeetCtx, NowPlayingCtx, FeedUserCtx } from '../lib/feed/contexts';
+import { OpenMeetCtx, HostMeetCtx, NowPlayingCtx, FeedUserCtx, PostActionsCtx } from '../lib/feed/contexts';
 import { styles } from '../lib/feed/styles';
 
 // FeedUserCtx is consumed by external screens via `import { FeedUserCtx } from "./feed"`.
@@ -24,6 +24,7 @@ import { MeetListenerScreen } from "../components/meets/MeetListenerScreen";
 import { MeetLiveScreen } from "../components/meets/MeetLiveScreen";
 import { MeetMiniBar } from "../components/meets/MeetMiniBar";
 import { FeedList } from '../components/feed/FeedList';
+import { FeedDrawer } from '../components/feed/FeedDrawer';
 import { QuickComposer } from '../components/feed/QuickComposer';
 
 // ─── Spotify track card (shown inside chat when a track is shared) ───────────
@@ -31,10 +32,27 @@ import { QuickComposer } from '../components/feed/QuickComposer';
 import { useFeedScreen } from "../hooks/useFeedScreen";
 export { FeedUserCtx }
 
+// Keeps a tab's screen mounted but hidden when inactive, so its state and
+// fetched data persist across tab switches (no remount = no reload).
+function TabScreen({ active, children }: { active: boolean; children: ReactNode }) {
+  // Absolute children don't inherit the SafeAreaView's top padding, so apply the
+  // top inset here — otherwise content draws under the status bar/notch.
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      style={[StyleSheet.absoluteFill, { paddingTop: insets.top }, !active && hidden]}
+      pointerEvents={active ? "auto" : "none"}
+    >
+      {children}
+    </View>
+  );
+}
+const hidden = { display: "none" as const };
+
 export default function FeedScreen() {
   // Instantiate once at the top level so token cache + needsReconnect survive tab switches
   const {
-    nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, fetchFeedPosts, onToggleLike, handleQuickPost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight
+    nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, fetchFeedPosts, onToggleLike, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight
   } = useFeedScreen();
 
   // On the Feed tab, stack the minimized MeetMiniBar directly above the floating
@@ -47,31 +65,59 @@ export default function FeedScreen() {
     [composerBottom, composerHeight]
   );
 
+  // Keep-alive: mount each tab the first time it's visited and keep it mounted
+  // (hidden when inactive) so its state + fetched data survive tab switches.
+  // Only the now-playing card refreshes, since it reads from the live context.
+  const [visited, setVisited] = useState<Set<string>>(() => new Set([activeNav]));
+  useEffect(() => {
+    setVisited((prev) => (prev.has(activeNav) ? prev : new Set(prev).add(activeNav)));
+  }, [activeNav]);
+
   return (
     <NowPlayingCtx.Provider value={nowPlaying}>
     <FeedUserCtx.Provider value={{ currentUserId: currentUser?.id ?? null, likedPostIds, onToggleLike }}>
+    <PostActionsCtx.Provider value={{ onRemovePost: (id) => setFeedPosts((prev) => prev.filter((p) => p.id !== id)) }}>
     <OpenMeetCtx.Provider value={openListenerMeet}>
     <HostMeetCtx.Provider value={openHostMeet}>
     <View style={styles.container}>
-      <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
-        {activeNav === "Profile" ? (
-          <ProfileView />
-        ) : activeNav === "Discover" ? (
-          <DiscoverView />
-        ) : activeNav === "Meets" ? (
-          <MeetsView />
-        ) : activeNav === "Messages" ? (
-          <MessagesView onOpenChat={setOpenConv} />
-        ) : (
-          <FeedList
-            feedPosts={feedPosts}
-            feedScrollEnabled={feedScrollEnabled}
-            feedRefreshing={feedRefreshing}
-            onFeedRefresh={onFeedRefresh}
-            setQuickReplyPost={setQuickReplyPost}
-            setFeedScrollEnabled={setFeedScrollEnabled}
-            setDetailPost={setDetailPost}
-          />
+      <SafeAreaView style={{ flex: 1 }} edges={[]}>
+        {visited.has("Feed") && (
+          <TabScreen active={onFeed}>
+            <FeedDrawer
+              userId={currentUser?.id ?? null}
+              feedContent={
+                <FeedList
+                  feedPosts={feedPosts}
+                  feedScrollEnabled={feedScrollEnabled}
+                  feedRefreshing={feedRefreshing}
+                  onFeedRefresh={onFeedRefresh}
+                  setQuickReplyPost={setQuickReplyPost}
+                  setFeedScrollEnabled={setFeedScrollEnabled}
+                  setDetailPost={setDetailPost}
+                />
+              }
+            />
+          </TabScreen>
+        )}
+        {visited.has("Profile") && (
+          <TabScreen active={activeNav === "Profile"}>
+            <ProfileView />
+          </TabScreen>
+        )}
+        {visited.has("Discover") && (
+          <TabScreen active={activeNav === "Discover"}>
+            <DiscoverView />
+          </TabScreen>
+        )}
+        {visited.has("Meets") && (
+          <TabScreen active={activeNav === "Meets"}>
+            <MeetsView />
+          </TabScreen>
+        )}
+        {visited.has("Messages") && (
+          <TabScreen active={activeNav === "Messages"}>
+            <MessagesView onOpenChat={setOpenConv} />
+          </TabScreen>
         )}
       </SafeAreaView>
       {activeNav === "Feed" && (
@@ -84,6 +130,7 @@ export default function FeedScreen() {
           quickText={quickText}
           setQuickText={setQuickText}
           handleQuickPost={handleQuickPost}
+          handleVoicePost={handleVoicePost}
           onMeasure={setComposerHeight}
         />
       )}
@@ -161,6 +208,7 @@ export default function FeedScreen() {
     </View>
     </HostMeetCtx.Provider>
     </OpenMeetCtx.Provider>
+    </PostActionsCtx.Provider>
     </FeedUserCtx.Provider>
     </NowPlayingCtx.Provider>
   );

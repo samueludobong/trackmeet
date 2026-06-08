@@ -1,14 +1,15 @@
-import React from "react";
+import React, { useState } from "react";
 import { View, Text, TouchableOpacity, TextInput, Animated, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { styles } from "../../lib/feed/styles";
 import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
 import { NowPlayingBanner } from "./NowPlayingBanner";
+import { VoiceRecorder } from "./VoiceRecorder";
 
 /** The floating quick-post field shown on the Feed tab (text + now-playing attach). */
 export function QuickComposer({
   composerBottom, keyboardVisible, attachedTrack, setAttachedTrack,
-  setMenuVisible, quickText, setQuickText, handleQuickPost, onMeasure,
+  setMenuVisible, quickText, setQuickText, handleQuickPost, handleVoicePost, onMeasure,
 }: {
   composerBottom: Animated.AnimatedInterpolation<number> | Animated.Value | number;
   keyboardVisible: boolean;
@@ -18,10 +19,12 @@ export function QuickComposer({
   quickText: string;
   setQuickText: (v: string) => void;
   handleQuickPost: () => void;
+  handleVoicePost?: (rec: { uri: string; durationMs: number }) => void;
   // Reports the rendered height of the whole composer stack (input + optional
   // now-playing banner) so the MeetMiniBar can be positioned directly above it.
   onMeasure?: (height: number) => void;
 }) {
+  const [recorderOpen, setRecorderOpen] = useState(false);
   return (
     <Animated.View
       style={[styles.composerWrap, { bottom: composerBottom as any }]}
@@ -63,10 +66,28 @@ export function QuickComposer({
           onChangeText={setQuickText}
           onSubmitEditing={handleQuickPost}
         />
+        {handleVoicePost && (
+          <TouchableOpacity
+            style={styles.composerPlus}
+            activeOpacity={0.8}
+            onPress={() => setRecorderOpen(true)}
+            hitSlop={6}
+          >
+            <Ionicons name="mic" size={18} color="#AB00FF" />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.composerSend} activeOpacity={0.8} onPress={handleQuickPost}>
           <Text style={styles.composerSendIcon}>↑</Text>
         </TouchableOpacity>
       </View>
+
+      {handleVoicePost && (
+        <VoiceRecorder
+          visible={recorderOpen}
+          onClose={() => setRecorderOpen(false)}
+          onCapture={handleVoicePost}
+        />
+      )}
     </Animated.View>
   );
 }

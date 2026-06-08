@@ -6,6 +6,7 @@ import { supabase } from "../lib/supabase";
 import { SH } from "../lib/feed/dimensions";
 import { dbRowToPost } from "../lib/feed/helpers";
 import { type Post } from "../app/data/mock";
+import { type NowPlayingTrack } from "./useNowPlaying";
 
 export function usePostComposer({ visible, onClose, currentUser, onPosted, initialText }: { visible: boolean; onClose: () => void; currentUser: ComposerUser | null; onPosted: (post: Post) => void; initialText?: string }) {
   const [text, setText] = useState("");
@@ -15,13 +16,15 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
   const [pollOptions, setPollOptions] = useState(["", ""]);
   const [posting, setPosting] = useState(false);
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [musicMode, setMusicMode] = useState(false);
+  const [attachedTrack, setAttachedTrack] = useState<NowPlayingTrack | null>(null);
   const slideAnim = useRef(new Animated.Value(SH)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
       setText(initialText ?? ""); setImages([]); setPollMode(false); setMediaPickerOpen(false);
-      setPollQuestion(""); setPollOptions(["", ""]);
+      setPollQuestion(""); setPollOptions(["", ""]); setMusicMode(false); setAttachedTrack(null);
       Animated.parallel([
         Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 200 }),
         Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
@@ -81,6 +84,7 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
   const canPost =
     text.trim().length > 0 ||
     images.length > 0 ||
+    attachedTrack !== null ||
     (pollMode && pollQuestion.trim().length > 0 && pollOptions.filter((o) => o.trim()).length >= 2);
 
   const handlePost = async () => {
@@ -88,10 +92,19 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
     setPosting(true);
     try {
       const VIDEO_EXTS = ["mp4", "mov", "m4v", "avi", "webm"];
-      let type: "text" | "image" | "video" | "poll" = "text";
+      let type: "text" | "image" | "video" | "poll" | "music" = "text";
       let mediaUrls: string[] = [];
+      let song: Record<string, any> = {};
 
-      if (images.length > 0) {
+      if (attachedTrack) {
+        type = "music";
+        song = {
+          song_id: attachedTrack.id,
+          song_name: attachedTrack.name,
+          song_artist: attachedTrack.artist,
+          song_album_art: attachedTrack.albumArt ?? null,
+        };
+      } else if (images.length > 0) {
         const firstExt = (images[0].split(".").pop() ?? "").toLowerCase();
         type = VIDEO_EXTS.includes(firstExt) ? "video" : "image";
         for (const uri of images) {
@@ -135,6 +148,7 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
           media_urls: mediaUrls,
           poll_question: pollMode ? pollQuestion.trim() || null : null,
           poll_options: opts,
+          ...song,
         })
         .select("id, type, text, media_urls, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url)")
         .single();
@@ -157,5 +171,5 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
   })();
 
 
-  return { text, setText, images, setImages, pollMode, setPollMode, pollQuestion, setPollQuestion, pollOptions, setPollOptions, posting, setPosting, mediaPickerOpen, setMediaPickerOpen, slideAnim, backdropAnim, pickFromCamera, pickFromLibrary, pickVideo, removeImage, canPost, handlePost, initials };
+  return { text, setText, images, setImages, pollMode, setPollMode, pollQuestion, setPollQuestion, pollOptions, setPollOptions, posting, setPosting, mediaPickerOpen, setMediaPickerOpen, musicMode, setMusicMode, attachedTrack, setAttachedTrack, slideAnim, backdropAnim, pickFromCamera, pickFromLibrary, pickVideo, removeImage, canPost, handlePost, initials };
 }

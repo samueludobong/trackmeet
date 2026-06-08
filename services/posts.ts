@@ -45,7 +45,7 @@ import { dbRowToPost } from "../lib/feed/helpers";
 import { type Post } from "../app/data/mock";
 
 const FEED_POST_SELECT =
-  "id, type, text, media_urls, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url)";
+  "id, type, text, media_urls, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, voice_url, voice_duration_ms, voice_waveform, created_at, likes_count, comments_count, community_id, users!user_id(id, username, display_name, avatar_url), communities!community_id(id, name, slug)";
 
 /** Fetch the latest feed posts (newest first). */
 export async function getFeedPosts(limit = 50): Promise<Post[]> {
@@ -69,6 +69,12 @@ export async function togglePostLike(postId: string, userId: string): Promise<{ 
   const { data, error } = await supabase.rpc("toggle_post_like", { p_post_id: postId, p_user_id: userId });
   if (error) throw error;
   return data as { likes_count: number; liked: boolean };
+}
+
+/** Delete a post (RLS restricts this to the owner). */
+export async function deletePost(postId: string): Promise<void> {
+  const { error } = await supabase.from("posts").delete().eq("id", postId);
+  if (error) throw error;
 }
 
 /** Insert a post and return the hydrated Post. */

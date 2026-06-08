@@ -109,9 +109,30 @@ export function LyricsOverlay({
     celebrateTimers.current = [];
   };
 
-  // Tidy up the celebration banner whenever the overlay is closed.
+  // Full reset whenever the overlay closes — the Modal stays mounted, so without
+  // this, lyrics/scroll/translation/celebration state would persist into the
+  // next open.
   useEffect(() => {
-    if (!visible) { clearCelebrateTimers(); setBanner(null); }
+    if (visible) return;
+    clearCelebrateTimers();
+    setConfetti(0);
+    setLoading(false);
+    setLyrics(null);
+    setFailed(false);
+    setActiveIdx(-1);
+    setIntroProgress(0);
+    setBanner(null);
+    setPickerOpen(false);
+    setLangPickerOpen(false);
+    setTranslated(null);
+    setTargetLang(null);
+    setDetectedLang(null);
+    setTranslating(false);
+    setTransError(false);
+    lineY.current = [];
+    panelH.current = 0;
+    transCache.current.clear();
+    scrollRef.current?.scrollTo?.({ y: 0, animated: false });
   }, [visible]);
 
   // ── Non-owner: mirror the passed-in now-playing snapshot ────────────────────
@@ -174,14 +195,12 @@ export function LyricsOverlay({
       setLoading(true);
     }
 
-    // "Fresh" = we won the global DB discovery claim AND this device has never
-    // played the animation for this track. The local guard guarantees the
-    // confetti can never replay here, even if the DB claim is unavailable.
-    const freshP: Promise<boolean> = tid
-      ? Promise.all([
-          claimFirstDiscovery(tid).catch(() => false),
-          hasCelebrated(tid).catch(() => false),
-        ]).then(([first, already]) => first && !already)
+    // "Fresh" = this device has never played the animation for this track (sync,
+    // race-free local guard) AND we won the global DB discovery claim. The local
+    // guard alone guarantees the confetti can never replay here.
+    const alreadyCelebrated = !!tid && hasCelebrated(tid);
+    const freshP: Promise<boolean> = tid && !alreadyCelebrated
+      ? claimFirstDiscovery(tid).catch(() => false)
       : Promise.resolve(false);
     // As soon as we know it's a fresh discovery, show the anticipation banner.
     freshP.then((fresh) => {
@@ -565,6 +584,10 @@ const FALLBACK_ACCENT: [string, string, string] = ["#1A5CFF", "#1247E6", "#0E37C
 // Only show the intro "…" indicator when the first line is at least this far in
 // — short gaps aren't worth a placeholder.
 const INTRO_MIN_GAP_MS = 1500;
+
+// Blur radius applied to non-active (past/future) lyric lines so the current
+// line stands out crisply. 0 = no blur; higher = blurrier. Tweak to taste.
+const IDLE_BLUR_RADIUS = 4;
 
 // Discovery banner copy.
 const PLAYER_FIRST_TEXT = "Hey you're the first person to play this song on here, congratulations 😄";

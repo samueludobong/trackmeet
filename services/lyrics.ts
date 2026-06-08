@@ -180,34 +180,30 @@ export async function claimFirstDiscovery(trackId: string): Promise<boolean> {
 // played here. Belt-and-suspenders so the confetti can NEVER replay on this
 // device, even if the DB claim misbehaves or the migration isn't applied yet.
 const CELEBRATED_FILE = FileSystem.documentDirectory + "lyrics_celebrated.json";
-let _celebrated: Set<string> | null = null;
-
-async function loadCelebrated(): Promise<Set<string>> {
-  if (_celebrated) return _celebrated;
+// Single in-memory set (never reassigned), hydrated once from disk at startup.
+// Reads/writes are synchronous so there's no race between hasCelebrated and
+// markCelebrated — the old per-call async loader could clobber a just-added id
+// when two loads ran concurrently, replaying the confetti.
+const _celebrated = new Set<string>();
+(async () => {
   try {
     const txt = await FileSystem.readAsStringAsync(CELEBRATED_FILE);
-    _celebrated = new Set<string>(JSON.parse(txt));
+    for (const id of JSON.parse(txt) as string[]) _celebrated.add(id);
   } catch {
-    _celebrated = new Set<string>();
+    // no file yet — fine
   }
-  return _celebrated;
-}
+})();
 
 /** Has this device already played the discovery animation for this track? */
-export async function hasCelebrated(trackId: string): Promise<boolean> {
-  return (await loadCelebrated()).has(trackId);
+export function hasCelebrated(trackId: string): boolean {
+  return _celebrated.has(trackId);
 }
 
 /** Persist that this device has played the discovery animation for this track. */
-export async function markCelebrated(trackId: string): Promise<void> {
-  const set = await loadCelebrated();
-  if (set.has(trackId)) return;
-  set.add(trackId);
-  try {
-    await FileSystem.writeAsStringAsync(CELEBRATED_FILE, JSON.stringify([...set]));
-  } catch {
-    // non-fatal — worst case the animation could replay after an app restart
-  }
+export function markCelebrated(trackId: string): void {
+  if (_celebrated.has(trackId)) return;
+  _celebrated.add(trackId);
+  FileSystem.writeAsStringAsync(CELEBRATED_FILE, JSON.stringify([..._celebrated])).catch(() => {});
 }
 
 /** Synchronous peek into the in-memory cache. Returns null when not warmed yet. */

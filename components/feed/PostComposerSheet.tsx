@@ -1,8 +1,10 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { FontAwesome5 } from "@expo/vector-icons";
+import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { csStyles } from "../../lib/feed/localStyles";
+import { styles as feedStyles } from "../../lib/feed/styles";
+import { NowPlayingBanner } from "./NowPlayingBanner";
 import { type ComposerUser } from "../../types/composer";
 import { type Post } from "../../app/data/mock";
 
@@ -22,7 +24,7 @@ export function PostComposerSheet({
   initialText?: string;
 }) {
   const {
-    text, setText, images, setImages, pollMode, setPollMode, pollQuestion, setPollQuestion, pollOptions, setPollOptions, posting, setPosting, mediaPickerOpen, setMediaPickerOpen, slideAnim, backdropAnim, pickFromCamera, pickFromLibrary, pickVideo, removeImage, canPost, handlePost, initials
+    text, setText, images, setImages, pollMode, setPollMode, pollQuestion, setPollQuestion, pollOptions, setPollOptions, posting, setPosting, mediaPickerOpen, setMediaPickerOpen, musicMode, setMusicMode, attachedTrack, setAttachedTrack, slideAnim, backdropAnim, pickFromCamera, pickFromLibrary, pickVideo, removeImage, canPost, handlePost, initials
   } = usePostComposer({ visible, onClose, currentUser, onPosted, initialText });
 
   return (
@@ -70,7 +72,31 @@ export function PostComposerSheet({
                 multiline
                 autoFocus
               />
-            </View>            {images.length > 0 && (
+            </View>            {musicMode && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+                <NowPlayingBanner onAttach={(t) => setAttachedTrack((prev) => (prev?.id === t.id ? null : t))} />
+                {attachedTrack && (
+                  <View style={feedStyles.attachedTrackChip}>
+                    {attachedTrack.albumArt ? (
+                      <Image source={{ uri: attachedTrack.albumArt }} style={feedStyles.attachedTrackArt} />
+                    ) : (
+                      <View style={[feedStyles.attachedTrackArt, { backgroundColor: "#1DB95422", alignItems: "center", justifyContent: "center" }]}>
+                        <Ionicons name="musical-note" size={14} color="#1DB954" />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={feedStyles.attachedTrackName} numberOfLines={1}>{attachedTrack.name}</Text>
+                      <Text style={feedStyles.attachedTrackArtist} numberOfLines={1}>{attachedTrack.artist}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setAttachedTrack(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.35)" />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {images.length > 0 && (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -156,7 +182,7 @@ export function PostComposerSheet({
           )}          <View style={csStyles.toolbar}>
             <TouchableOpacity
               style={[csStyles.toolBtn, (images.length > 0 || mediaPickerOpen) && csStyles.toolBtnActive]}
-              onPress={() => { setMediaPickerOpen((o) => !o); setPollMode(false); }}
+              onPress={() => { setMediaPickerOpen((o) => !o); setPollMode(false); setMusicMode(false); setAttachedTrack(null); }}
               activeOpacity={0.7}
             >
               <FontAwesome5
@@ -167,11 +193,19 @@ export function PostComposerSheet({
             </TouchableOpacity>
             <TouchableOpacity
               style={[csStyles.toolBtn, pollMode && csStyles.toolBtnActive]}
-              onPress={() => { setPollMode((p) => !p); setImages([]); }}
+              onPress={() => { setPollMode((p) => !p); setImages([]); setMusicMode(false); setAttachedTrack(null); }}
               disabled={images.length > 0}
               activeOpacity={0.7}
             >
               <FontAwesome5 name="poll-h" size={19} color={pollMode ? "#AB00FF" : "rgba(255,255,255,0.45)"} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[csStyles.toolBtn, (musicMode || attachedTrack) && csStyles.toolBtnActive]}
+              onPress={() => { setMusicMode((m) => !m); setImages([]); setPollMode(false); }}
+              disabled={images.length > 0 || pollMode}
+              activeOpacity={0.7}
+            >
+              <FontAwesome5 name="music" size={18} color={(musicMode || attachedTrack) ? "#AB00FF" : "rgba(255,255,255,0.45)"} />
             </TouchableOpacity>
             <View style={{ flex: 1 }} />
             <View style={csStyles.audienceChip}>
