@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable, TextInput,
-  Platform, Image, KeyboardAvoidingView, ActivityIndicator, Alert, Switch,
+  Platform, Image, KeyboardAvoidingView, ActivityIndicator, Alert, Switch, Keyboard,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
@@ -111,7 +111,7 @@ export function CreateCommunityDialog({
     <Modal transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <Pressable style={cpStyles.dialogOverlay} onPress={onClose}>
-          <Pressable onPress={(e) => e.stopPropagation()}>
+          <Pressable onPress={(e) => { e.stopPropagation(); Keyboard.dismiss(); }}>
             <ScrollView style={cpStyles.dialogSheet} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={cpStyles.dialogHandle} />
               <Text style={cpStyles.dialogTitle}>Create Community</Text>

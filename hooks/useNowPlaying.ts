@@ -39,6 +39,12 @@ export function useNowPlaying() {
   const baseProgress    = useRef<number>(0)
   const lastBroadcastId = useRef<string | null>(null)  // track id last written to DB
   const broadcastingRef = useRef(false)                // sync ref so poll() closure reads current value
+  // Bumped on resetSpotify so any in-flight poll that completes AFTER a
+  // disconnect/reconnect knows to throw away its result. Without this, a poll
+  // that grabbed a valid token a moment before disconnectSpotify() ran would
+  // race back and call setTrack(result), reviving the old now-playing card
+  // until the next render cycle.
+  const resetGen        = useRef(0)
   // Baseline of the last position we broadcast, so we can detect seeks (actual
   // position diverging from where continuous playback would have reached).
   const lastBroadcastProgress = useRef(0)
@@ -140,13 +146,21 @@ export function useNowPlaying() {
   }
 
   const poll = async () => {
+    // Snapshot the reset generation so we can abort if a disconnect happens
+    // during any of the awaits below.
+    const startGen = resetGen.current
+
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setLoading(false); return }
+    if (!user || resetGen.current !== startGen) { setLoading(false); return }
 
     const token = await getValidToken(user.id)
-    if (!token) { setLoading(false); return }
+    if (!token || resetGen.current !== startGen) { setLoading(false); return }
 
     const raw = await getCurrentlyPlaying(token)
+
+    // Disconnect happened mid-flight — discard whatever we fetched and let the
+    // already-applied resetSpotify state stand.
+    if (resetGen.current !== startGen) { setLoading(false); return }
 
     // 401 — token revoked/expired even though DB says it's valid
     if (raw && 'unauthorized' in raw) {
@@ -244,7 +258,10 @@ export function useNowPlaying() {
 
   // Call after a Spotify connect/disconnect to wipe stale cache and reset all
   // track state so every screen that reads the context reflects the change instantly.
+  // Also bumps the generation counter so any in-flight poll discards its result
+  // instead of writing it back over the cleared state.
   const resetSpotify = () => {
+    resetGen.current       += 1
     tokenCache.current      = null
     lastBroadcastId.current = null
     fetchedAt.current       = Date.now()

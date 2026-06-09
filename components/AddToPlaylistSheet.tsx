@@ -1,4 +1,4 @@
-import { View, Text, Modal, Pressable, TouchableOpacity, TextInput, Image, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, Modal, Pressable, TouchableOpacity, TextInput, Image, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform, Keyboard } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { type PlaylistTrackInput } from "../services/playlists";
 
@@ -19,8 +19,19 @@ type Props = {
 
 export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, onSavedChange }: Props) {
   const {
-    items, bulk, single, playlists, setPlaylists, memberOf, setMemberOf, addedTo, setAddedTo, loading, setLoading, busy, setBusy, creating, setCreating, newName, setNewName, key, emit, toggle, createAndAdd
+    items, bulk, single,
+    busy, creating, newName, setNewName,
+    toggle, createAndAdd,
+    mode, setMode,
+    spotifyToken,
+    activeLoading, activePlaylists, activeMemberOf, activeAddedTo,
+    canCreate, createDisabledReason,
+    error, dismissError,
+    reconnect, reconnecting,
   } = useAddToPlaylist({ visible, onClose, track, tracks, userId, onSavedChange });
+
+  const isSpotify = mode === "spotify";
+  const accentColor = isSpotify ? "#1DB954" : "#FF6C1A";
 
   return (
     <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
@@ -29,7 +40,7 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <Pressable style={s.overlay} onPress={onClose}>
-          <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
+          <Pressable style={s.sheet} onPress={(e) => { e.stopPropagation(); Keyboard.dismiss(); }}>
             <View style={s.handle} />
             <Text style={s.title}>{bulk ? `Add ${items.length} songs` : "Add to Playlist"}</Text>
 
@@ -45,42 +56,108 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
                   <Text style={s.trackArtist} numberOfLines={1}>{single.artist}</Text>
                 </View>
               </View>
-            )}            <View style={s.newRow}>
-              <View style={s.newIcon}>
-                <Ionicons name="add" size={20} color="#FF6C1A" />
-              </View>
-              <TextInput
-                style={s.newInput}
-                placeholder="New playlist…"
-                placeholderTextColor="rgba(255,255,255,0.3)"
-                value={newName}
-                onChangeText={setNewName}
-                returnKeyType="done"
-                onSubmitEditing={createAndAdd}
-              />
-              {newName.trim().length > 0 && (
-                <TouchableOpacity style={s.createBtn} onPress={createAndAdd} disabled={creating}>
-                  {creating
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={s.createBtnText}>Create</Text>}
-                </TouchableOpacity>
-              )}
+            )}
+
+            {/* ── Mode selector ── */}
+            <View style={s.modeRow}>
+              <TouchableOpacity
+                style={[s.modeBtn, !isSpotify && s.modeBtnActive]}
+                activeOpacity={0.85}
+                onPress={() => setMode("curated")}
+              >
+                <Ionicons name="albums-outline" size={14} color={!isSpotify ? "#0D0D0D" : "rgba(255,255,255,0.7)"} />
+                <Text style={[s.modeBtnText, !isSpotify && s.modeBtnTextActive]}>TrackMeet</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.modeBtn, isSpotify && s.modeBtnActiveSpotify]}
+                activeOpacity={0.85}
+                onPress={() => setMode("spotify")}
+              >
+                <FontAwesome5 name="spotify" size={13} color={isSpotify ? "#0D0D0D" : "rgba(255,255,255,0.7)"} />
+                <Text style={[s.modeBtnText, isSpotify && s.modeBtnTextActive]}>Spotify</Text>
+              </TouchableOpacity>
             </View>
 
-            {loading ? (
+            {/* ── Create new playlist row (always at top, in either mode) ── */}
+            {canCreate ? (
+              <View style={s.newRow}>
+                <View style={[s.newIcon, { backgroundColor: isSpotify ? "rgba(29,185,84,0.14)" : "rgba(255,108,26,0.12)" }]}>
+                  <Ionicons name="add" size={20} color={accentColor} />
+                </View>
+                <TextInput
+                  style={s.newInput}
+                  placeholder={isSpotify ? "New Spotify playlist…" : "New playlist…"}
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={newName}
+                  onChangeText={setNewName}
+                  returnKeyType="done"
+                  onSubmitEditing={createAndAdd}
+                />
+                {newName.trim().length > 0 && (
+                  <TouchableOpacity style={[s.createBtn, { backgroundColor: accentColor }]} onPress={createAndAdd} disabled={creating}>
+                    {creating
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Text style={s.createBtnText}>Create</Text>}
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <View style={[s.newRow, { opacity: 0.6 }]}>
+                <View style={[s.newIcon, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
+                  <Ionicons name="lock-closed-outline" size={18} color="rgba(255,255,255,0.4)" />
+                </View>
+                <Text style={[s.trackArtist, { flex: 1 }]} numberOfLines={2}>{createDisabledReason}</Text>
+              </View>
+            )}
+
+            {error && (
+              <View style={s.errBox}>
+                <Ionicons name="alert-circle" size={16} color="#FF6C1A" />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.errText} numberOfLines={4}>{error.message}</Text>
+                  {error.needsReconnect && (
+                    <TouchableOpacity
+                      onPress={reconnect}
+                      disabled={reconnecting}
+                      activeOpacity={0.85}
+                      style={s.errReconnectBtn}
+                    >
+                      {reconnecting ? (
+                        <ActivityIndicator size="small" color="#0D0D0D" />
+                      ) : (
+                        <>
+                          <FontAwesome5 name="spotify" size={12} color="#0D0D0D" />
+                          <Text style={s.errReconnectTxt}>Reconnect Spotify</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <TouchableOpacity onPress={dismissError} hitSlop={10}>
+                  <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {activeLoading ? (
               <View style={s.loadingWrap}>
                 <ActivityIndicator color="rgba(255,255,255,0.4)" />
               </View>
-            ) : playlists.length === 0 ? (
-              <Text style={s.empty}>No playlists yet — create one above.</Text>
+            ) : isSpotify && !spotifyToken ? (
+              <Text style={s.empty}>Connect Spotify in Settings → Connected Apps to save here.</Text>
+            ) : activePlaylists.length === 0 ? (
+              <Text style={s.empty}>
+                {isSpotify ? "No Spotify playlists found." : "No playlists yet — create one above."}
+              </Text>
             ) : (
               <ScrollView
                 style={s.list}
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
                 showsVerticalScrollIndicator={false}
               >
-                {playlists.map(pl => {
-                  const inIt = bulk ? addedTo.has(pl.id) : memberOf.has(pl.id);
+                {activePlaylists.map(pl => {
+                  const inIt = bulk ? activeAddedTo.has(pl.id) : activeMemberOf.has(pl.id);
                   return (
                     <TouchableOpacity
                       key={pl.id}
@@ -89,11 +166,17 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
                       onPress={() => toggle(pl.id)}
                       disabled={busy === pl.id}
                     >
-                      {pl.image_url
-                        ? <Image source={{ uri: pl.image_url }} style={s.cover} />
-                        : <View style={[s.cover, s.coverFallback]}>
-                            <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
-                          </View>}
+                      {pl.isLiked ? (
+                        <View style={[s.cover, { backgroundColor: "rgba(29,185,84,0.14)", alignItems: "center", justifyContent: "center" }]}>
+                          <Ionicons name="heart" size={18} color="#1DB954" />
+                        </View>
+                      ) : pl.image_url ? (
+                        <Image source={{ uri: pl.image_url }} style={s.cover} />
+                      ) : (
+                        <View style={[s.cover, s.coverFallback]}>
+                          <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
+                        </View>
+                      )}
                       <Text style={s.rowName} numberOfLines={1}>{pl.name}</Text>
                       {busy === pl.id ? (
                         <ActivityIndicator size="small" color="rgba(255,255,255,0.5)" />
@@ -101,7 +184,7 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
                         <Ionicons
                           name={inIt ? "checkmark-circle" : "ellipse-outline"}
                           size={24}
-                          color={inIt ? "#FF6C1A" : "rgba(255,255,255,0.25)"}
+                          color={inIt ? accentColor : "rgba(255,255,255,0.25)"}
                         />
                       )}
                     </TouchableOpacity>
@@ -119,4 +202,3 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
     </Modal>
   );
 }
-

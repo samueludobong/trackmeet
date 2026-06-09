@@ -111,7 +111,8 @@ export function CommunityDetailOverlay({
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
-            keyboardShouldPersistTaps="handled">
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag">
             {liveMeet && (
               <LiveMeetCard meet={liveMeet} onJoin={() => router.push({ pathname: "/feed", params: { openMeetId: liveMeet.id } })} />
             )}

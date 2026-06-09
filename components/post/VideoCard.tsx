@@ -58,5 +58,13 @@ export function VideoCard({ post }: { post: Post }) {
 
 function InlinePreview({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => { p.muted = true; p.pause(); });
-  return <VideoView player={player} style={{ width: "100%", height: "100%" }} contentFit="cover" />;
+  return (
+    <VideoView
+      player={player}
+      style={{ width: "100%", height: "100%" }}
+      contentFit="cover"
+      nativeControls={false}
+      pointerEvents="none"
+    />
+  );
 }

@@ -114,7 +114,8 @@ export function CommunityAdminPanel({
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView showsVerticalScrollIndicator={false}
             contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40 }}
-            keyboardShouldPersistTaps="handled">
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag">
             {tab === "details" && (
               <AdminPanelDetails
                 community={community} userId={userId}

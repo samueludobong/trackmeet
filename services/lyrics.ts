@@ -143,8 +143,9 @@ async function fetchFromLrclib(opts: {
 
 // ── In-memory cache ───────────────────────────────────────────────────────────
 // Session-lifetime cache so a prefetched song renders instantly (no Supabase
-// round-trip) when the lyrics overlay opens. "none" = known to have no lyrics.
-const _mem = new Map<string, LyricsResult | "none">();
+// round-trip) when the lyrics overlay opens. Negative results are intentionally
+// NOT cached — every miss re-checks lrclib in case lyrics were uploaded later.
+const _mem = new Map<string, LyricsResult>();
 // In-flight lookups keyed by track id, so a prefetch and an overlay-open for the
 // same song share one request instead of racing.
 const _inflight = new Map<string, Promise<LyricsResult | null>>();
@@ -207,40 +208,42 @@ export function markCelebrated(trackId: string): void {
 }
 
 /** Synchronous peek into the in-memory cache. Returns null when not warmed yet. */
-export function peekLyrics(trackId: string | null | undefined): LyricsResult | "none" | null {
+export function peekLyrics(trackId: string | null | undefined): LyricsResult | null {
   if (!trackId) return null;
   return _mem.get(trackId) ?? null;
 }
 
 // ── Supabase cache ──────────────────────────────────────────────────────────
-
-// "none" = we've looked this track up before and it genuinely has no lyrics.
-// null   = not in the cache yet (caller should fetch from lrclib).
-async function readCache(trackId: string): Promise<LyricsResult | "none" | null> {
+// Positive results only. Rows previously written with not_found=true are
+// treated as a cache miss so we re-check lrclib (a song with no lyrics yesterday
+// may have had them uploaded today).
+async function readCache(trackId: string): Promise<LyricsResult | null> {
   const { data, error } = await supabase
     .from("lyrics_cache")
     .select("synced_lyrics, plain_lyrics, not_found")
     .eq("spotify_track_id", trackId)
     .maybeSingle();
   if (error || !data) return null;
-  if (data.not_found) return "none";
+  if (data.not_found) return null;   // legacy negative row — force a fresh lookup
   return toResult({ syncedLrc: data.synced_lyrics, plain: data.plain_lyrics });
 }
 
+// Only ever called with a positive result — callers must NOT pass null `raw`,
+// because negative results are intentionally not persisted.
 async function writeCache(
   trackId: string,
   trackName: string,
   artistName: string | null,
-  raw: RawLyrics | null,
+  raw: RawLyrics,
 ): Promise<void> {
   await supabase.from("lyrics_cache").upsert(
     {
       spotify_track_id: trackId,
       track_name: trackName,
       track_artist: artistName,
-      synced_lyrics: raw?.syncedLrc ?? null,
-      plain_lyrics: raw?.plain ?? null,
-      not_found: toResult(raw) === null,
+      synced_lyrics: raw.syncedLrc,
+      plain_lyrics: raw.plain,
+      not_found: false,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "spotify_track_id" },
@@ -261,10 +264,11 @@ export async function getLyricsForTrack(opts: {
   const { trackId, trackName, artistName, durationMs } = opts;
   if (!trackName) return null;
 
-  // 1) In-memory cache — instant.
+  // 1) In-memory cache — instant. Only positive results live here; misses are
+  //    intentionally not memoized so the next call re-checks lrclib.
   if (trackId) {
     const mem = _mem.get(trackId);
-    if (mem !== undefined) return mem === "none" ? null : mem;
+    if (mem !== undefined) return mem;
     // Share an in-flight lookup instead of starting a duplicate, slower request.
     const existing = _inflight.get(trackId);
     if (existing) return existing;
@@ -274,16 +278,16 @@ export async function getLyricsForTrack(opts: {
     // 2) Shared DB cache.
     if (trackId) {
       const cached = await readCache(trackId).catch(() => null);
-      if (cached === "none") { _mem.set(trackId, "none"); return null; }
       if (cached) { _mem.set(trackId, cached); return cached; }
     }
 
-    // 3) Miss → hit lrclib, then persist for everyone after us (memory + DB,
-    //    including the negative result).
+    // 3) Miss → hit lrclib. Only persist positive results; a "no lyrics found"
+    //    outcome is left uncached so the next viewer triggers a fresh lookup
+    //    (lyrics get added to lrclib over time).
     const raw = await fetchFromLrclib({ trackName, artistName, durationMs });
     const result = toResult(raw);
-    if (trackId) {
-      _mem.set(trackId, result ?? "none");
+    if (trackId && result && raw) {
+      _mem.set(trackId, result);
       writeCache(trackId, trackName, artistName ?? null, raw).catch(() => {});
     }
     return result;

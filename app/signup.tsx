@@ -9,7 +9,8 @@ import StartUpVideo  from "../assets/videos/loop.mp4";
 import { Field } from "../components/signup/SignupFields";
 import { TOTAL_STEPS, STEP_TITLES, STEP_SUBS } from "../constants/signup";
 import { styles } from "./signup.styles";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing, Dimensions, Platform, KeyboardAvoidingView, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing, Dimensions, Platform, Modal } from "react-native";
+import { KeyboardDismissView } from "../components/shared/KeyboardDismissView";
 import * as SecureStore from "expo-secure-store";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Video, ResizeMode } from "expo-av";
@@ -36,10 +37,7 @@ export default function SignupScreen() {
   } = useSignup();
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
+    <KeyboardDismissView style={styles.container}>
       <Video
         source={StartUpVideo}
         style={StyleSheet.absoluteFill}
@@ -195,7 +193,7 @@ export default function SignupScreen() {
           }}
         />
       </Modal>
-    </KeyboardAvoidingView>
+    </KeyboardDismissView>
   );
 }
 

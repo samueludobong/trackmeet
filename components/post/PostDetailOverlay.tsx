@@ -57,6 +57,7 @@ export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () =
         contentContainerStyle={styles.detailListContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         ListHeaderComponent={
           <>
             <PostCard item={post} />

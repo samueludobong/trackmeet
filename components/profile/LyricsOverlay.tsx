@@ -183,11 +183,12 @@ export function LyricsOverlay({
     let active = true;
 
     // Show the lyrics state synchronously up front so we never flash the empty
-    // ("Huhh…") state during an in-flight DB read.
+    // ("Huhh…") state during an in-flight DB read. We only cache positive
+    // results now — a miss falls through to the async fetch below.
     const peeked = tid ? peekLyrics(tid) : null;
     if (peeked) {
-      setLyrics(peeked === "none" ? null : peeked);
-      setFailed(peeked === "none");
+      setLyrics(peeked);
+      setFailed(false);
       setLoading(false);
     } else {
       setLyrics(null);

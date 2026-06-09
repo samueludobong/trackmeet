@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Switch, Keyboard } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Switch, Keyboard, TouchableWithoutFeedback } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { startMeet } from "../../services/meets";
 import { mmStyles } from "../../lib/feed/localStyles";
@@ -94,6 +94,8 @@ export function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boo
         pointerEvents="none"
       />
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />      <Animated.View style={[mmStyles.sheet, { transform: [{ translateY: slideY }] }]}>
+        <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+          <View style={{ flex: 1 }}>
         <View style={mmStyles.handle} />
 
         <View style={mmStyles.header}>
@@ -107,6 +109,7 @@ export function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boo
           style={{ flex: 1 }}
           contentContainerStyle={mmStyles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
         >
           <Text style={mmStyles.label}>Meet Name *</Text>
@@ -179,6 +182,8 @@ export function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boo
             <Text style={mmStyles.startBtnText}>{starting ? "Starting…" : "Start Meet"}</Text>
           </TouchableOpacity>          <Animated.View style={{ height: kbPad }} />
         </ScrollView>
+          </View>
+        </TouchableWithoutFeedback>
       </Animated.View>
     </Modal>
   );

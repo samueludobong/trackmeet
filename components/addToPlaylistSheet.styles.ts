@@ -81,4 +81,35 @@ export const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   doneBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
+
+  modeRow: {
+    flexDirection: "row", gap: 8, marginBottom: 10,
+  },
+  modeBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, paddingVertical: 9, borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+  },
+  modeBtnActive:        { backgroundColor: "#fff", borderColor: "#fff" },
+  modeBtnActiveSpotify: { backgroundColor: "#1DB954", borderColor: "#1DB954" },
+  modeBtnText:       { fontSize: 13, fontWeight: "700", color: "rgba(255,255,255,0.7)" },
+  modeBtnTextActive: { color: "#0D0D0D" },
+
+  errBox: {
+    flexDirection: "row", alignItems: "flex-start", gap: 8,
+    backgroundColor: "rgba(255,108,26,0.10)",
+    borderWidth: 1, borderColor: "rgba(255,108,26,0.35)",
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+    marginTop: 4, marginBottom: 6,
+  },
+  errText: { color: "#fff", fontSize: 12, lineHeight: 16 },
+  errReconnectBtn: {
+    marginTop: 8, alignSelf: "flex-start",
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "#1DB954",
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 999,
+  },
+  errReconnectTxt: { fontSize: 12, fontWeight: "800", color: "#0D0D0D" },
 });

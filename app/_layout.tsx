@@ -52,6 +52,10 @@ export default function RootLayout() {
         <Stack.Screen name="user-profile"    options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="artist-profile" options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="spotify-callback" options={{ headerShown: false, animation: 'none' }} />
+        <Stack.Screen name="story-composer"    options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="story-card-picker" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="story-text-editor" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="story-viewer"      options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />

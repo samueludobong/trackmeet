@@ -73,6 +73,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
               contentContainerStyle={chatStyles.messagesContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
               onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: true })}
               renderItem={({ item: msg, index }) => {
                 const fromMe = msg.sender_id === currentUserId;

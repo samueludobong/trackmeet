@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Platform, KeyboardAvoidingView, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Platform, KeyboardAvoidingView, RefreshControl, ActivityIndicator, Keyboard, TouchableWithoutFeedback } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { followUser, unfollowUser } from "../../services/follows";
@@ -9,7 +9,6 @@ import { useDiscoverSearch } from "../../hooks/useDiscoverSearch";
 import { TrendingCarousel } from "../feed/TrendingCarousel";
 import { ArtistResultCard } from "./ArtistResultCard";
 import { PersonResultCard } from "./PersonResultCard";
-import { StoriesRow } from "./StoriesRow";
 import { TrendingArtistsRow } from "./TrendingArtistsRow";
 import { ForYouRow } from "./ForYouRow";
 import { UpcomingMeetsList } from "./UpcomingMeetsList";
@@ -51,7 +50,6 @@ export function DiscoverView() {
   const showArtists  = activeFilter === "All" || activeFilter === "Artists";
   const showForYou   = activeFilter === "All" || activeFilter === "Artists";
   const showMeets    = activeFilter === "All" || activeFilter === "Events";
-  const showStories  = activeFilter === "Stories";
 
   const q = searchText.toLowerCase();
   const filteredArtists = TRENDING_ARTISTS.filter((a) => !q || a.name.toLowerCase().includes(q) || a.genre.toLowerCase().includes(q));
@@ -70,6 +68,7 @@ export function DiscoverView() {
         contentContainerStyle={ds.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#AB00FF" />}
       >
         <View style={ds.header}>
@@ -153,8 +152,6 @@ export function DiscoverView() {
             onFollowArtist={(id) => toggleSet(setFollowedArtists, id)}
           />
         )}
-
-        {showStories && <StoriesRow />}
 
         {showArtists && filteredArtists.length > 0 && (
           <TrendingArtistsRow artists={filteredArtists} followedArtists={followedArtists} onToggleFollow={(id) => toggleSet(setFollowedArtists, id)} />

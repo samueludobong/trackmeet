@@ -20,6 +20,8 @@ const SPOTIFY_SCOPES = [
   'playlist-read-collaborative',
   'user-library-modify',    // needed for Save to Liked Songs
   'user-library-read',      // needed to check if track is already liked
+  'playlist-modify-public',  // needed to add tracks to / create public playlists
+  'playlist-modify-private', // needed to add tracks to / create private playlists
 ].join(' ')
 
 // Generate redirect URI
@@ -302,6 +304,11 @@ export const reconnectSpotify = async (userId: string): Promise<
       scope: SPOTIFY_SCOPES,
       code_challenge_method: 'S256',
       code_challenge: codeChallenge,
+      // Force the Spotify consent dialog so re-granting picks up any scopes
+      // added to SPOTIFY_SCOPES since the user last authorized. Without this
+      // Spotify silently reissues a token using the user's previously approved
+      // (smaller) scope set, and our write endpoints all fail with 403.
+      show_dialog: 'true',
     })
 
     // Same unified approach as connectSpotify — always use openAuthSessionAsync
@@ -347,6 +354,14 @@ export const reconnectSpotify = async (userId: string): Promise<
       return { error: `Token exchange failed: ${tokenRaw.slice(0, 120)}` }
     }
     if (tokens.error) return { error: tokens.error_description ?? tokens.error }
+
+    // Verify the granted scope set actually includes what we asked for. If the
+    // user hits Cancel on a permission they should have re-granted, Spotify
+    // can return success with a *narrower* scope set — and our writes will keep
+    // failing silently. Logging it makes that diagnosable.
+    if (tokens.scope) {
+      console.log('[reconnectSpotify] granted scopes:', tokens.scope)
+    }
 
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString()
 
@@ -434,6 +449,17 @@ export const getCurrentlyPlaying = async (accessToken: string) => {
 // Requires the user-library-modify scope (added in SPOTIFY_SCOPES above).
 // Returns true on success, false on failure (including missing scope).
 export const saveTrackToLiked = async (accessToken: string, trackId: string): Promise<boolean> => {
+  const res = await saveTrackToLikedDetailed(accessToken, trackId)
+  return res.ok
+}
+
+// Detailed variant of saveTrackToLiked — same shape as the playlist write helpers
+// so the AddToPlaylistSheet can show specific errors (403 = missing scope).
+export const saveTrackToLikedDetailed = async (
+  accessToken: string,
+  trackId: string,
+): Promise<SpotifyWriteResult> => {
+  console.log('[Spotify] saveTrackToLiked tok=', _tokPfx(accessToken), 'track=', trackId)
   try {
     const res = await fetch('https://api.spotify.com/v1/me/tracks', {
       method: 'PUT',
@@ -443,9 +469,13 @@ export const saveTrackToLiked = async (accessToken: string, trackId: string): Pr
       },
       body: JSON.stringify({ ids: [trackId] }),
     })
-    return res.status === 200
-  } catch {
-    return false
+    if (res.ok) return { ok: true }
+    const message = await _readSpotifyErr(res)
+    console.log('[Spotify] saveTrackToLiked failed', res.status, message)
+    return { ok: false, status: res.status, needsReconnect: res.status === 401 || res.status === 403, message }
+  } catch (e: any) {
+    console.log('[Spotify] saveTrackToLiked exception', e?.message)
+    return { ok: false, status: 0, needsReconnect: false, message: e?.message ?? 'Network error' }
   }
 }
 
@@ -456,6 +486,33 @@ export type SpotifyTrackResult = {
   albumArt: string | null
   durationMs: number
   previewUrl: string | null
+}
+
+// Top tracks for the signed-in user (short_term ≈ last 4 weeks).
+// Used as a "popular" feed when the app has nothing more global to show.
+// Requires user-top-read scope (already in SPOTIFY_SCOPES).
+export const getUserTopTracks = async (
+  accessToken: string,
+  limit = 20,
+): Promise<SpotifyTrackResult[]> => {
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/me/top/tracks?time_range=short_term&limit=${limit}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.items ?? []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      artist: item.artists?.[0]?.name ?? '',
+      albumArt: item.album?.images?.[0]?.url ?? null,
+      durationMs: item.duration_ms,
+      previewUrl: item.preview_url ?? null,
+    }))
+  } catch {
+    return []
+  }
 }
 
 export const searchSpotifyTracks = async (
@@ -752,6 +809,220 @@ export const getAlbumTracks = async (
       previewUrl: t.preview_url ?? null,
     }))
   } catch { return [] }
+}
+
+// ─── Spotify playlist writes ──────────────────────────────────────────────────
+// Require playlist-modify-public + playlist-modify-private scopes (added above).
+// Older user tokens issued before the scopes were added will return 403 / 401
+// here; callers detect that via the `needsReconnect` discriminator and prompt.
+
+// Structured result for write operations so the UI can distinguish "succeeded",
+// "missing scope (must reconnect)", and other failures.
+export type SpotifyWriteResult =
+  | { ok: true }
+  | { ok: false; status: number; needsReconnect: boolean; message?: string }
+
+// Pull a useful message out of a Spotify error response without crashing if
+// the body isn't JSON. (Spotify *usually* returns { error: { message, status } }
+// but a 503 / network blip might be plain text or empty.)
+async function _readSpotifyErr(res: Response): Promise<string | undefined> {
+  try {
+    const t = await res.text()
+    // Log the raw body so we can see exactly what Spotify says — "Insufficient
+    // client scope" means missing playlist-modify scope, "Forbidden" with no
+    // body usually means the request never reached the Spotify API (bad/empty
+    // token), and "You cannot modify this playlist" means we hit a playlist we
+    // don't own.
+    if (t) console.log('[Spotify] error body:', t.slice(0, 400))
+    if (!t) return undefined
+    try {
+      const j = JSON.parse(t)
+      return j?.error?.message ?? j?.message ?? t.slice(0, 200)
+    } catch {
+      return t.slice(0, 200)
+    }
+  } catch { return undefined }
+}
+
+// Short token prefix for logging — never log the full token.
+const _tokPfx = (t: string | null | undefined) =>
+  !t ? '<null>' : t.length < 12 ? t : t.slice(0, 8) + '…'
+
+function _writeResultFrom(res: Response, message?: string): SpotifyWriteResult {
+  if (res.ok) return { ok: true }
+  // 401 = revoked / expired, 403 = wrong scope. Both need reconnect.
+  return { ok: false, status: res.status, needsReconnect: res.status === 401 || res.status === 403, message }
+}
+
+// Add a track URI to a Spotify playlist.
+export const addTrackToSpotifyPlaylist = async (
+  accessToken: string,
+  playlistId: string,
+  trackId: string,
+): Promise<SpotifyWriteResult> => {
+  console.log('[Spotify] addTrackToSpotifyPlaylist tok=', _tokPfx(accessToken), 'pl=', playlistId, 'track=', trackId)
+  try {
+    const res = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ uris: [`spotify:track:${trackId}`] }),
+    })
+    if (res.ok) return { ok: true }
+    const message = await _readSpotifyErr(res)
+    console.log('[Spotify] addTrackToSpotifyPlaylist failed', res.status, message)
+    return _writeResultFrom(res, message)
+  } catch (e: any) {
+    console.log('[Spotify] addTrackToSpotifyPlaylist exception', e?.message)
+    return { ok: false, status: 0, needsReconnect: false, message: e?.message ?? 'Network error' }
+  }
+}
+
+// Remove every occurrence of a track URI from a Spotify playlist.
+export const removeTrackFromSpotifyPlaylist = async (
+  accessToken: string,
+  playlistId: string,
+  trackId: string,
+): Promise<SpotifyWriteResult> => {
+  try {
+    const res = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ tracks: [{ uri: `spotify:track:${trackId}` }] }),
+    })
+    if (res.ok) return { ok: true }
+    const message = await _readSpotifyErr(res)
+    console.log('[Spotify] removeTrackFromSpotifyPlaylist failed', res.status, message)
+    return _writeResultFrom(res, message)
+  } catch (e: any) {
+    console.log('[Spotify] removeTrackFromSpotifyPlaylist exception', e?.message)
+    return { ok: false, status: 0, needsReconnect: false, message: e?.message ?? 'Network error' }
+  }
+}
+
+// Remove a track from the user's Liked Songs.
+export const removeTrackFromLiked = async (
+  accessToken: string,
+  trackId: string,
+): Promise<SpotifyWriteResult> => {
+  try {
+    const res = await fetch(`https://api.spotify.com/v1/me/tracks?ids=${trackId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (res.ok) return { ok: true }
+    const message = await _readSpotifyErr(res)
+    console.log('[Spotify] removeTrackFromLiked failed', res.status, message)
+    return _writeResultFrom(res, message)
+  } catch (e: any) {
+    console.log('[Spotify] removeTrackFromLiked exception', e?.message)
+    return { ok: false, status: 0, needsReconnect: false, message: e?.message ?? 'Network error' }
+  }
+}
+
+// Create a new (private by default) Spotify playlist owned by the signed-in user.
+// Returns the playlist on success, or a structured error so the UI can prompt
+// for a reconnect when the token is missing playlist-modify scopes.
+export type CreateSpotifyPlaylistResult =
+  | { ok: true; playlist: SpotifyPlaylist }
+  | { ok: false; status: number; needsReconnect: boolean; message?: string }
+
+export const createSpotifyPlaylist = async (
+  accessToken: string,
+  name: string,
+  options: { isPublic?: boolean; description?: string } = {},
+): Promise<CreateSpotifyPlaylistResult> => {
+  console.log('[Spotify] createSpotifyPlaylist tok=', _tokPfx(accessToken), 'name=', name)
+  try {
+    // Need the user's id for the create endpoint
+    const meRes = await fetch('https://api.spotify.com/v1/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!meRes.ok) {
+      const message = await _readSpotifyErr(meRes)
+      console.log('[Spotify] createSpotifyPlaylist /me failed', meRes.status, message)
+      return { ok: false, status: meRes.status, needsReconnect: meRes.status === 401 || meRes.status === 403, message }
+    }
+    const me = await meRes.json()
+    const userId = me?.id
+    console.log('[Spotify] createSpotifyPlaylist /me ok, userId=', userId)
+    if (!userId) return { ok: false, status: 0, needsReconnect: false, message: 'Could not read Spotify user id' }
+
+    const res = await fetch(`https://api.spotify.com/v1/users/${encodeURIComponent(userId)}/playlists`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: name.trim(),
+        public: options.isPublic ?? false,
+        description: options.description ?? '',
+      }),
+    })
+    if (!res.ok) {
+      const message = await _readSpotifyErr(res)
+      console.log('[Spotify] createSpotifyPlaylist create failed', res.status, message)
+      return { ok: false, status: res.status, needsReconnect: res.status === 401 || res.status === 403, message }
+    }
+    const data = await res.json()
+    return {
+      ok: true,
+      playlist: {
+        id: data.id,
+        name: data.name,
+        imageUrl: data.images?.[0]?.url ?? null,
+        trackCount: data.tracks?.total ?? 0,
+      },
+    }
+  } catch (e: any) {
+    console.log('[Spotify] createSpotifyPlaylist exception', e?.message)
+    return { ok: false, status: 0, needsReconnect: false, message: e?.message ?? 'Network error' }
+  }
+}
+
+// Bulk membership check for one track across many Spotify playlists. Each playlist
+// requires a separate API call (Spotify has no batch endpoint for this), so we
+// cap concurrency to keep the request burst friendly to rate limits.
+export const playlistsContainingTrack = async (
+  accessToken: string,
+  playlistIds: string[],
+  trackId: string,
+): Promise<Set<string>> => {
+  const out = new Set<string>()
+  const limit = 6
+  let i = 0
+  const worker = async () => {
+    while (i < playlistIds.length) {
+      const idx = i++
+      const id = playlistIds[idx]
+      try {
+        // Smallest possible response — just the items we care about.
+        const res = await fetch(
+          `https://api.spotify.com/v1/playlists/${id}/tracks?fields=items(track(id)),next&limit=100`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        )
+        if (!res.ok) continue
+        let data = await res.json()
+        let found = false
+        while (data) {
+          if ((data.items ?? []).some((it: any) => it?.track?.id === trackId)) { found = true; break }
+          if (!data.next) break
+          const nextRes = await fetch(data.next, { headers: { Authorization: `Bearer ${accessToken}` } })
+          if (!nextRes.ok) break
+          data = await nextRes.json()
+        }
+        if (found) out.add(id)
+      } catch { /* ignore single-playlist failure */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, playlistIds.length) }, worker))
+  return out
 }
 
 // Check if a track is already in the user's Liked Songs.

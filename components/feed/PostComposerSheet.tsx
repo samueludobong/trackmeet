@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator, Keyboard, TouchableWithoutFeedback } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { csStyles } from "../../lib/feed/localStyles";
@@ -34,7 +34,10 @@ export function PostComposerSheet({
       </Animated.View>
 
       <Animated.View style={[csStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>          <View style={csStyles.header}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+          <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+            <View style={{ flex: 1 }}>
+          <View style={csStyles.header}>
             <TouchableOpacity onPress={onClose} hitSlop={12}>
               <Text style={csStyles.cancelBtn}>Cancel</Text>
             </TouchableOpacity>
@@ -53,6 +56,7 @@ export function PostComposerSheet({
           <ScrollView
             style={{ flex: 1 }}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: 20 }}
           >            <View style={csStyles.composeRow}>
@@ -213,6 +217,8 @@ export function PostComposerSheet({
               <Text style={csStyles.audienceText}>Public</Text>
             </View>
           </View>
+            </View>
+          </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
       </Animated.View>
     </Modal>

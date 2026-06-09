@@ -1,7 +1,7 @@
 import React from "react";
 import { EditProfilePinnedSong } from "../../components/profile/EditProfilePinnedSong";
 import { EditProfileSocialLinks } from "../../components/profile/EditProfileSocialLinks";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator, Keyboard, TouchableWithoutFeedback } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -33,6 +33,8 @@ export function EditProfileOverlay({ visible, onClose, initialData, onSaved, acc
         </Animated.View>
         <Animated.View style={[epOverlayStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+            <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+              <View style={{ flex: 1 }}>
 
             <View style={epOverlayStyles.sheetHeader}>
               <TouchableOpacity onPress={onClose} hitSlop={12}>
@@ -49,6 +51,7 @@ export function EditProfileOverlay({ visible, onClose, initialData, onSaved, acc
             <ScrollView
               style={{ flex: 1 }}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 40 }}
             >              <View style={epOverlayStyles.section}>
@@ -152,6 +155,8 @@ export function EditProfileOverlay({ visible, onClose, initialData, onSaved, acc
                 <EditProfilePinnedSong form={form} setForm={setForm} onOpenPicker={() => setSongSearchOpen(true)} />
                 <EditProfileSocialLinks form={form} setSocialLink={setSocialLink} newLink={newLink} setNewLink={setNewLink} addLink={addLink} removeLink={removeLink} />
             </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
           </KeyboardAvoidingView>
 
           <BannerColorOverlay

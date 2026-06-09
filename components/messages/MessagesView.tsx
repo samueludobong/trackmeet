@@ -1,18 +1,21 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import { feedCache } from "../../lib/feed/caches";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Pressable, PanResponder, RefreshControl } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Pressable, PanResponder, RefreshControl, Image } from "react-native";
+import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { getConversations, type ConversationInfo } from "../../services/messages";
+import { getFollowingNowListening, type NowListeningUser } from "../../services/follows";
 import { ds, msgStyles } from "../../lib/feed/localStyles";
+import { styles as feedStyles } from "../../lib/feed/styles";
 import { MESSAGES_TABS } from "../../constants/messages";
 import { MSG_HEADER_H } from "../../constants/feedLayout";
 import { NAVBAR_H, BOTTOM_INSET } from "../../lib/feed/dimensions";
 import { type MessagesTab } from "../../types/messages";
-import { NowPlayingBubble } from "../../components/feed/NowPlayingBubble";
 import { DirectMessagesList } from "../../components/messages/DirectMessagesList";
 import { GroupChatsList } from "../../components/messages/GroupChatsList";
 import { CommunityList } from "../../components/messages/CommunityList";
-import { NOW_PLAYING_STORIES, MESSAGES_UNREAD } from "../../app/data/mock";
+import { SongPreviewSheet } from "../../components/SongPreviewSheet";
+import { useViewer } from "../../hooks/useViewer";
+import { MESSAGES_UNREAD } from "../../app/data/mock";
 
 export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationInfo) => void }) {
   const [activeTab, setActiveTab] = useState<MessagesTab>("Messages");
@@ -25,6 +28,19 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
   const [convsLoading,  setConvsLoading]  = useState(!feedCache.conversations);
   const [convsRefreshing, setConvsRefreshing] = useState(false);
 
+  // Now-listening: viewer + followed users currently broadcasting
+  const [listening, setListening] = useState<NowListeningUser[]>([]);
+  const [previewSong, setPreviewSong] = useState<{ id: string; name: string; artist: string; albumArt: string | null } | null>(null);
+  const { currentUserId, spotifyToken } = useViewer();
+
+  const refreshListening = useCallback(async () => {
+    try {
+      setListening(await getFollowingNowListening());
+    } catch {
+      setListening([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (feedCache.conversations) return;
     getConversations().then(c => {
@@ -34,13 +50,32 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
     });
   }, []);
 
+  useEffect(() => { refreshListening(); }, [refreshListening]);
+
+  // Refresh broadcasts every 20s so the strip stays roughly live without
+  // hammering the DB. A pull-to-refresh on Messages also refreshes it.
+  useEffect(() => {
+    const id = setInterval(refreshListening, 20_000);
+    return () => clearInterval(id);
+  }, [refreshListening]);
+
   const refreshConversations = async () => {
     setConvsRefreshing(true);
     feedCache.conversations = null;
-    const c = await getConversations();
+    const [c] = await Promise.all([getConversations(), refreshListening()]);
     feedCache.conversations = c;
     setConversations(c);
     setConvsRefreshing(false);
+  };
+
+  const openPreview = (u: NowListeningUser) => {
+    if (!u.song_id || !u.song_name) return;
+    setPreviewSong({
+      id: u.song_id,
+      name: u.song_name,
+      artist: u.song_artist ?? "",
+      albumArt: u.song_album_art,
+    });
   };
 
   const openDropdown = () => {
@@ -94,15 +129,21 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
       {/* ── Now Playing stories strip ── */}
       <View style={msgStyles.nowPlayingSection}>
         <Text style={msgStyles.nowPlayingLabel}>Now Listening</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={msgStyles.nowPlayingRow}
-        >
-          {NOW_PLAYING_STORIES.map((s) => (
-            <NowPlayingBubble key={s.id} item={s} />
-          ))}
-        </ScrollView>
+        {listening.length === 0 ? (
+          <Text style={{ paddingHorizontal: 16, paddingBottom: 12, color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
+            Nobody you follow is broadcasting right now.
+          </Text>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={msgStyles.nowPlayingRow}
+          >
+            {listening.map((u) => (
+              <NowListeningBubble key={u.id} user={u} onPress={() => openPreview(u)} />
+            ))}
+          </ScrollView>
+        )}
       </View>
 
       {/* Backdrop to close dropdown */}
@@ -172,7 +213,42 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
         {activeTab === "Group Chats" && <GroupChatsList />}
         {activeTab === "Community"   && <CommunityList />}
       </ScrollView>
+
+      <SongPreviewSheet
+        visible={!!previewSong}
+        onClose={() => setPreviewSong(null)}
+        song={previewSong}
+        accessToken={spotifyToken}
+        userId={currentUserId}
+      />
     </View>
+  );
+}
+
+// ─── Now-listening bubble ────────────────────────────────────────────────────
+function NowListeningBubble({ user, onPress }: { user: NowListeningUser; onPress: () => void }) {
+  const initial = (user.display_name || user.username || "?").trim().slice(0, 1).toUpperCase();
+  return (
+    <TouchableOpacity style={feedStyles.nowPlayingItem} activeOpacity={0.8} onPress={onPress}>
+      <View style={[feedStyles.storyRing, { borderColor: user.isMe ? "#CAFF00" : "#AB00FF" }]}>
+        {user.song_album_art ? (
+          <Image source={{ uri: user.song_album_art }} style={feedStyles.storyAvatar} />
+        ) : user.avatar_url ? (
+          <Image source={{ uri: user.avatar_url }} style={feedStyles.storyAvatar} />
+        ) : (
+          <View style={[feedStyles.storyAvatar, { backgroundColor: "rgba(171,0,255,0.18)", alignItems: "center", justifyContent: "center" }]}>
+            <Text style={[feedStyles.storyInitials, { color: "#AB00FF" }]}>{initial}</Text>
+          </View>
+        )}
+        <View style={[feedStyles.nowPlayingBadge, { backgroundColor: user.isMe ? "#CAFF00" : "#AB00FF" }]}>
+          <FontAwesome5 name="music" size={8} color="#0D0D0D" />
+        </View>
+      </View>
+      <Text style={feedStyles.storyName} numberOfLines={1}>
+        {user.isMe ? "You" : (user.display_name || user.username || "anon")}
+      </Text>
+      <Text style={feedStyles.storyArtistSub} numberOfLines={1}>{user.song_name}</Text>
+    </TouchableOpacity>
   );
 }
 

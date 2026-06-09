@@ -53,6 +53,7 @@ export type Post = {
   initials: string;
   avatarColor: string;
   avatarUrl?: string | null;   // real avatar from DB
+  isVerified?: boolean;
   bio: string | null;
   time: string;
   text?: string;
@@ -176,17 +177,6 @@ export const MY_NOW_PLAYING = {
 
 // ─── Feed data ────────────────────────────────────────────────────────────────
 
-export const STORIES = [
-  { id: "1", name: "maya_v", color: "#AB00FF", initials: "M" },
-  { id: "2", name: "jaykay", color: "#FF6B35", initials: "J" },
-  { id: "3", name: "tolu",   color: "#CAFF00", initials: "T" },
-  { id: "4", name: "seren",  color: "#AB00FF", initials: "S" },
-  { id: "5", name: "nate_x", color: "#FF6B35", initials: "N" },
-  { id: "6", name: "ayo",    color: "#CAFF00", initials: "A" },
-  { id: "7", name: "priya",  color: "#AB00FF", initials: "P" },
-  { id: "8", name: "dan.b",  color: "#FF6B35", initials: "D" },
-];
-
 export const POSTS: Post[] = [
   {
     id: "1", user: "maya_v", handle: "@maya_v", initials: "M",
@@ -275,7 +265,7 @@ export const FAKE_PHOTO_COLORS = ["#3a1800", "#1a0030", "#001a0f", "#1a1000", "#
 
 // ─── Discover ─────────────────────────────────────────────────────────────────
 
-export const DISCOVER_FILTERS = ["All", "Artists", "Events", "Stories"];
+export const DISCOVER_FILTERS = ["All", "Artists", "Events"];
 
 export const CAROUSEL_CARD_W = SW - 48;
 export const CAROUSEL_GAP    = 12;

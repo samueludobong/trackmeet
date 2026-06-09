@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Image, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Image, ActivityIndicator, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback } from "react-native";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { type SpotifyTrackResult } from "../../lib/spotify";
 import { psStyles, epOverlayStyles } from "../../lib/feed/localStyles";
@@ -52,7 +52,10 @@ export function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, cta
       pointerEvents={visible ? "auto" : "none"}
     >
       <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.70)" }]} onPress={onClose} />
+      <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS === "ios" ? "padding" : undefined} style={StyleSheet.absoluteFill}>
       <Animated.View style={[psStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+          <View style={{ flex: 1 }}>
         <View style={epOverlayStyles.handle} />
         <View style={epOverlayStyles.sheetHeader}>
           <TouchableOpacity onPress={isSubStep ? goBack : onClose} hitSlop={12} style={psStyles.navBtn}>
@@ -182,7 +185,10 @@ export function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, cta
             ) : playlistTracks.map((item) => <TrackRow key={item.id} item={item} />)}
           </ScrollView>
         )}        {typeof step === "object" && step.type === "preview" && <PinnedSongPreview song={step.song} previewDurationMs={previewDurationMs} previewPositionMs={previewPositionMs} previewLoading={previewLoading} previewPlaying={previewPlaying} previewSaved={previewSaved} fmtMs={fmtMs} togglePreviewPlayback={togglePreviewPlayback} savePreviewToLiked={savePreviewToLiked} onPin={pin} ctaIcon={ctaIcon} ctaLabel={ctaLabel} />}
+          </View>
+        </TouchableWithoutFeedback>
       </Animated.View>
+      </KeyboardAvoidingView>
 
       <AddToPlaylistSheet
         visible={previewPickerOpen}

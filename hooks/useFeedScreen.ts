@@ -166,11 +166,18 @@ export function useFeedScreen() {
     try {
       const { uploadImageToStorage } = await import("../services/storage");
       const ext = uri.split(".").pop()?.toLowerCase() || "m4a";
+      // m4a on iOS, sometimes 3gp/webm on Android — pick a sensible audio MIME.
+      const mime =
+        ext === "m4a" || ext === "mp4" ? "audio/m4a" :
+        ext === "aac"                  ? "audio/aac" :
+        ext === "wav"                  ? "audio/wav" :
+        ext === "webm"                 ? "audio/webm" :
+                                         "audio/mpeg";
       const publicUrl = await uploadImageToStorage(
-        "post-media",
+        "post-audio",
         `${currentUser.id}/voice-${Date.now()}.${ext}`,
         uri,
-        `audio/${ext === "m4a" ? "m4a" : ext}`,
+        mime,
       );
       const newPost = await createPost({
         user_id: currentUser.id,

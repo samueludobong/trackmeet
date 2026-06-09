@@ -79,6 +79,7 @@ export function MeetMusicPanel(p: {
             contentContainerStyle={mlStyles.musicListContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             ListEmptyComponent={<Text style={mlStyles.musicEmpty}>No results for "{p.searchQuery}"</Text>}
           />
         ) : p.showTracks ? (
@@ -90,6 +91,7 @@ export function MeetMusicPanel(p: {
             contentContainerStyle={mlStyles.musicListContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             ListEmptyComponent={
               p.tracksError === 401 || p.tracksError === 403 ? (
                 <View style={{ alignItems: "center", paddingHorizontal: 24, marginTop: 48, gap: 8 }}>

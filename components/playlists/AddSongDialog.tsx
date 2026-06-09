@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { addSongToCuratedPlaylist } from "../../services/playlists";
-import { View, Text, ScrollView, TouchableOpacity, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator, Keyboard } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { searchSpotifyTracks, getValidSpotifyToken, type SpotifyTrackResult } from "../../lib/spotify";
 import { cpStyles } from "../../lib/feed/localStyles";
@@ -54,7 +54,7 @@ export function AddSongDialog({
     <Modal transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={cpStyles.dialogOverlay} onPress={onClose}>
-          <Pressable onPress={e => e.stopPropagation()}>
+          <Pressable onPress={(e) => { e.stopPropagation(); Keyboard.dismiss(); }}>
             <View style={cpStyles.dialogSheet}>
               <View style={cpStyles.dialogHandle} />
               <Text style={cpStyles.dialogTitle}>Add Song</Text>

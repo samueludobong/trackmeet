@@ -20,6 +20,7 @@ export function MeetChatList({ messages }: { messages: MeetMessage[] }) {
       contentContainerStyle={{ gap: 9, justifyContent: "flex-end", flexGrow: 1 }}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
     >
       {recent.map((m) => {
         const name = m.author?.display_name || m.author?.username || "Listener";

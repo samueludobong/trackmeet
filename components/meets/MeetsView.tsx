@@ -48,6 +48,7 @@ export function MeetsView() {
       contentContainerStyle={ms.scrollContent}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#AB00FF" />}
     >
       {/* Header */}

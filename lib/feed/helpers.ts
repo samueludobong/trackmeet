@@ -29,6 +29,7 @@ export function dbRowToPost(row: any): Post {
     initials,
     avatarColor: "#AB00FF",
     avatarUrl: author?.avatar_url ?? null,
+    isVerified: author?.is_verified ?? false,
     bio: author?.display_name ?? null,
     time,
     text: row.text ?? undefined,

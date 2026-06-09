@@ -1,9 +1,9 @@
 import React from "react";
-import { View, Text, ScrollView, FlatList, TouchableOpacity, RefreshControl } from "react-native";
+import { View, Text, FlatList, TouchableOpacity, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { styles } from "../../lib/feed/styles";
-import { NOW_PLAYING_STORIES, type Post } from "../../app/data/mock";
-import { NowPlayingBubble } from "./NowPlayingBubble";
+import { type Post } from "../../app/data/mock";
+import { FeedStoriesStrip } from "./FeedStoriesStrip";
 import { SwipeablePost } from "../post/SwipeablePost";
 
 /** The main feed: now-playing stories header + a virtualized list of posts. */
@@ -37,9 +37,7 @@ export function FeedList({
               <Ionicons name="notifications-outline" size={22} color="#fff" />
             </TouchableOpacity>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storiesContent} style={styles.storiesStrip}>
-            {NOW_PLAYING_STORIES.map((s) => <NowPlayingBubble key={s.id} item={s} />)}
-          </ScrollView>
+          <FeedStoriesStrip />
           <View style={styles.stripDivider} />
         </>
       }

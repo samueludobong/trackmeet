@@ -1,28 +1,31 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Animated, Dimensions, Image, Modal, PanResponder, ScrollView, StyleSheet,
-  Text, TextInput, TouchableOpacity, View,
+  Animated, Image, Modal, PanResponder, Pressable, ScrollView,
+  Text, TextInput, TouchableOpacity, View, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { type Post } from "../../app/data/mock";
 import { AttachedSongChip } from "./AttachedSongChip";
+import { useVideoControls } from "./useVideoControls";
+import { VideoControlBar } from "./VideoControlBar";
+import { Action } from "./MediaViewerActions";
+import { mvStyles as s, EXPANDED, SW, SH } from "./mediaViewer.styles";
 
-const { width: SW, height: SH } = Dimensions.get("window");
-const SHEET_PEEK = 90;             // visible sheet height when collapsed
-const SHEET_EXPANDED = SH * 0.62;  // expanded sheet height
+const MEDIA_GAP = 12; // breathing room between media bottom and sheet top
 
-const fmtN = (n: number) => {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`.replace(".0M", "M");
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n < 10_000 ? 1 : 0)}K`.replace(".0K", "K");
-  return String(n);
-};
+// Component heights used to size the collapsed PEEK to its actual content.
+const H_GRAB = 15;       // grabZone (paddingTop 7 + grabber 4 + paddingBottom 4)
+const H_HEAD = 48;       // headRow avatar 40 + marginBottom 8
+const H_BODY_LINE = 21;  // body lineHeight
+const H_SONG = 64;       // song chip 56 + marginTop 8
+const H_ACTIONS = 46;    // actions 36 + marginTop 10
+const H_SCRUB_BASE = 66; // scrubInline marginTop 4 + bar without safe-area pad (paddingTop 6 + track 20 + mb 4 + row 24 + 8)
 
 type Media = { type: "image" | "video"; uri: string };
 
-/** X/Twitter-style media viewer: media on a black canvas + draggable post sheet. */
+/** X/Twitter-style media viewer: media on black + draggable post sheet + bottom playback bar. */
 export function MediaViewer({
   post, media, startIndex = 0, onClose,
 }: {
@@ -34,8 +37,35 @@ export function MediaViewer({
   const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(startIndex);
   const scrollRef = useRef<ScrollView>(null);
-  const [sheetExpanded, setSheetExpanded] = useState(false);
-  const sheetY = useRef(new Animated.Value(SHEET_EXPANDED - SHEET_PEEK)).current;
+  const [expanded, setExpanded] = useState(false);
+
+  // Lifted video player — drives both the in-frame VideoView and the bottom bar.
+  const videoUri = media.find((m) => m.type === "video")?.uri ?? null;
+
+  // Size the collapsed sheet to fit its content exactly so there's no dead space below the scrub bar.
+  const hasSong = !!(post.song || post.songId);
+  const text = post.text ?? "";
+  const bodyLines = text
+    ? Math.min(2, (text.match(/\n/g)?.length ?? 0) + 1 + (text.split("\n").reduce((m, l) => Math.max(m, l.length), 0) > 35 ? 1 : 0))
+    : 0;
+  const PEEK =
+    H_GRAB +
+    H_HEAD +
+    bodyLines * H_BODY_LINE +
+    (hasSong ? H_SONG : 0) +
+    H_ACTIONS +
+    (videoUri ? H_SCRUB_BASE + insets.bottom : 8);
+  const mediaH = SH - PEEK - MEDIA_GAP;
+  const COLLAPSED_Y = EXPANDED - PEEK;
+  const sheetY = useRef(new Animated.Value(COLLAPSED_Y)).current;
+  const restY = useRef(COLLAPSED_Y);
+  const videoRef = useRef<VideoView>(null);
+  const player = useVideoPlayer(videoUri, (p) => {
+    p.loop = false;
+    p.timeUpdateEventInterval = 0.25;
+    if (videoUri) p.play();
+  });
+  const controls = useVideoControls(player);
 
   useEffect(() => {
     if (startIndex > 0) {
@@ -44,29 +74,24 @@ export function MediaViewer({
     }
   }, [startIndex]);
 
-  const animateSheet = (expanded: boolean) => {
-    setSheetExpanded(expanded);
-    Animated.spring(sheetY, {
-      toValue: expanded ? 0 : SHEET_EXPANDED - SHEET_PEEK,
-      useNativeDriver: true, bounciness: 4,
-    }).start();
+  const animateSheet = (toExpanded: boolean) => {
+    setExpanded(toExpanded);
+    restY.current = toExpanded ? 0 : COLLAPSED_Y;
+    Animated.spring(sheetY, { toValue: restY.current, useNativeDriver: true, bounciness: 3 }).start();
   };
 
   const pan = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 8,
-    onPanResponderMove: (_e, g) => {
-      const base = sheetExpanded ? 0 : SHEET_EXPANDED - SHEET_PEEK;
-      const next = Math.min(SHEET_EXPANDED - SHEET_PEEK, Math.max(0, base + g.dy));
-      sheetY.setValue(next);
-    },
-    onPanResponderRelease: (_e, g) => animateSheet(g.dy < -40 ? true : g.dy > 40 ? false : sheetExpanded),
+    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 6,
+    onPanResponderMove: (_e, g) => sheetY.setValue(Math.min(COLLAPSED_Y, Math.max(0, restY.current + g.dy))),
+    onPanResponderRelease: (_e, g) => animateSheet(g.dy < -40 ? true : g.dy > 40 ? false : restY.current === 0),
   })).current;
 
-  const cur = media[index];
   return (
     <Modal transparent visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-      <View style={s.root}>
-        <View style={[s.topBar, { paddingTop: insets.top + 8 }]}>
+      <KeyboardAvoidingView style={s.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <View style={{ flex: 1 }}>
+        {/* ── Top bar ── */}
+        <View style={[s.topBar, { paddingTop: insets.top + 6 }]}>
           <TouchableOpacity style={s.iconBtn} onPress={onClose} hitSlop={8}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
@@ -75,43 +100,73 @@ export function MediaViewer({
           </TouchableOpacity>
         </View>
 
+        {/* ── Media — sized to the area above the sheet so it never clips ── */}
         <ScrollView
           ref={scrollRef} horizontal pagingEnabled showsHorizontalScrollIndicator={false}
+          scrollEnabled={media.length > 1}
           onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / SW))}
-          style={s.pager}
+          style={[s.pager, { height: mediaH }]}
         >
           {media.map((m, i) => (
-            <View key={i} style={s.page}>
+            <View key={i} style={[s.page, { height: mediaH }]}>
               {m.type === "image" ? (
-                <Image source={{ uri: m.uri }} style={s.fullImage} resizeMode="contain" />
+                <Image source={{ uri: m.uri }} style={s.media} resizeMode="contain" />
               ) : (
-                <InlineVideo uri={m.uri} active={i === index} />
+                <Pressable style={s.media} onPress={controls.togglePlay}>
+                  <VideoView
+                    ref={videoRef}
+                    player={player}
+                    style={s.media}
+                    nativeControls={false}
+                    contentFit="contain"
+                    allowsFullscreen
+                    allowsPictureInPicture
+                  />
+                  {!controls.playing && (
+                    <View style={s.centerPlayOverlay} pointerEvents="none">
+                      <View style={s.centerPlayBtn}>
+                        <Ionicons name="play" size={30} color="#fff" />
+                      </View>
+                    </View>
+                  )}
+                </Pressable>
               )}
             </View>
           ))}
         </ScrollView>
 
         {media.length > 1 && (
-          <View style={s.pageDots}>
-            {media.map((_, i) => (
-              <View key={i} style={[s.dot, i === index && s.dotActive]} />
-            ))}
+          <View style={[s.dots, { top: mediaH - 14 }]}>
+            {media.map((_, i) => <View key={i} style={[s.dot, i === index && s.dotActive]} />)}
           </View>
         )}
 
-        <Animated.View style={[s.sheet, { transform: [{ translateY: sheetY }], paddingBottom: insets.bottom + 8 }]} {...pan.panHandlers}>
-          <View style={s.grabber} />
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+        {/* ── Draggable post sheet ── */}
+        <Animated.View style={[s.sheet, { transform: [{ translateY: sheetY }] }]}>
+          <View {...pan.panHandlers} style={s.grabZone}>
+            <View style={s.grabber} />
+          </View>
+
+          <ScrollView
+            scrollEnabled={expanded}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 8 }}
+          >
             <View style={s.headRow}>
               {post.avatarUrl ? (
                 <Image source={{ uri: post.avatarUrl }} style={s.avatar} />
               ) : (
                 <View style={[s.avatar, { backgroundColor: (post.avatarColor || "#AB00FF") + "33", alignItems: "center", justifyContent: "center" }]}>
-                  <Text style={{ color: post.avatarColor || "#AB00FF", fontWeight: "800" }}>{post.initials}</Text>
+                  <Text style={{ color: post.avatarColor || "#AB00FF", fontWeight: "800", fontSize: 16 }}>{post.initials}</Text>
                 </View>
               )}
               <View style={{ flex: 1 }}>
-                <Text style={s.author} numberOfLines={1}>{post.bio || post.user}</Text>
+                <View style={s.nameRow}>
+                  <Text style={s.author} numberOfLines={1}>{post.bio || post.user}</Text>
+                  {post.isVerified && <Ionicons name="checkmark-circle" size={15} color="#1DB954" />}
+                </View>
                 <Text style={s.handle} numberOfLines={1}>{post.handle}</Text>
               </View>
               <TouchableOpacity style={s.followBtn} activeOpacity={0.85}>
@@ -119,105 +174,48 @@ export function MediaViewer({
               </TouchableOpacity>
             </View>
 
-            {!!post.text && <Text style={s.body}>{post.text}</Text>}
+            {!!post.text && (
+              <Text style={s.body} numberOfLines={expanded ? undefined : 2}>{post.text}</Text>
+            )}
 
             {(post.song || post.songId) && (
               <AttachedSongChip songId={post.songId} songName={post.song} songArtist={post.artist} albumArt={post.albumArt} />
             )}
 
-            <Text style={s.timeMeta}>{post.time}</Text>
+            {expanded && <Text style={s.timeMeta}>{post.time}</Text>}
 
-            <View style={s.statsRow}>
-              <Stat icon="chatbubble-outline" n={post.comments} />
-              <Stat icon="repeat-outline" n={post.shares} />
-              <Stat icon="heart-outline" n={post.likes} />
-              <Stat icon="bookmark-outline" n={0} />
-              <Stat icon="share-outline" n={0} />
+            <View style={[s.actions, expanded && s.actionsFlat]}>
+              <Action icon="chatbubble-outline" n={post.comments} flat={expanded} />
+              <Action icon="repeat-outline" n={post.shares} flat={expanded} />
+              <Action icon="heart-outline" n={post.likes} flat={expanded} />
+              <Action icon="bookmark-outline" n={expanded ? Math.round(post.likes * 0.5) : 0} flat={expanded} />
+              <Action icon="share-outline" n={0} flat={expanded} />
             </View>
+
+            {/* Inline scrub bar (collapsed video posts) — flush with actions, cancels the ScrollView's horizontal padding. */}
+            {videoUri && !expanded && (
+              <View style={s.scrubInline}>
+                <VideoControlBar
+                  controls={controls}
+                  bottomInset={insets.bottom}
+                  onFullscreen={() => videoRef.current?.enterFullscreen()}
+                  onPip={() => videoRef.current?.startPictureInPicture?.()}
+                />
+              </View>
+            )}
           </ScrollView>
 
-          <View style={[s.replyBar, { paddingBottom: insets.bottom + 8 }]}>
-            {post.avatarUrl
-              ? <Image source={{ uri: post.avatarUrl }} style={s.replyAvatar} />
-              : <View style={[s.replyAvatar, { backgroundColor: "#222" }]} />}
-            <TextInput
-              style={s.replyInput} placeholder="Post your reply"
-              placeholderTextColor="rgba(255,255,255,0.4)"
-            />
-          </View>
+          {expanded && (
+            <View style={[s.replyBar, { paddingBottom: insets.bottom + 8 }]}>
+              {post.avatarUrl
+                ? <Image source={{ uri: post.avatarUrl }} style={s.replyAvatar} />
+                : <View style={[s.replyAvatar, { backgroundColor: "#222" }]} />}
+              <TextInput style={s.replyInput} placeholder="Post your reply" placeholderTextColor="rgba(255,255,255,0.45)" />
+            </View>
+          )}
         </Animated.View>
-
-        {/* Bottom scrim so collapsed sheet has readable contrast over media */}
-        {!sheetExpanded && (
-          <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.75)"]}
-            style={[s.scrim, { height: SHEET_PEEK + insets.bottom + 30 }]}
-            pointerEvents="none"
-          />
-        )}
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
-
-function Stat({ icon, n }: { icon: keyof typeof Ionicons.glyphMap; n: number }) {
-  return (
-    <View style={s.stat}>
-      <Ionicons name={icon} size={18} color="rgba(255,255,255,0.7)" />
-      {n > 0 && <Text style={s.statText}>{fmtN(n)}</Text>}
-    </View>
-  );
-}
-
-function InlineVideo({ uri, active }: { uri: string; active: boolean }) {
-  const player = useVideoPlayer(uri, (p) => { p.loop = false; if (active) p.play(); });
-  useEffect(() => { active ? player.play() : player.pause(); }, [active, player]);
-  return <VideoView player={player} style={s.fullImage} nativeControls contentFit="contain" />;
-}
-
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#000" },
-  topBar: {
-    position: "absolute", top: 0, left: 0, right: 0, zIndex: 5,
-    flexDirection: "row", justifyContent: "space-between",
-    paddingHorizontal: 12, paddingBottom: 10,
-  },
-  iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center" },
-  pager: { flex: 1 },
-  page: { width: SW, height: SH, alignItems: "center", justifyContent: "center" },
-  fullImage: { width: SW, height: SH * 0.7 },
-  pageDots: { position: "absolute", top: SH * 0.46, left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 6 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.35)" },
-  dotActive: { backgroundColor: "#fff", width: 18 },
-
-  sheet: {
-    position: "absolute", left: 0, right: 0, bottom: 0,
-    height: SHEET_EXPANDED, backgroundColor: "#000",
-    borderTopLeftRadius: 16, borderTopRightRadius: 16,
-    borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.1)",
-  },
-  grabber: { alignSelf: "center", width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.3)", marginTop: 6, marginBottom: 10 },
-  headRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#222" },
-  author: { fontSize: 15, fontWeight: "800", color: "#fff" },
-  handle: { fontSize: 13, color: "rgba(255,255,255,0.5)", marginTop: 1 },
-  followBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16, backgroundColor: "#fff" },
-  followText: { color: "#000", fontWeight: "800", fontSize: 13 },
-
-  body: { fontSize: 16, color: "#fff", lineHeight: 23, marginTop: 4, fontWeight: "500" },
-  timeMeta: { fontSize: 13, color: "rgba(255,255,255,0.45)", marginTop: 14 },
-
-  statsRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 14, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.12)" },
-  stat: { flexDirection: "row", alignItems: "center", gap: 6 },
-  statText: { color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: "700" },
-
-  replyBar: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 16, paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.1)",
-  },
-  replyAvatar: { width: 30, height: 30, borderRadius: 15 },
-  replyInput: { flex: 1, color: "#fff", fontSize: 15, paddingVertical: 8 },
-
-  scrim: { position: "absolute", left: 0, right: 0, bottom: 0 },
-});
