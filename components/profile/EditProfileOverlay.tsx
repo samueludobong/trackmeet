@@ -12,6 +12,8 @@ import { PinnedSongOverlay } from "../../components/profile/PinnedSongOverlay";
 import { BannerColorOverlay } from "../../components/profile/BannerColorOverlay";
 
 import { useEditProfileForm } from "../../hooks/useEditProfileForm";
+import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { DragGrabber } from "../common/DragGrabber";
 
 export function EditProfileOverlay({ visible, onClose, initialData, onSaved, accessToken, userId }: {
   visible: boolean;
@@ -26,12 +28,16 @@ export function EditProfileOverlay({ visible, onClose, initialData, onSaved, acc
     form, setForm, saving, setSaving, songSearchOpen, setSongSearchOpen, bannerColorOpen, setBannerColorOpen, newLink, setNewLink, avatarUploading, setAvatarUploading, pickAvatar, addLink, removeLink, setSocialLink, usernameDaysLeft, isUsernameLocked, dnWindowExpired, dnChangesUsed, dnChangesLeft, isDNLocked, dnDaysLeft, usernameLabelSuffix, dnLabelSuffix, save, initials
   } = useEditProfileForm({ visible, onClose, initialData, onSaved, accessToken, userId });
 
+  const { panHandlers: dragHandlers, stretch } = useSheetDragClose({ slideAnim, onClose, closedValue: 800 });
+  const dragBackdrop = slideAnim.interpolate({ inputRange: [0, 800], outputRange: [1, 0], extrapolate: "clamp" });
+
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
-      <Animated.View style={[StyleSheet.absoluteFill, epOverlayStyles.backdrop, { opacity: backdropAnim }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, epOverlayStyles.backdrop, { opacity: Animated.multiply(backdropAnim, dragBackdrop) }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         </Animated.View>
-        <Animated.View style={[epOverlayStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+        <Animated.View style={[epOverlayStyles.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
+          <DragGrabber panHandlers={dragHandlers} />
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
             <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
               <View style={{ flex: 1 }}>

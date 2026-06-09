@@ -4,6 +4,8 @@ import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { startMeet } from "../../services/meets";
 import { mmStyles } from "../../lib/feed/localStyles";
 import { SH } from "../../lib/feed/dimensions";
+import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { DragGrabber } from "../common/DragGrabber";
 
 export function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boolean; onClose: () => void; onStarted: (meetId: string, name: string) => void }) {
   const slideY    = useRef(new Animated.Value(SH)).current;
@@ -86,17 +88,20 @@ export function StartMeetOverlay({ visible, onClose, onStarted }: { visible: boo
     }
   };
 
+  const { panHandlers: dragHandlers, stretch } = useSheetDragClose({ slideAnim: slideY, onClose, closedValue: SH });
+  const dragBackdrop = slideY.interpolate({ inputRange: [0, SH], outputRange: [1, 0], extrapolate: "clamp" });
+
   if (!visible) return null;
 
   return (
     <Modal transparent animationType="none" visible={visible} onRequestClose={onClose}>      <Animated.View
-        style={[StyleSheet.absoluteFill, mmStyles.backdrop, { opacity: backdropO }]}
+        style={[StyleSheet.absoluteFill, mmStyles.backdrop, { opacity: Animated.multiply(backdropO, dragBackdrop) }]}
         pointerEvents="none"
       />
-      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />      <Animated.View style={[mmStyles.sheet, { transform: [{ translateY: slideY }] }]}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />      <Animated.View style={[mmStyles.sheet, { transform: [{ translateY: slideY }, { scaleY: stretch }] }]}>
+        <DragGrabber panHandlers={dragHandlers} />
         <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
           <View style={{ flex: 1 }}>
-        <View style={mmStyles.handle} />
 
         <View style={mmStyles.header}>
           <Text style={mmStyles.headerTitle}>Start a Meet</Text>

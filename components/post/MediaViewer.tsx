@@ -1,31 +1,26 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Animated, Image, Modal, PanResponder, Pressable, ScrollView,
-  Text, TextInput, TouchableOpacity, View, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback,
+  Image, Modal, PanResponder, Pressable, ScrollView,
+  Text, TouchableOpacity, View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { type Post } from "../../app/data/mock";
-import { AttachedSongChip } from "./AttachedSongChip";
 import { useVideoControls } from "./useVideoControls";
-import { VideoControlBar } from "./VideoControlBar";
-import { Action } from "./MediaViewerActions";
-import { mvStyles as s, EXPANDED, SW, SH } from "./mediaViewer.styles";
-
-const MEDIA_GAP = 12; // breathing room between media bottom and sheet top
-
-// Component heights used to size the collapsed PEEK to its actual content.
-const H_GRAB = 15;       // grabZone (paddingTop 7 + grabber 4 + paddingBottom 4)
-const H_HEAD = 48;       // headRow avatar 40 + marginBottom 8
-const H_BODY_LINE = 21;  // body lineHeight
-const H_SONG = 64;       // song chip 56 + marginTop 8
-const H_ACTIONS = 46;    // actions 36 + marginTop 10
-const H_SCRUB_BASE = 66; // scrubInline marginTop 4 + bar without safe-area pad (paddingTop 6 + track 20 + mb 4 + row 24 + 8)
+import { openSpotifyLink } from "../../lib/spotify";
+import { mvStyles as s, SW, SH } from "./mediaViewer.styles";
 
 type Media = { type: "image" | "video"; uri: string };
 
-/** X/Twitter-style media viewer: media on black + draggable post sheet + bottom playback bar. */
+const fmtN = (n: number) => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`.replace(".0M", "M");
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n < 10_000 ? 1 : 0)}K`.replace(".0K", "K");
+  return String(n);
+};
+
+/** TikTok-style immersive viewer: full-bleed media + right action rail + bottom info overlay. */
 export function MediaViewer({
   post, media, startIndex = 0, onClose,
 }: {
@@ -37,31 +32,16 @@ export function MediaViewer({
   const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(startIndex);
   const scrollRef = useRef<ScrollView>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expandedCaption, setExpandedCaption] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [following, setFollowing] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Lifted video player — drives both the in-frame VideoView and the bottom bar.
   const videoUri = media.find((m) => m.type === "video")?.uri ?? null;
-
-  // Size the collapsed sheet to fit its content exactly so there's no dead space below the scrub bar.
-  const hasSong = !!(post.song || post.songId);
-  const text = post.text ?? "";
-  const bodyLines = text
-    ? Math.min(2, (text.match(/\n/g)?.length ?? 0) + 1 + (text.split("\n").reduce((m, l) => Math.max(m, l.length), 0) > 35 ? 1 : 0))
-    : 0;
-  const PEEK =
-    H_GRAB +
-    H_HEAD +
-    bodyLines * H_BODY_LINE +
-    (hasSong ? H_SONG : 0) +
-    H_ACTIONS +
-    (videoUri ? H_SCRUB_BASE + insets.bottom : 8);
-  const mediaH = SH - PEEK - MEDIA_GAP;
-  const COLLAPSED_Y = EXPANDED - PEEK;
-  const sheetY = useRef(new Animated.Value(COLLAPSED_Y)).current;
-  const restY = useRef(COLLAPSED_Y);
   const videoRef = useRef<VideoView>(null);
   const player = useVideoPlayer(videoUri, (p) => {
-    p.loop = false;
+    p.loop = true;
     p.timeUpdateEventInterval = 0.25;
     if (videoUri) p.play();
   });
@@ -74,41 +54,41 @@ export function MediaViewer({
     }
   }, [startIndex]);
 
-  const animateSheet = (toExpanded: boolean) => {
-    setExpanded(toExpanded);
-    restY.current = toExpanded ? 0 : COLLAPSED_Y;
-    Animated.spring(sheetY, { toValue: restY.current, useNativeDriver: true, bounciness: 3 }).start();
+  // Right-swipe to dismiss, without stealing horizontal swipes that should page through multi-media.
+  const indexRef = useRef(index);
+  useEffect(() => { indexRef.current = index; }, [index]);
+  const wantsClose = (g: { dx: number; dy: number }) => {
+    const horizontal = Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6;
+    if (!horizontal || g.dx <= 0) return false;
+    if (media.length > 1 && indexRef.current > 0) return false;
+    return true;
   };
-
-  const pan = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 6,
-    onPanResponderMove: (_e, g) => sheetY.setValue(Math.min(COLLAPSED_Y, Math.max(0, restY.current + g.dy))),
-    onPanResponderRelease: (_e, g) => animateSheet(g.dy < -40 ? true : g.dy > 40 ? false : restY.current === 0),
+  const closePan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_e, g) => wantsClose(g),
+    onMoveShouldSetPanResponder:        (_e, g) => wantsClose(g),
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderRelease: (_e, g) => { if (g.dx > 80) onClose(); },
   })).current;
+
+  const progress = controls.duration > 0 ? Math.min(1, controls.current / controls.duration) : 0;
+  const captionLong = (post.text ?? "").length > 80;
+  const tagLabel = post.communityName;
 
   return (
     <Modal transparent visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-      <KeyboardAvoidingView style={s.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <View style={{ flex: 1 }}>
-        {/* ── Top bar ── */}
-        <View style={[s.topBar, { paddingTop: insets.top + 6 }]}>
-          <TouchableOpacity style={s.iconBtn} onPress={onClose} hitSlop={8}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={s.iconBtn} hitSlop={8}>
-            <Ionicons name="ellipsis-horizontal" size={22} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* ── Media — sized to the area above the sheet so it never clips ── */}
+      <View style={s.root} {...closePan.panHandlers}>
+        {/* ── Full-bleed media (horizontal pager for multi-media posts) ── */}
         <ScrollView
-          ref={scrollRef} horizontal pagingEnabled showsHorizontalScrollIndicator={false}
+          ref={scrollRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
           scrollEnabled={media.length > 1}
           onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / SW))}
-          style={[s.pager, { height: mediaH }]}
+          style={s.pager}
         >
           {media.map((m, i) => (
-            <View key={i} style={[s.page, { height: mediaH }]}>
+            <View key={i} style={s.page}>
               {m.type === "image" ? (
                 <Image source={{ uri: m.uri }} style={s.media} resizeMode="contain" />
               ) : (
@@ -117,15 +97,17 @@ export function MediaViewer({
                     ref={videoRef}
                     player={player}
                     style={s.media}
-                    nativeControls={false}
+                    nativeControls={isFullscreen}
                     contentFit="contain"
                     allowsFullscreen
                     allowsPictureInPicture
+                    onFullscreenEnter={() => setIsFullscreen(true)}
+                    onFullscreenExit={() => setIsFullscreen(false)}
                   />
                   {!controls.playing && (
-                    <View style={s.centerPlayOverlay} pointerEvents="none">
-                      <View style={s.centerPlayBtn}>
-                        <Ionicons name="play" size={30} color="#fff" />
+                    <View style={s.playOverlay} pointerEvents="none">
+                      <View style={s.playBadge}>
+                        <Ionicons name="play" size={36} color="#fff" />
                       </View>
                     </View>
                   )}
@@ -135,87 +117,134 @@ export function MediaViewer({
           ))}
         </ScrollView>
 
-        {media.length > 1 && (
-          <View style={[s.dots, { top: mediaH - 14 }]}>
-            {media.map((_, i) => <View key={i} style={[s.dot, i === index && s.dotActive]} />)}
-          </View>
-        )}
+        {/* ── Top dimming so back/dots stay readable over bright media ── */}
+        <LinearGradient
+          pointerEvents="none"
+          colors={["rgba(0,0,0,0.55)", "transparent"]}
+          style={[s.topScrim, { height: insets.top + 70 }]}
+        />
 
-        {/* ── Draggable post sheet ── */}
-        <Animated.View style={[s.sheet, { transform: [{ translateY: sheetY }] }]}>
-          <View {...pan.panHandlers} style={s.grabZone}>
-            <View style={s.grabber} />
-          </View>
+        {/* ── Bottom dimming for the caption / handle / music block ── */}
+        <LinearGradient
+          pointerEvents="none"
+          colors={["transparent", "rgba(0,0,0,0.65)", "rgba(0,0,0,0.85)"]}
+          style={s.bottomScrim}
+        />
 
-          <ScrollView
-            scrollEnabled={expanded}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 8 }}
-          >
-            <View style={s.headRow}>
-              {post.avatarUrl ? (
-                <Image source={{ uri: post.avatarUrl }} style={s.avatar} />
-              ) : (
-                <View style={[s.avatar, { backgroundColor: (post.avatarColor || "#AB00FF") + "33", alignItems: "center", justifyContent: "center" }]}>
-                  <Text style={{ color: post.avatarColor || "#AB00FF", fontWeight: "800", fontSize: 16 }}>{post.initials}</Text>
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <View style={s.nameRow}>
-                  <Text style={s.author} numberOfLines={1}>{post.bio || post.user}</Text>
-                  {post.isVerified && <Ionicons name="checkmark-circle" size={15} color="#1DB954" />}
-                </View>
-                <Text style={s.handle} numberOfLines={1}>{post.handle}</Text>
+        {/* ── Top bar: back · pager dots · search ── */}
+        <View style={[s.topBar, { paddingTop: insets.top + 6 }]}>
+          <TouchableOpacity style={s.topBtn} onPress={onClose} hitSlop={10}>
+            <Ionicons name="chevron-back" size={28} color="#fff" />
+          </TouchableOpacity>
+          {media.length > 1 ? (
+            <View style={s.dotsRow}>
+              {media.map((_, i) => <View key={i} style={[s.dot, i === index && s.dotActive]} />)}
+            </View>
+          ) : <View />}
+          <TouchableOpacity style={s.topBtn} hitSlop={10}>
+            <Ionicons name="search" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Right rail: avatar+follow, like, comment, bookmark, share ── */}
+        <View style={[s.rail, { bottom: insets.bottom + 28 }]}>
+          <View style={s.profileWrap}>
+            {post.avatarUrl ? (
+              <Image source={{ uri: post.avatarUrl }} style={s.railAvatar} />
+            ) : (
+              <View style={[s.railAvatar, { backgroundColor: (post.avatarColor || "#AB00FF") + "55", alignItems: "center", justifyContent: "center" }]}>
+                <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>{post.initials}</Text>
               </View>
-              <TouchableOpacity style={s.followBtn} activeOpacity={0.85}>
-                <Text style={s.followText}>Follow</Text>
+            )}
+            {!following && (
+              <TouchableOpacity style={s.followPlus} activeOpacity={0.8} onPress={() => setFollowing(true)} hitSlop={8}>
+                <Ionicons name="add" size={14} color="#fff" />
               </TouchableOpacity>
-            </View>
-
-            {!!post.text && (
-              <Text style={s.body} numberOfLines={expanded ? undefined : 2}>{post.text}</Text>
             )}
+          </View>
 
-            {(post.song || post.songId) && (
-              <AttachedSongChip songId={post.songId} songName={post.song} songArtist={post.artist} albumArt={post.albumArt} />
+          <RailButton
+            icon={liked ? "heart" : "heart"}
+            color={liked ? "#FF3B6F" : "#fff"}
+            count={post.likes + (liked ? 1 : 0)}
+            onPress={() => setLiked((v) => !v)}
+          />
+          <RailButton icon="chatbubble-ellipses" count={post.comments} />
+          <RailButton
+            icon={saved ? "bookmark" : "bookmark"}
+            color={saved ? "#FFC93C" : "#fff"}
+            count={Math.max(0, Math.round(post.likes * 0.18)) + (saved ? 1 : 0)}
+            onPress={() => setSaved((v) => !v)}
+          />
+          <RailButton icon="arrow-redo" count={post.shares} />
+        </View>
+
+        {/* ── Bottom info overlay ── */}
+        <View style={[s.bottom, { paddingBottom: insets.bottom + 14 }]}>
+          {!!tagLabel && (
+            <TouchableOpacity style={s.tag} activeOpacity={0.85}>
+              <Ionicons name="pricetag" size={11} color="#FFD24A" />
+              <Text style={s.tagText}>{tagLabel}</Text>
+            </TouchableOpacity>
+          )}
+
+          <View style={s.handleRow}>
+            {post.avatarUrl ? (
+              <Image source={{ uri: post.avatarUrl }} style={s.handleAvatar} />
+            ) : (
+              <View style={[s.handleAvatar, { backgroundColor: (post.avatarColor || "#AB00FF") + "55" }]} />
             )}
+            <Text style={s.handle} numberOfLines={1}>{post.handle}</Text>
+            {post.isVerified && <Ionicons name="checkmark-circle" size={14} color="#1DB954" />}
+          </View>
 
-            {expanded && <Text style={s.timeMeta}>{post.time}</Text>}
+          {!!post.text && (
+            <Text
+              style={s.caption}
+              numberOfLines={expandedCaption ? undefined : 2}
+              onPress={() => captionLong && setExpandedCaption((v) => !v)}
+            >
+              {post.text}
+              {!expandedCaption && captionLong && <Text style={s.seeMore}>  See more</Text>}
+            </Text>
+          )}
 
-            <View style={[s.actions, expanded && s.actionsFlat]}>
-              <Action icon="chatbubble-outline" n={post.comments} flat={expanded} />
-              <Action icon="repeat-outline" n={post.shares} flat={expanded} />
-              <Action icon="heart-outline" n={post.likes} flat={expanded} />
-              <Action icon="bookmark-outline" n={expanded ? Math.round(post.likes * 0.5) : 0} flat={expanded} />
-              <Action icon="share-outline" n={0} flat={expanded} />
-            </View>
+          {(post.song || post.songId) && (
+            <TouchableOpacity
+              style={s.musicRow}
+              activeOpacity={0.85}
+              onPress={() => post.songId && openSpotifyLink(`spotify:track:${post.songId}`, `https://open.spotify.com/track/${post.songId}`)}
+            >
+              <Ionicons name="musical-notes" size={14} color="#fff" />
+              <Text style={s.musicText} numberOfLines={1}>
+                {[post.artist, post.song].filter(Boolean).join(" - ")}
+              </Text>
+            </TouchableOpacity>
+          )}
 
-            {/* Inline scrub bar (collapsed video posts) — flush with actions, cancels the ScrollView's horizontal padding. */}
-            {videoUri && !expanded && (
-              <View style={s.scrubInline}>
-                <VideoControlBar
-                  controls={controls}
-                  bottomInset={insets.bottom}
-                  onFullscreen={() => videoRef.current?.enterFullscreen()}
-                  onPip={() => videoRef.current?.startPictureInPicture?.()}
-                />
-              </View>
-            )}
-          </ScrollView>
-
-          {expanded && (
-            <View style={[s.replyBar, { paddingBottom: insets.bottom + 8 }]}>
-              {post.avatarUrl
-                ? <Image source={{ uri: post.avatarUrl }} style={s.replyAvatar} />
-                : <View style={[s.replyAvatar, { backgroundColor: "#222" }]} />}
-              <TextInput style={s.replyInput} placeholder="Post your reply" placeholderTextColor="rgba(255,255,255,0.45)" />
+          {videoUri && (
+            <View style={s.progressOuter}>
+              <View style={[s.progressFill, { width: `${progress * 100}%` }]} />
             </View>
           )}
-        </Animated.View>
+        </View>
       </View>
-      </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+function RailButton({
+  icon, count, color, onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  count: number;
+  color?: string;
+  onPress?: () => void;
+}) {
+  return (
+    <TouchableOpacity style={s.railBtn} activeOpacity={0.7} onPress={onPress} hitSlop={4}>
+      <Ionicons name={icon} size={32} color={color || "#fff"} />
+      {count > 0 && <Text style={s.railCount}>{fmtN(count)}</Text>}
+    </TouchableOpacity>
   );
 }

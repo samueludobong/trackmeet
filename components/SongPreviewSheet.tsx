@@ -6,6 +6,8 @@ import { AddToPlaylistSheet } from "./AddToPlaylistSheet";
 import { ps } from "./songPreviewSheet.styles";
 
 import { useSongPreview } from "../hooks/useSongPreview";
+import { useSheetDragClose } from "../hooks/useSheetDragClose";
+import { DragGrabber } from "./common/DragGrabber";
 
 type Song = {
   id: string;
@@ -29,6 +31,9 @@ export function SongPreviewSheet({ visible, onClose, song, accessToken, userId }
     backdropAnim, slideAnim, soundRef, previewUrl, setPreviewUrl, loading, setLoading, playing, setPlaying, posMs, setPosMs, durMs, setDurMs, saved, setSaved, pickerOpen, setPickerOpen, rendered, setRendered, togglePlay, handleSave, handleOpen, fmt, progress
   } = useSongPreview({ visible, onClose, song, accessToken, userId });
 
+  const { panHandlers: dragHandlers, stretch } = useSheetDragClose({ slideAnim, onClose, closedValue: 400 });
+  const dragBackdrop = slideAnim.interpolate({ inputRange: [0, 400], outputRange: [1, 0], extrapolate: "clamp" });
+
   if (!song) return null;
 
   return (
@@ -40,11 +45,11 @@ export function SongPreviewSheet({ visible, onClose, song, accessToken, userId }
       onRequestClose={onClose}
     >
       <Animated.View
-        style={[StyleSheet.absoluteFill, ps.root, { opacity: backdropAnim }]}
+        style={[StyleSheet.absoluteFill, ps.root, { opacity: Animated.multiply(backdropAnim, dragBackdrop) }]}
       >      <Pressable
         style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.72)" }]}
         onPress={onClose}
-      />      <Animated.View style={[ps.sheet, { transform: [{ translateY: slideAnim }] }]}>        <View style={ps.handle} />        <View style={ps.artWrap}>
+      />      <Animated.View style={[ps.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>        <DragGrabber panHandlers={dragHandlers} />        <View style={ps.artWrap}>
           {song.albumArt ? (
             <Image source={{ uri: song.albumArt }} style={ps.art} resizeMode="cover" />
           ) : (

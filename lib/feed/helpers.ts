@@ -35,10 +35,12 @@ export function dbRowToPost(row: any): Post {
     text: row.text ?? undefined,
     type: row.type as Post["type"],
     mediaUrls: row.media_urls ?? [],
+    mediaAspect: row.media_aspect ?? null,
     song:     row.song_name      ?? undefined,
     artist:   row.song_artist    ?? undefined,
     songId:   row.song_id        ?? undefined,
     albumArt: row.song_album_art ?? undefined,
+    previewUrl: row.song_preview_url ?? null,
     pollQuestion: row.poll_question ?? undefined,
     pollOptions: row.poll_options ?? undefined,
     totalVotes: row.poll_options

@@ -59,6 +59,7 @@ export type Post = {
   text?: string;
   type: PostType;
   mediaUrls?: string[];        // real image URLs from storage
+  mediaAspect?: number | null; // natural width / height of mediaUrls[0] (video posts)
   mediaColor?: string;
   duration?: string;
   song?: string;
@@ -67,6 +68,7 @@ export type Post = {
   albumArt?: string | null;     // real album-art URL from Spotify
   albumColor?: string;
   albumAccent?: string;
+  previewUrl?: string | null;   // 30s preview audio cached in our post-media bucket
   likes: number;
   comments: number;
   shares: number;

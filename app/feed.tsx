@@ -94,6 +94,8 @@ export default function FeedScreen() {
                   setQuickReplyPost={setQuickReplyPost}
                   setFeedScrollEnabled={setFeedScrollEnabled}
                   setDetailPost={setDetailPost}
+                  focused={onFeed}
+                  userId={currentUser?.id ?? null}
                 />
               }
             />

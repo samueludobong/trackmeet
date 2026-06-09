@@ -9,6 +9,8 @@ import { PALETTE_ROWS, SHAPE_ROWS } from "../../constants/profile";
 import { SWATCH_SIZE } from "../../constants/feedLayout";
 import { isLightColor } from "../../lib/feed/helpers";
 import { BannerShape } from "../../components/profile/BannerShape";
+import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { DragGrabber } from "../common/DragGrabber";
 
 export function BannerColorOverlay({ visible, onClose, selectedColor, bannerImageUrl, onSelectColor, onSelectImage, userId, selectedShape, selectedShapeColor, onSelectShape, onSelectShapeColor }: {
   visible: boolean;
@@ -25,6 +27,8 @@ export function BannerColorOverlay({ visible, onClose, selectedColor, bannerImag
 }) {
   const { slideAnim, backdropAnim } = useSheetAnimation(visible);
   const [imageUploading, setImageUploading] = useState(false);
+  const { panHandlers: dragHandlers, stretch } = useSheetDragClose({ slideAnim, onClose, closedValue: 500 });
+  const dragBackdrop = slideAnim.interpolate({ inputRange: [0, 500], outputRange: [1, 0], extrapolate: "clamp" });
 
 
   const pickBannerImage = async () => {
@@ -57,12 +61,12 @@ export function BannerColorOverlay({ visible, onClose, selectedColor, bannerImag
   // Rendered inside the edit sheet's Animated.View — no nested Modal needed
   return (
     <Animated.View
-      style={[StyleSheet.absoluteFill, { zIndex: 50, opacity: backdropAnim }]}
+      style={[StyleSheet.absoluteFill, { zIndex: 50, opacity: Animated.multiply(backdropAnim, dragBackdrop) }]}
       pointerEvents={visible ? "auto" : "none"}
     >
       <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)" }]} onPress={onClose} />
-      <Animated.View style={[bcOverlayStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
-        <View style={bcOverlayStyles.handle} />
+      <Animated.View style={[bcOverlayStyles.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
+        <DragGrabber panHandlers={dragHandlers} />
         <View style={bcOverlayStyles.header}>
           <Text style={bcOverlayStyles.title}>Banner</Text>
           <TouchableOpacity onPress={onClose} hitSlop={12}>

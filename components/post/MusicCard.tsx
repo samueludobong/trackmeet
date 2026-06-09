@@ -10,6 +10,7 @@ import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 import { ActionRow } from "../../components/post/ActionRow";
 import { PostHeader } from "../../components/post/PostHeader";
 import { PostText } from "../../components/post/TextCard";
+import { useFeedAudio } from "../../lib/feed/contexts";
 import { type Post } from "../../app/data/mock";
 
 export function MusicCard({ post }: { post: Post }) {
@@ -18,6 +19,8 @@ export function MusicCard({ post }: { post: Post }) {
   const [saved,      setSaved]      = useState(false);
   const [userId,     setUserId]     = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const { muted, toggleMuted, activePostId } = useFeedAudio();
+  const isActive = activePostId === post.id && !!post.previewUrl;
 
   useEffect(() => {
     if (!post.songId) return;
@@ -63,9 +66,27 @@ export function MusicCard({ post }: { post: Post }) {
             style={styles.musicInfoOverlay}
             pointerEvents="none"
           />
-          <View style={styles.musicInfoText} pointerEvents="none">
-            <Text style={styles.musicSongTitle} numberOfLines={1}>{post.song}</Text>
-            <Text style={styles.musicArtistName} numberOfLines={1}>{post.artist}</Text>
+          <View style={[styles.musicInfoText, { flexDirection: "row", alignItems: "flex-end", gap: 10 }]}>
+            <View style={{ flex: 1 }} pointerEvents="none">
+              <Text style={styles.musicSongTitle} numberOfLines={1}>{post.song}</Text>
+              <Text style={styles.musicArtistName} numberOfLines={1}>{post.artist}</Text>
+            </View>
+            {/* Universal mute — toggles audio across the feed + media viewer.
+                Subtle ring while this card is the active preview source. */}
+            <TouchableOpacity
+              onPress={toggleMuted}
+              hitSlop={10}
+              style={{
+                width: 32, height: 32, borderRadius: 16,
+                alignItems: "center", justifyContent: "center",
+                backgroundColor: "rgba(0,0,0,0.55)",
+                borderWidth: isActive ? 1 : 0,
+                borderColor: "rgba(255,255,255,0.6)",
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name={muted ? "volume-mute" : "volume-high"} size={16} color="#fff" />
+            </TouchableOpacity>
           </View>
 
           {/* Top-right: open in Spotify + save to Liked Songs */}

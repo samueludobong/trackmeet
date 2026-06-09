@@ -20,6 +20,9 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
   const [attachedTrack, setAttachedTrack] = useState<NowPlayingTrack | null>(null);
   const slideAnim = useRef(new Animated.Value(SH)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
+  // Natural width/height per picked asset URI — used to persist media_aspect on
+  // video posts so feed cards know the right size on first paint.
+  const assetDimsRef = useRef<Map<string, { w: number; h: number }>>(new Map());
 
   useEffect(() => {
     if (visible) {
@@ -43,6 +46,9 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
     if (!perm.granted) { Alert.alert("Permission needed", "Allow camera access to take a photo."); return; }
     const result = await ImagePicker.launchCameraAsync({ quality: 0.85, allowsEditing: false });
     if (!result.canceled) {
+      result.assets.forEach((a) => {
+        if (a.width && a.height) assetDimsRef.current.set(a.uri, { w: a.width, h: a.height });
+      });
       setImages((prev) => [...prev, ...result.assets.map((a) => a.uri)].slice(0, 4));
       setPollMode(false);
     }
@@ -59,6 +65,9 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
       selectionLimit: 4,
     });
     if (!result.canceled) {
+      result.assets.forEach((a) => {
+        if (a.width && a.height) assetDimsRef.current.set(a.uri, { w: a.width, h: a.height });
+      });
       setImages((prev) => [...prev, ...result.assets.map((a) => a.uri)].slice(0, 4));
       setPollMode(false);
     }
@@ -74,6 +83,9 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
       quality: 0.85,
     });
     if (!result.canceled) {
+      result.assets.forEach((a) => {
+        if (a.width && a.height) assetDimsRef.current.set(a.uri, { w: a.width, h: a.height });
+      });
       setImages((prev) => [...prev, ...result.assets.map((a) => a.uri)].slice(0, 4));
       setPollMode(false);
     }
@@ -98,11 +110,14 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
 
       if (attachedTrack) {
         type = "music";
+        const { getOrCacheSongPreviewUrl } = await import("../lib/spotify");
+        const previewUrl = await getOrCacheSongPreviewUrl(attachedTrack.id);
         song = {
           song_id: attachedTrack.id,
           song_name: attachedTrack.name,
           song_artist: attachedTrack.artist,
           song_album_art: attachedTrack.albumArt ?? null,
+          ...(previewUrl ? { song_preview_url: previewUrl } : {}),
         };
       } else if (images.length > 0) {
         const firstExt = (images[0].split(".").pop() ?? "").toLowerCase();
@@ -139,6 +154,13 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
             .map((o, i) => ({ id: `opt_${i}`, label: o.trim(), votes: 0 }))
         : null;
 
+      // First picked asset becomes mediaUrls[0]; persist its aspect so feed
+      // VideoCards can render the right shape on first paint. Only meaningful
+      // for video posts but harmless on images.
+      const firstUri = images[0];
+      const firstDims = firstUri ? assetDimsRef.current.get(firstUri) : undefined;
+      const mediaAspect = firstDims && firstDims.h > 0 ? firstDims.w / firstDims.h : null;
+
       const { data: newRow, error } = await supabase
         .from("posts")
         .insert({
@@ -146,11 +168,12 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
           type,
           text: text.trim() || null,
           media_urls: mediaUrls,
+          media_aspect: mediaAspect,
           poll_question: pollMode ? pollQuestion.trim() || null : null,
           poll_options: opts,
           ...song,
         })
-        .select("id, type, text, media_urls, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url)")
+        .select("id, type, text, media_urls, media_aspect, song_id, song_name, song_artist, song_album_art, poll_question, poll_options, created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url)")
         .single();
 
       if (error) throw error;

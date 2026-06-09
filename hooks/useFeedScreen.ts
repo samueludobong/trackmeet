@@ -3,7 +3,7 @@ import { useLocalSearchParams } from "expo-router";
 import { getFeedPosts, getLikedPostIds, togglePostLike, createPost } from "../services/posts";
 import { Animated, Platform, Keyboard, Alert } from "react-native";
 import { supabase } from "../lib/supabase";
-import { getValidSpotifyToken } from "../lib/spotify";
+import { getValidSpotifyToken, getOrCacheSongPreviewUrl } from "../lib/spotify";
 import { type ConversationInfo } from "../services/messages";
 import { useNowPlaying, type NowPlayingTrack } from "../hooks/useNowPlaying";
 import { COMPOSER_ABOVE_NAV } from "../lib/feed/dimensions";
@@ -149,6 +149,10 @@ export function useFeedScreen() {
         payload.song_name      = trackToPost.name;
         payload.song_artist    = trackToPost.artist;
         payload.song_album_art = trackToPost.albumArt ?? null;
+        // Cache the 30s preview to our bucket so the feed can stream it without
+        // re-scraping. Null on failure — the post still posts, just without preview.
+        const previewUrl = await getOrCacheSongPreviewUrl(trackToPost.id);
+        if (previewUrl) payload.song_preview_url = previewUrl;
       }
 
       const newPost = await createPost(payload);

@@ -985,6 +985,31 @@ export const settingsOverlayStyles = StyleSheet.create({
     backgroundColor: "#ff4d6d",
   },
   disconnectConfirmText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+
+  // ── Preferences sub-screen ────────────────────────────────────────────────
+  prefRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    marginHorizontal: 12,
+    marginTop: 4,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  prefIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(171,0,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  prefLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: "#fff" },
+  prefSub:   { fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 },
 });
 
 export const reactStyles = StyleSheet.create({

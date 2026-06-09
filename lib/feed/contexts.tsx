@@ -46,3 +46,25 @@ export const FeedUserCtx = createContext<FeedUserCtxValue>({
 export type PostActionsCtxValue = { onRemovePost: (postId: string) => void };
 export const PostActionsCtx = createContext<PostActionsCtxValue>({ onRemovePost: () => {} });
 export const usePostActions = () => useContext(PostActionsCtx);
+
+// ─── Feed audio (mute + active card) ──────────────────────────────────────────
+// `muted` controls song-preview audio (defaults off → previews are audible).
+// `videosMuted` controls feed video audio (defaults on → videos are silent until
+// the user explicitly unmutes any one of them, which unmutes all).
+// `activePostId` is the post currently driving auto-play, used by cards both to
+// know if they should run and to know if they should highlight their mute icon.
+export type FeedAudioCtxValue = {
+  muted: boolean;
+  toggleMuted: () => void;
+  videosMuted: boolean;
+  toggleVideosMuted: () => void;
+  activePostId: string | null;
+};
+export const FeedAudioCtx = createContext<FeedAudioCtxValue>({
+  muted: false,
+  toggleMuted: () => {},
+  videosMuted: true,
+  toggleVideosMuted: () => {},
+  activePostId: null,
+});
+export const useFeedAudio = () => useContext(FeedAudioCtx);

@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, I
 import { FontAwesome5 } from "@expo/vector-icons";
 import { linksSheetStyles } from "../../lib/feed/localStyles";
 import { parseSpotifyUrl, fetchSpotifyLinkInfo, type SpotifyLinkInfo } from "../../lib/feed/helpers";
+import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { DragGrabber } from "../common/DragGrabber";
 
 export function LinksSheet({
   links,
@@ -49,13 +51,16 @@ export function LinksSheet({
 
   const openLink = (url: string) => { Linking.openURL(url).catch(() => {}); dismiss(); };
 
+  const { panHandlers: dragHandlers, stretch } = useSheetDragClose({ slideAnim, onClose, closedValue: 400 });
+  const dragBackdrop = slideAnim.interpolate({ inputRange: [0, 400], outputRange: [1, 0], extrapolate: "clamp" });
+
   return (
     <Modal transparent visible animationType="none" onRequestClose={dismiss} statusBarTranslucent>
-      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)", opacity: backdropAnim }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)", opacity: Animated.multiply(backdropAnim, dragBackdrop) }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={dismiss} />
       </Animated.View>
-      <Animated.View style={[linksSheetStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
-        <View style={linksSheetStyles.handle} />
+      <Animated.View style={[linksSheetStyles.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
+        <DragGrabber panHandlers={dragHandlers} />
         <Text style={linksSheetStyles.heading}>Links</Text>
 
         {links.map((url, i) => {

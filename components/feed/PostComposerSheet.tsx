@@ -9,6 +9,9 @@ import { type ComposerUser } from "../../types/composer";
 import { type Post } from "../../app/data/mock";
 
 import { usePostComposer } from "../../hooks/usePostComposer";
+import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { SH } from "../../lib/feed/dimensions";
+import { DragGrabber } from "../common/DragGrabber";
 
 export function PostComposerSheet({
   visible,
@@ -27,13 +30,17 @@ export function PostComposerSheet({
     text, setText, images, setImages, pollMode, setPollMode, pollQuestion, setPollQuestion, pollOptions, setPollOptions, posting, setPosting, mediaPickerOpen, setMediaPickerOpen, musicMode, setMusicMode, attachedTrack, setAttachedTrack, slideAnim, backdropAnim, pickFromCamera, pickFromLibrary, pickVideo, removeImage, canPost, handlePost, initials
   } = usePostComposer({ visible, onClose, currentUser, onPosted, initialText });
 
+  const { panHandlers: dragHandlers, stretch } = useSheetDragClose({ slideAnim, onClose, closedValue: SH });
+  const dragBackdrop = slideAnim.interpolate({ inputRange: [0, SH], outputRange: [1, 0], extrapolate: "clamp" });
+
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
-      <Animated.View style={[StyleSheet.absoluteFill, csStyles.backdrop, { opacity: backdropAnim }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, csStyles.backdrop, { opacity: Animated.multiply(backdropAnim, dragBackdrop) }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
       </Animated.View>
 
-      <Animated.View style={[csStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+      <Animated.View style={[csStyles.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
+        <DragGrabber panHandlers={dragHandlers} />
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
           <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
             <View style={{ flex: 1 }}>

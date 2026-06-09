@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from "react";
-import { fetchSpotifyTrackById } from "../lib/spotify";
+import { fetchSpotifyTrackById, fetchSpotifyEmbedPreview } from "../lib/spotify";
 import { Animated, Modal } from "react-native";
 import { Audio } from "expo-av";
 import { openSpotifyLink } from "../lib/spotify";
@@ -51,11 +51,16 @@ export function useSongPreview({ visible, onClose, song, accessToken, userId }: 
 
     const load = async () => {
       try {
-        // Fetch preview_url for this track ID
+        // Fetch preview_url for this track ID. Spotify's API now returns null
+        // for most tracks (regression since late 2024), so fall back to scraping
+        // the embed page's `audioPreview.url`.
         const data = await fetchSpotifyTrackById(accessToken as string, song.id);
-        if (!data || !active) return;
-        const url: string | null = data.preview_url ?? null;
         if (!active) return;
+        let url: string | null = data?.preview_url ?? null;
+        if (!url) {
+          url = await fetchSpotifyEmbedPreview(song.id);
+          if (!active) return;
+        }
         setPreviewUrl(url);
 
         if (!url) { setLoading(false); return; }

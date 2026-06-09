@@ -9,15 +9,19 @@ import { SAVED_ACCOUNTS_KEY } from "../constants/profile";
 import { SW } from "../lib/feed/dimensions";
 import { useNowPlayingCtx } from "../lib/feed/contexts";
 import { type SavedAccount } from "../types/profile";
+import { useUserSettings } from "./useUserSettings";
 
 export function useSettingsOverlay({ profile, userId, onClose, onProfileRefresh }: { profile: UserProfile | null; userId: string | null; onClose: () => void; onProfileRefresh: () => void }) {
   const { resetSpotify, refresh: refreshNowPlaying } = useNowPlayingCtx();
 
-  // Which screen is visible: 'main' | 'connected-apps'
-  type Screen = 'main' | 'connected-apps';
+  // Which screen is visible: 'main' | 'connected-apps' | 'preferences'
+  type Screen = 'main' | 'connected-apps' | 'preferences';
   const [screen,      setScreen]      = useState<Screen>('main');
   const [showConfirm, setShowConfirm] = useState(false);
   const [signingOut,  setSigningOut]  = useState(false);
+
+  // User settings (preferences sub-screen)
+  const { settings: userSettings, updateSetting } = useUserSettings(userId);
 
   // Connected-apps sub-screen state
   const [spotifyConnected,    setSpotifyConnected]    = useState(!!profile?.spotify_access_token);
@@ -117,5 +121,5 @@ export function useSettingsOverlay({ profile, userId, onClose, onProfileRefresh 
   };
 
 
-  return { screen, setScreen, showConfirm, setShowConfirm, signingOut, setSigningOut, spotifyConnected, setSpotifyConnected, showDisconnectAlert, setShowDisconnectAlert, disconnecting, setDisconnecting, connecting, setConnecting, slideAnim, backdropAnim, subSlideX, router, close, openScreen, goBack, doSignOut, handleDisconnect, handleConnect };
+  return { screen, setScreen, showConfirm, setShowConfirm, signingOut, setSigningOut, spotifyConnected, setSpotifyConnected, showDisconnectAlert, setShowDisconnectAlert, disconnecting, setDisconnecting, connecting, setConnecting, slideAnim, backdropAnim, subSlideX, router, close, openScreen, goBack, doSignOut, handleDisconnect, handleConnect, userSettings, updateSetting };
 }

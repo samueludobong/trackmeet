@@ -1,62 +1,103 @@
 import { Dimensions, StyleSheet } from "react-native";
 
 const { width: SW, height: SH } = Dimensions.get("window");
-// PEEK is set per-post in MediaViewer (taller for videos to fit the scrub bar).
-export const PEEK_IMAGE = 232;
-export const PEEK_VIDEO = 312;
-export const EXPANDED = Math.round(SH * 0.62);
 export { SW, SH };
 
 export const mvStyles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
+
+  // Media fills the entire viewport — overlays sit on top via absolute positioning.
+  pager: { flex: 1 },
+  page: { width: SW, height: SH, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
+  media: { width: SW, height: SH },
+  playOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  playBadge: {
+    width: 78, height: 78, borderRadius: 39,
+    backgroundColor: "rgba(0,0,0,0.32)",
+    alignItems: "center", justifyContent: "center",
+  },
+
+  // Top + bottom dimming so the white text/icons stay legible over any photo.
+  topScrim: { position: "absolute", top: 0, left: 0, right: 0 },
+  bottomScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: 280 },
+
+  // Top bar — back · pager dots (multi-media) · search-style action
   topBar: {
-    position: "absolute", top: 0, left: 0, right: 0, zIndex: 5,
-    flexDirection: "row", justifyContent: "space-between",
-    paddingHorizontal: 14, paddingBottom: 10,
+    position: "absolute", top: 0, left: 0, right: 0,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 12, paddingBottom: 10,
   },
-  iconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(40,40,40,0.85)", alignItems: "center", justifyContent: "center" },
+  topBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+  dotsRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.45)" },
+  dotActive: { width: 18, backgroundColor: "#fff" },
 
-  pager: {},
-  page: { width: SW, alignItems: "center", justifyContent: "center" },
-  media: { width: SW, height: "100%" },
-  centerPlayOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
-  centerPlayBtn: { width: 60, height: 60, borderRadius: 30, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center" },
-  dots: { position: "absolute", left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 6 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.4)" },
-  dotActive: { backgroundColor: "#fff", width: 16 },
-
-  sheet: {
-    position: "absolute", left: 0, right: 0, bottom: 0,
-    height: EXPANDED, backgroundColor: "#0A0A0A",
-    borderTopLeftRadius: 18, borderTopRightRadius: 18,
+  // Right-side action rail — avatar+follow, like, comment, bookmark, share
+  rail: {
+    position: "absolute", right: 10,
+    alignItems: "center", gap: 18,
   },
-  grabZone: { alignItems: "center", paddingTop: 7, paddingBottom: 4 },
-  grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.28)" },
-
-  headRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#222" },
-  nameRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  author: { fontSize: 15, fontWeight: "800", color: "#fff", letterSpacing: -0.2 },
-  handle: { fontSize: 13, color: "rgba(255,255,255,0.5)", marginTop: 1 },
-  followBtn: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 16, backgroundColor: "#fff" },
-  followText: { color: "#000", fontWeight: "800", fontSize: 13 },
-
-  body: { fontSize: 15, color: "#fff", lineHeight: 21, fontWeight: "600" },
-  timeMeta: { fontSize: 13, color: "rgba(255,255,255,0.45)", marginTop: 12 },
-
-  actions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 },
-  actionsFlat: { paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.12)" },
-  action: { flexDirection: "row", alignItems: "center", gap: 7 },
-  actionPill: { backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 18, paddingHorizontal: 12, paddingVertical: 7 },
-  actionCircle: { width: 36, height: 36, borderRadius: 18, paddingHorizontal: 0, justifyContent: "center" },
-  actionText: { color: "rgba(255,255,255,0.85)", fontSize: 13, fontWeight: "700" },
-
-  scrubInline: { marginHorizontal: -16, marginTop: 4 },
-  replyBar: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 16, paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.1)",
+  profileWrap: { width: 50, height: 60, alignItems: "center", justifyContent: "flex-start", marginBottom: 4 },
+  railAvatar: {
+    width: 48, height: 48, borderRadius: 24,
+    borderWidth: 2, borderColor: "#fff",
+    backgroundColor: "#222",
   },
-  replyAvatar: { width: 32, height: 32, borderRadius: 16 },
-  replyInput: { flex: 1, color: "#fff", fontSize: 15, paddingVertical: 9 },
+  followPlus: {
+    position: "absolute", bottom: 0, alignSelf: "center",
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: "#FF3B6F",
+    borderWidth: 2, borderColor: "#000",
+    alignItems: "center", justifyContent: "center",
+  },
+  railBtn: { alignItems: "center", justifyContent: "center", gap: 4, minWidth: 50 },
+  railCount: {
+    color: "#fff", fontSize: 12, fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+  },
+
+  // Bottom info overlay — community chip, handle, caption, music row, progress
+  bottom: {
+    position: "absolute", left: 0, right: 80, bottom: 0,
+    paddingHorizontal: 14, paddingTop: 12,
+    gap: 8,
+  },
+  tag: {
+    alignSelf: "flex-start",
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(255,210,74,0.18)",
+    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
+  },
+  tagText: { color: "#FFE39A", fontSize: 12, fontWeight: "700" },
+
+  handleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  handleAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#222" },
+  handle: {
+    color: "#fff", fontSize: 15, fontWeight: "800", letterSpacing: -0.2,
+    textShadowColor: "rgba(0,0,0,0.5)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+  },
+
+  caption: {
+    color: "#fff", fontSize: 14, lineHeight: 19, fontWeight: "500",
+    textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+  },
+  seeMore: { color: "rgba(255,255,255,0.7)", fontWeight: "700" },
+
+  musicRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 4,
+  },
+  musicText: {
+    flex: 1,
+    color: "#fff", fontSize: 13, fontWeight: "600",
+    textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
+  },
+
+  progressOuter: {
+    height: 2, borderRadius: 1,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    marginTop: 4, marginRight: -80, // extend full width under the rail
+    overflow: "hidden",
+  },
+  progressFill: { height: 2, backgroundColor: "#fff" },
 });

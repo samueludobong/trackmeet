@@ -73,13 +73,14 @@ export function useNowPlaying() {
 
   // Toggle broadcasting on/off — writes to DB, clears song data when turning off,
   // and registers/unregisters the background sync task.
+  // Reads the ref (not the state) so rapid taps don't read a stale closure.
   const toggleBroadcasting = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const newVal = !broadcastingEnabled
-    setBroadcastingEnabled(newVal)
+    const newVal = !broadcastingRef.current
     broadcastingRef.current = newVal
+    setBroadcastingEnabled(newVal)
 
     if (!newVal) {
       lastBroadcastId.current = null

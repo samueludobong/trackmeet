@@ -9,6 +9,8 @@ import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 import { EditProfileOverlay } from "../../components/profile/EditProfileOverlay";
 
 import { usePinnedSongPicker } from "../../hooks/usePinnedSongPicker";
+import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { DragGrabber } from "../common/DragGrabber";
 
 import { PinnedSongPreview } from "../../components/profile/PinnedSongPreview";
 
@@ -23,6 +25,9 @@ export function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, cta
   const {
     step, setStep, nowPlaying, setNowPlaying, loadingNow, setLoadingNow, playlists, setPlaylists, loadingPlaylists, setLoadingPlaylists, playlistTracks, setPlaylistTracks, loadingTracks, setLoadingTracks, query, setQuery, searchResults, setSearchResults, searching, setSearching, previewPositionMs, setPreviewPositionMs, previewDurationMs, setPreviewDurationMs, previewPlaying, setPreviewPlaying, previewLoading, setPreviewLoading, previewSaved, setPreviewSaved, previewPickerOpen, setPreviewPickerOpen, pinUserId, setPinUserId, soundRef, slideAnim, backdropAnim, searchTimer, previewSongId, previewSongUrl, pin, goBack, togglePreviewPlayback, savePreviewToLiked, previewTrack, fmtMs, title, isSubStep
   } = usePinnedSongPicker({ visible, onClose, onSelect, accessToken });
+
+  const { panHandlers: dragHandlers, stretch } = useSheetDragClose({ slideAnim, onClose, closedValue: 600 });
+  const dragBackdrop = slideAnim.interpolate({ inputRange: [0, 600], outputRange: [1, 0], extrapolate: "clamp" });
 
   const TrackRow = ({ item }: { item: SpotifyTrackResult }) => (
     <TouchableOpacity
@@ -48,15 +53,15 @@ export function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, cta
 
   return (
     <Animated.View
-      style={[StyleSheet.absoluteFill, { zIndex: 100, opacity: backdropAnim }]}
+      style={[StyleSheet.absoluteFill, { zIndex: 100, opacity: Animated.multiply(backdropAnim, dragBackdrop) }]}
       pointerEvents={visible ? "auto" : "none"}
     >
       <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.70)" }]} onPress={onClose} />
       <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS === "ios" ? "padding" : undefined} style={StyleSheet.absoluteFill}>
-      <Animated.View style={[psStyles.sheet, { transform: [{ translateY: slideAnim }] }]}>
+      <Animated.View style={[psStyles.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
+        <DragGrabber panHandlers={dragHandlers} />
         <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
           <View style={{ flex: 1 }}>
-        <View style={epOverlayStyles.handle} />
         <View style={epOverlayStyles.sheetHeader}>
           <TouchableOpacity onPress={isSubStep ? goBack : onClose} hitSlop={12} style={psStyles.navBtn}>
             <FontAwesome5
