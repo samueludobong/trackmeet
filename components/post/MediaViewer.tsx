@@ -14,7 +14,7 @@ import { mvStyles as s, SW, SH } from "./mediaViewer.styles";
 
 type Media = { type: "image" | "video"; uri: string };
 
-const fmtN = (n: number) => {
+export const fmtN = (n: number) => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`.replace(".0M", "M");
   if (n >= 1_000) return `${(n / 1_000).toFixed(n < 10_000 ? 1 : 0)}K`.replace(".0K", "K");
   return String(n);
@@ -233,7 +233,7 @@ export function MediaViewer({
   );
 }
 
-function RailButton({
+export function RailButton({
   icon, count, color, onPress,
 }: {
   icon: keyof typeof Ionicons.glyphMap;

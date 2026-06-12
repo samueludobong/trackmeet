@@ -12,7 +12,9 @@ import { SpotifyPlaylistDetailOverlay } from "../../components/playlists/Spotify
 import { CreateCommunityDialog } from "../../components/communities/CreateCommunityDialog";
 import { CommunityDetailOverlay } from "../../components/communities/CommunityDetailOverlay";
 import { getMyCommunities, type Community } from "../../services/communities";
-import { PROFILE_TABS, PROFILE_REPOSTS } from "../../app/data/mock";
+import { PROFILE_TABS } from "../../app/data/mock";
+import { type Post } from "../../app/data/mock";
+import { getUserReposts } from "../../services/posts";
 
 export function ProfileTabs({ userId, readOnly = false }: { userId: string | null; readOnly?: boolean }) {
   const {
@@ -25,6 +27,20 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
   const [communitiesLoaded, setCommunitiesLoaded] = useState(false);
   const [showCreateCommunity, setShowCreateCommunity] = useState(false);
   const [openCommunity, setOpenCommunity] = useState<Community | null>(null);
+
+  // Reposts tab — fetched from public.post_reposts joined to posts on demand.
+  const [reposts, setReposts] = useState<Post[]>([]);
+  const [repostsLoading, setRepostsLoading] = useState(false);
+  const [repostsLoaded, setRepostsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (active !== "Reposts" || repostsLoaded || !userId) return;
+    setRepostsLoading(true);
+    getUserReposts(userId)
+      .then(setReposts)
+      .catch((e) => console.error("getUserReposts:", e))
+      .finally(() => { setRepostsLoading(false); setRepostsLoaded(true); });
+  }, [active, userId]);
 
   useEffect(() => {
     if (active !== "Communities" || communitiesLoaded || !userId) return;
@@ -52,9 +68,19 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
     }
 
     if (active === "Reposts") {
+      if (repostsLoading) return <ActivityIndicator color="#FF6C1A" style={{ marginTop: 48 }} />;
+      if (reposts.length === 0) {
+        return (
+          <View style={{ alignItems: "center", paddingTop: 52 }}>
+            <Text style={{ color: "rgba(255,255,255,0.25)", fontSize: 15 }}>
+              {readOnly ? "No reposts yet" : "You haven't reposted anything yet"}
+            </Text>
+          </View>
+        );
+      }
       return (
         <View style={{ gap: 12, paddingTop: 12 }}>
-          {PROFILE_REPOSTS.map((post) => (
+          {reposts.map((post) => (
             <View key={post.id}>
               <View style={profileStyles.repostLabel}>
                 <Text style={profileStyles.repostLabelText}>↺  Reposted</Text>
@@ -162,6 +188,10 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
           onUpdated={(updated) => {
             setCuratedPlaylists(prev => prev.map(p => p.id === updated.id ? updated : p));
             setOpenCurated(updated);
+          }}
+          onDeleted={() => {
+            setCuratedPlaylists(prev => prev.filter(p => p.id !== openCurated.id));
+            setOpenCurated(null);
           }}
         />
       )}

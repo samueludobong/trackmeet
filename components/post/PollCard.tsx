@@ -1,56 +1,33 @@
-import React, { useState } from "react";
-import { voteOnPoll } from "../../services/posts";
+import React, { useContext } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { styles } from "../../lib/feed/styles";
 import { ActionRow } from "../../components/post/ActionRow";
 import { PostHeader } from "../../components/post/PostHeader";
 import { PostText } from "../../components/post/TextCard";
+import { FeedUserCtx } from "../../lib/feed/contexts";
 import { type Post } from "../../app/data/mock";
 
+/**
+ * Poll card. Reads `voted` from FeedUserCtx.pollVotes (a Map<postId, optId>)
+ * instead of holding it in local state — so the user's selection survives
+ * remounts (feed → detail → feed) and the server-authoritative RPC can refuse
+ * a re-vote without the UI showing a stale fresh state.
+ */
 export function PollCard({ post }: { post: Post }) {
-  const [voted, setVoted] = useState<string | null>(null);
-  const [localOptions, setLocalOptions] = useState(post.pollOptions ?? []);
-  const [voting, setVoting] = useState(false);
+  const { pollVotes, onVoteOnPoll, currentUserId } = useContext(FeedUserCtx);
+  const voted = pollVotes.get(post.id) ?? null;
 
-  // Derive total from live localOptions (not a snapshot), handle 0-vote state
-  const displayTotal = localOptions.reduce((s, o) => s + o.votes, 0);
+  const options = post.pollOptions ?? [];
+  const displayTotal = options.reduce((s, o) => s + o.votes, 0);
   const total = displayTotal || 1; // avoid division-by-zero for pct calculation
+  const maxVotes = Math.max(0, ...options.map((o) => o.votes));
 
-  const handleVote = async (optId: string) => {
-    // Tapping the already-selected option is a no-op
-    if (optId === voted || voting) return;
-
-    const prevVoted = voted;
-    const prevOptions = localOptions;
-
-    // Optimistic update: increment new, decrement old
-    const optimistic = localOptions.map((o) => {
-      if (o.id === optId)      return { ...o, votes: o.votes + 1 };
-      if (o.id === prevVoted)  return { ...o, votes: Math.max(0, o.votes - 1) };
-      return o;
-    });
-    setVoted(optId);
-    setLocalOptions(optimistic);
-    setVoting(true);
-
-    // Persist via SECURITY DEFINER RPC — bypasses RLS so any voter can update
-    const { data, error } = await voteOnPoll(post.id, optId, prevVoted);
-
-    setVoting(false);
-
-    if (error) {
-      // Revert on failure
-      console.log("[PollCard] vote error:", error.message);
-      setVoted(prevVoted);
-      setLocalOptions(prevOptions);
-    } else if (data?.options) {
-      // Sync with server-authoritative counts
-      setLocalOptions(data.options);
-    }
+  const handleVote = (optId: string) => {
+    if (!currentUserId) return;
+    if (optId === voted) return; // tapping the already-selected option is a no-op
+    onVoteOnPoll(post.id, optId);
   };
-
-  const maxVotes = Math.max(...localOptions.map((o) => o.votes));
 
   return (
     <View style={styles.card}>
@@ -60,10 +37,10 @@ export function PollCard({ post }: { post: Post }) {
       <View style={styles.pollContainer}>
         <Text style={styles.pollQuestion}>{post.pollQuestion}</Text>
         <View style={styles.pollOptions}>
-          {localOptions.map((opt) => {
-            const pct       = Math.round((opt.votes / total) * 100);
-            const isVoted   = voted === opt.id;
-            const isWinner  = voted !== null && opt.votes === maxVotes && opt.votes > 0;
+          {options.map((opt) => {
+            const pct      = Math.round((opt.votes / total) * 100);
+            const isVoted  = voted === opt.id;
+            const isWinner = voted !== null && opt.votes === maxVotes && opt.votes > 0;
 
             return (
               <TouchableOpacity
@@ -71,7 +48,6 @@ export function PollCard({ post }: { post: Post }) {
                 style={[styles.pollOption, isVoted && { borderColor: "rgba(171,0,255,0.45)" }]}
                 activeOpacity={voted ? 0.65 : 0.8}
                 onPress={() => handleVote(opt.id)}
-                disabled={voting}
               >
                 {/* Fill bar — visible once any vote has been cast */}
                 {voted !== null && (
@@ -86,7 +62,6 @@ export function PollCard({ post }: { post: Post }) {
                   <Text style={[styles.pollOptionLabel, isVoted && { color: "#AB00FF" }]}>
                     {opt.label}
                   </Text>
-                  {/* Right side: checkmark for current vote, pct after voting */}
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                     {voted !== null && (
                       <Text style={[styles.pollPct, isWinner && { color: "#AB00FF" }]}>{pct}%</Text>
@@ -101,7 +76,7 @@ export function PollCard({ post }: { post: Post }) {
           })}
         </View>
         <Text style={styles.pollMeta}>
-          {(voted === null ? displayTotal : displayTotal).toLocaleString()} votes
+          {displayTotal.toLocaleString()} votes
           {voted !== null ? " · tap another option to change" : " · tap to vote"}
         </Text>
       </View>

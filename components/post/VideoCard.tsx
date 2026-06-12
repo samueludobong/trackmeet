@@ -8,14 +8,9 @@ import { PostHeader } from "./PostHeader";
 import { PostText } from "./TextCard";
 import { AttachedSongChip } from "./AttachedSongChip";
 import { MediaViewer } from "./MediaViewer";
-import { useFeedAudio } from "../../lib/feed/contexts";
+import { useFeedAudio, useOpenVideoFeed } from "../../lib/feed/contexts";
+import { videoPositionStore } from "../../lib/feed/videoPositions";
 import { type Post } from "../../app/data/mock";
-
-/**
- * Per-post playback position cache, keyed by post id. Survives FlatList
- * virtualisation so scrolling away and back resumes from where you left off.
- */
-const videoPositionStore = new Map<string, number>();
 
 const fmt = (s: number) => {
   const sec = Math.max(0, Math.round(s));
@@ -34,6 +29,16 @@ export function VideoCard({ post }: { post: Post }) {
   const [open, setOpen] = useState(false);
   const { activePostId, videosMuted, toggleVideosMuted } = useFeedAudio();
   const isActive = activePostId === post.id;
+  // In the main feed this opens the TikTok-style vertical viewer across every
+  // feed video. Elsewhere (profile, detail, communities) there's no provider,
+  // so we fall back to the single-post MediaViewer below.
+  const openVideoFeed = useOpenVideoFeed();
+
+  const openViewer = useCallback(() => {
+    if (!videoUri) return;
+    if (openVideoFeed) openVideoFeed(post.id);
+    else setOpen(true);
+  }, [videoUri, openVideoFeed, post.id]);
 
   // Player state is held here so InlinePreview (inside the touch target) and
   // the scrub bar (below the media block) share the same source of truth.
@@ -66,7 +71,7 @@ export function VideoCard({ post }: { post: Post }) {
 
       <TouchableOpacity
         activeOpacity={0.92}
-        onPress={() => videoUri && setOpen(true)}
+        onPress={openViewer}
         style={[
           styles.mediaBlock,
           { backgroundColor: post.mediaColor ?? "#1a1a1a" },
@@ -80,7 +85,9 @@ export function VideoCard({ post }: { post: Post }) {
           <InlinePreview
             postId={post.id}
             uri={videoUri}
-            active={isActive}
+            // Yield to the fullscreen viewer while it's open so we never have
+            // two players running at once. Resumes when the modal closes.
+            active={isActive && !open}
             muted={videosMuted}
             onPlayerReady={onPlayerReady}
             onProgress={onProgress}
@@ -310,8 +317,14 @@ function ScrubBar({
 
   const pan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => false,
+    // Only claim a *decisively* horizontal drag. A small/diagonal move stays
+    // with the FlatList so the feed keeps scrolling — otherwise a scroll that
+    // starts over this band gets grabbed as a seek and (because we refuse to
+    // terminate) the vertical scroll locks up.
     onMoveShouldSetPanResponder: (_e, g) =>
-      Math.abs(g.dx) > 4 && Math.abs(g.dx) > Math.abs(g.dy),
+      Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+    // Once we own a real horizontal seek, keep it (a vertical wiggle mid-scrub
+    // shouldn't cancel the seek). The strict claim above is what protects scroll.
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: (e) => seekFromX(e.nativeEvent.locationX),
     onPanResponderMove:  (e) => seekFromX(e.nativeEvent.locationX),

@@ -40,6 +40,10 @@ export function CreateCommunityDialog({
 
   const [isPrivate, setIsPrivate] = useState(false);
   const [allowAnyoneToPost, setAllowAnyoneToPost] = useState(true);
+  const [allowComments, setAllowComments] = useState(true);
+  const [rules, setRules] = useState("");
+  const [welcomeMessage, setWelcomeMessage] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
   // Auto-derive slug from name until the user edits it manually.
@@ -99,7 +103,8 @@ export function CreateCommunityDialog({
       const community = await createCommunity(userId, {
         name, slug: slug.trim() || slugify(name), description,
         avatarUrl, bannerUrl, bannerColor: bannerUri ? null : bannerColor,
-        genres, isPrivate, allowAnyoneToPost,
+        genres, isPrivate, allowAnyoneToPost, allowComments,
+        rules, welcomeMessage,
       });
       onCreated(community);
     } catch (e: any) {
@@ -160,8 +165,35 @@ export function CreateCommunityDialog({
               <GenreSelector selected={genres} onChange={setGenres} />
 
               <Text style={[cpStyles.label, { marginTop: 18 }]}>SETTINGS</Text>
-              <ToggleRow label="Private community" sub="Only approved members can join" value={isPrivate} onChange={setIsPrivate} />
+              <ToggleRow label="Private community" sub="People must request to join; admins approve" value={isPrivate} onChange={setIsPrivate} />
               <ToggleRow label="Allow anyone to post" sub="Otherwise only admins can post" value={allowAnyoneToPost} onChange={setAllowAnyoneToPost} />
+              <ToggleRow label="Allow comments" sub="Members can comment on posts" value={allowComments} onChange={setAllowComments} />
+
+              <TouchableOpacity style={tr.moreToggle} onPress={() => setMoreOpen((v) => !v)} activeOpacity={0.7}>
+                <Text style={tr.moreToggleText}>{moreOpen ? "Hide" : "More"} options</Text>
+                <Ionicons name={moreOpen ? "chevron-up" : "chevron-down"} size={14} color="rgba(255,255,255,0.5)" />
+              </TouchableOpacity>
+
+              {moreOpen && (
+                <>
+                  <Text style={cpStyles.label}>RULES</Text>
+                  <TextInput
+                    style={[cpStyles.input, { height: 100, textAlignVertical: "top" }]}
+                    placeholder="House rules for this community…"
+                    placeholderTextColor="rgba(255,255,255,0.25)"
+                    value={rules} onChangeText={setRules}
+                    multiline maxLength={1000}
+                  />
+                  <Text style={cpStyles.label}>WELCOME MESSAGE</Text>
+                  <TextInput
+                    style={[cpStyles.input, { height: 72, textAlignVertical: "top" }]}
+                    placeholder="Greets new members when they join…"
+                    placeholderTextColor="rgba(255,255,255,0.25)"
+                    value={welcomeMessage} onChangeText={setWelcomeMessage}
+                    multiline maxLength={200}
+                  />
+                </>
+              )}
 
               <TouchableOpacity
                 style={[cpStyles.createSubmitBtn, { marginTop: 18 }, !canCreate && { opacity: 0.45 }]}
@@ -195,4 +227,9 @@ const tr = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.07)" },
   label: { fontSize: 15, fontWeight: "700", color: "#fff" },
   sub: { fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 },
+  moreToggle: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
+    paddingVertical: 12, marginTop: 4,
+  },
+  moreToggleText: { fontSize: 13, fontWeight: "700", color: "rgba(255,255,255,0.5)" },
 });

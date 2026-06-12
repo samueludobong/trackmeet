@@ -1,10 +1,12 @@
 import { useRef, useState, useEffect } from "react";
 import { useLocalSearchParams } from "expo-router";
-import { getFeedPosts, getLikedPostIds, togglePostLike, createPost } from "../services/posts";
+import { getFeedPosts, getLikedPostIds, togglePostLike, createPost, getRepostedPostIds, togglePostRepost, getMyPollVotes, voteOnPoll } from "../services/posts";
 import { Animated, Platform, Keyboard, Alert } from "react-native";
 import { supabase } from "../lib/supabase";
 import { getValidSpotifyToken, getOrCacheSongPreviewUrl } from "../lib/spotify";
 import { type ConversationInfo } from "../services/messages";
+import { joinOrStartDmJam } from "../services/meets";
+import { type JamOther } from "../lib/feed/contexts";
 import { useNowPlaying, type NowPlayingTrack } from "../hooks/useNowPlaying";
 import { COMPOSER_ABOVE_NAV } from "../lib/feed/dimensions";
 import { type ComposerUser } from "../types/composer";
@@ -59,6 +61,24 @@ export function useFeedScreen() {
     if (currentUser?.id) getValidSpotifyToken(currentUser.id).then(setHostMeetToken);
   };
 
+  // ── DM Jam (hostless, private co-listening scoped to a conversation) ──────────
+  const [jamMeetId,    setJamMeetId]    = useState<string | null>(null);
+  const [jamConvId,    setJamConvId]    = useState<string | null>(null);
+  const [jamOther,     setJamOther]     = useState<JamOther | null>(null);
+  const [jamToken,     setJamToken]     = useState<string | null>(null);
+  const [jamMinimized, setJamMinimized] = useState(false);
+
+  const openJam = async (conversationId: string, other: JamOther) => {
+    // Already in this conversation's jam (e.g. minimized) → just restore it.
+    if (jamConvId === conversationId && jamMeetId) { setJamMinimized(false); return; }
+    setJamOther(other);
+    setJamConvId(conversationId);
+    if (currentUser?.id) getValidSpotifyToken(currentUser.id).then(setJamToken);
+    const { meetId } = await joinOrStartDmJam(conversationId);
+    if (meetId) { setJamMeetId(meetId); setJamMinimized(false); }
+  };
+  const closeJam = () => { setJamMeetId(null); setJamConvId(null); setJamOther(null); setJamToken(null); setJamMinimized(false); };
+
   // Auto-open the listener room when navigated here from a meet-incoming push
   useEffect(() => {
     if (openMeetId) openListenerMeet(String(openMeetId));
@@ -83,11 +103,22 @@ export function useFeedScreen() {
   const [quickText, setQuickText] = useState("");
   const [attachedTrack, setAttachedTrack] = useState<NowPlayingTrack | null>(null);
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set());
+  const [repostedPostIds, setRepostedPostIds] = useState<Set<string>>(new Set());
+  const [pollVotes, setPollVotes] = useState<Map<string, string>>(new Map());
 
   const fetchFeedPosts = async (userId?: string) => {
     try {
       setFeedPosts(await getFeedPosts());
-      if (userId) setLikedPostIds(await getLikedPostIds(userId));
+      if (userId) {
+        const [liked, reposted, votes] = await Promise.all([
+          getLikedPostIds(userId),
+          getRepostedPostIds(userId),
+          getMyPollVotes(userId),
+        ]);
+        setLikedPostIds(liked);
+        setRepostedPostIds(reposted);
+        setPollVotes(votes);
+      }
     } catch (e) {
       console.error("fetchFeedPosts:", e);
     }
@@ -122,6 +153,101 @@ export function useFeedScreen() {
         return next;
       });
       console.error("toggle_post_like:", e);
+    }
+  };
+
+  /**
+   * Toggle a repost. Same pattern as like: optimistic flip, RPC sync, revert
+   * on failure. The RPC keeps `posts.reposts_count` in sync so the feed
+   * card's badge updates on the next render.
+   */
+  const onToggleRepost = async (postId: string) => {
+    if (!currentUser) return;
+    setRepostedPostIds((prev) => {
+      const next = new Set(prev);
+      next.has(postId) ? next.delete(postId) : next.add(postId);
+      return next;
+    });
+    try {
+      const data = await togglePostRepost(postId, currentUser.id);
+      if (data) {
+        setFeedPosts((prev) =>
+          prev.map((p) => (p.id === postId ? { ...p, reposts: data.reposts_count } : p))
+        );
+        setRepostedPostIds((prev) => {
+          const next = new Set(prev);
+          data.reposted ? next.add(postId) : next.delete(postId);
+          return next;
+        });
+      }
+    } catch (e) {
+      setRepostedPostIds((prev) => {
+        const next = new Set(prev);
+        next.has(postId) ? next.delete(postId) : next.add(postId);
+        return next;
+      });
+      console.error("toggle_post_repost:", e);
+    }
+  };
+
+  /**
+   * Cast a poll vote. Idempotent against double-tapping the same option.
+   * Optimistically updates the user's selection + per-option counts, then
+   * reconciles against the RPC's authoritative response. The RPC bases
+   * "previous option" on poll_votes (not the client), so the bug where the
+   * same user could vote forever by reopening the post is closed.
+   */
+  const onVoteOnPoll = async (postId: string, optId: string) => {
+    if (!currentUser) return;
+    const prevOptId = pollVotes.get(postId) ?? null;
+    if (prevOptId === optId) return; // already voted for this option
+
+    // Optimistic: update vote map + per-option counts on the post.
+    setPollVotes((prev) => {
+      const next = new Map(prev);
+      next.set(postId, optId);
+      return next;
+    });
+    setFeedPosts((prev) =>
+      prev.map((p) => {
+        if (p.id !== postId || !p.pollOptions) return p;
+        const nextOpts = p.pollOptions.map((o) => {
+          if (o.id === optId)              return { ...o, votes: o.votes + 1 };
+          if (prevOptId && o.id === prevOptId) return { ...o, votes: Math.max(0, o.votes - 1) };
+          return o;
+        });
+        return { ...p, pollOptions: nextOpts };
+      })
+    );
+
+    try {
+      const { data, error } = await voteOnPoll(postId, optId);
+      if (error) throw error;
+      // Server-authoritative options come back — re-sync.
+      if (data?.options) {
+        setFeedPosts((prev) =>
+          prev.map((p) => (p.id === postId ? { ...p, pollOptions: data.options } : p))
+        );
+      }
+    } catch (e) {
+      // Revert vote + counts.
+      setPollVotes((prev) => {
+        const next = new Map(prev);
+        if (prevOptId) next.set(postId, prevOptId); else next.delete(postId);
+        return next;
+      });
+      setFeedPosts((prev) =>
+        prev.map((p) => {
+          if (p.id !== postId || !p.pollOptions) return p;
+          const reverted = p.pollOptions.map((o) => {
+            if (o.id === optId)              return { ...o, votes: Math.max(0, o.votes - 1) };
+            if (prevOptId && o.id === prevOptId) return { ...o, votes: o.votes + 1 };
+            return o;
+          });
+          return { ...p, pollOptions: reverted };
+        })
+      );
+      console.error("vote_on_poll:", e);
     }
   };
 
@@ -271,5 +397,5 @@ useEffect(() => {
 }, []);
 
 
-  return { nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, fetchFeedPosts, onToggleLike, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight };
+  return { nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, jamMeetId, jamOther, jamToken, jamMinimized, setJamMinimized, openJam, closeJam, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, repostedPostIds, setRepostedPostIds, pollVotes, setPollVotes, onVoteOnPoll, fetchFeedPosts, onToggleLike, onToggleRepost, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight };
 }

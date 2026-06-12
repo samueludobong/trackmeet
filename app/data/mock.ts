@@ -72,6 +72,8 @@ export type Post = {
   likes: number;
   comments: number;
   shares: number;
+  /** Count of users who have reposted this. Optional — older mocks may omit it. */
+  reposts?: number;
   pollQuestion?: string;
   pollOptions?: PollOption[];
   totalVotes?: number;
@@ -431,11 +433,6 @@ export const COMMUNITY_ITEMS: CommunityItem[] = [
   { id: "ci4", title: "Producing your first EP with only your phone: a complete guide",       author: "Sarz",      authorUser: "seren",  followers: "6.2K", tags: ["#Production", "#DIY"],       date: "15 Jul, 2024", active: true,  viewerUsers: ["jaykay", "priya", "ayo"]    },
 ];
 
-export const MESSAGES_UNREAD: Record<string, number> = {
-  "Messages": 19,
-  "Group Chats": 9,
-  "Community": 4,
-};
 
 export type ChatMessage = {
   id: string;

@@ -12,6 +12,7 @@ type Props = {
   name: string; setName: (v: string) => void;
   description: string; setDescription: (v: string) => void;
   rules: string; setRules: (v: string) => void;
+  welcomeMessage: string; setWelcomeMessage: (v: string) => void;
   tagsText: string; setTagsText: (v: string) => void;
   imageUri: string | null; setImageUri: (v: string | null) => void;
   setImageUrl: (v: string | null) => void;
@@ -94,6 +95,9 @@ export function AdminPanelDetails(p: Props) {
 
       <Text style={a.label}>RULES</Text>
       <TextInput style={[a.input, { height: 120, textAlignVertical: "top" }]} value={p.rules} onChangeText={p.setRules} multiline placeholder="House rules for this community…" placeholderTextColor="rgba(255,255,255,0.3)" />
+
+      <Text style={a.label}>WELCOME MESSAGE</Text>
+      <TextInput style={[a.input, { height: 80, textAlignVertical: "top" }]} value={p.welcomeMessage} onChangeText={p.setWelcomeMessage} multiline maxLength={200} placeholder="Greets new members when they join…" placeholderTextColor="rgba(255,255,255,0.3)" />
 
       <Text style={a.label}>TAGS</Text>
       <TextInput style={a.input} value={p.tagsText} onChangeText={p.setTagsText} placeholder="comma, separated, tags" placeholderTextColor="rgba(255,255,255,0.3)" autoCapitalize="none" />

@@ -1,40 +1,31 @@
-import React, { useState, useEffect, useContext, useRef } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
-  Pressable,
-  UIManager,
-  findNodeHandle,
-  Dimensions,
   Alert,
 } from "react-native";
-import { FontAwesome5, Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { styles, profileSStyles } from "../../lib/feed/styles";
+import { styles } from "../../lib/feed/styles";
 import { OpenDetailCtx, FeedUserCtx, usePostActions } from "../../lib/feed/contexts";
 import { type Post } from "../../app/data/mock";
 import { getPostComments, deletePost } from "../../services/posts";
 import { followUser, unfollowUser, checkIsFollowing } from "../../services/follows";
 import { openSpotifyLink } from "../../lib/spotify";
 import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
+import { PostActionsOverlay } from "./PostActionsOverlay";
+import { UnrepostConfirmOverlay } from "./UnrepostConfirmOverlay";
 
 export function ActionRow({ post }: { post: Post }) {
-  const { currentUserId, likedPostIds, onToggleLike } = useContext(FeedUserCtx);
+  const { currentUserId, likedPostIds, onToggleLike, repostedPostIds, onToggleRepost } = useContext(FeedUserCtx);
   const liked = likedPostIds.has(post.id);
-  const [fabMenuOpen, setFabMenuOpen] = useState(false);
-  const [artistDropdownOpen, setArtistDropdownOpen] = useState(false);
-
-  const [menuPosition, setMenuPosition] = useState<{
-    top?: number;
-    bottom?: number;
-    right: number;
-  }>({ top: 0, right: 16 });
-  const moreButtonRef = useRef(null);
-  const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
+  const reposted = repostedPostIds.has(post.id);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [likeCount, setLikeCount] = useState(post.likes);
   const [commentsCount, setCommentsCount] = useState(post.comments);
+  const [repostCount, setRepostCount] = useState(post.reposts ?? 0);
+  const [unrepostConfirmOpen, setUnrepostConfirmOpen] = useState(false);
 
   const openDetail = useContext(OpenDetailCtx);
   const { onRemovePost } = usePostActions();
@@ -43,38 +34,70 @@ export function ActionRow({ post }: { post: Post }) {
   const [isFollowing, setIsFollowing] = useState(false);
   const isOwnPost = !!post.authorId && post.authorId === currentUserId;
 
-  // Refresh follow state when the menu opens.
+  // Refresh follow state when the menu opens so the row reads "Following" if
+  // they already are.
   useEffect(() => {
-    if (fabMenuOpen && post.authorId && !isOwnPost) {
+    if (menuOpen && post.authorId && !isOwnPost) {
       checkIsFollowing(post.authorId).then(setIsFollowing).catch(() => {});
     }
-  }, [fabMenuOpen]);
+  }, [menuOpen]);
 
-  // ── Menu action handlers ────────────────────────────────────────────────────
+  useEffect(() => {
+    setLikeCount(post.likes);
+  }, [post.likes]);
+
+  useEffect(() => {
+    setRepostCount(post.reposts ?? 0);
+  }, [post.reposts]);
+
+  const handleRepost = () => {
+    if (!currentUserId) return;
+    // Already reposted? Don't auto-undo on a single tap — show the confirm
+    // sheet. The first repost is silent though (easy to undo, no warning).
+    if (reposted) {
+      setUnrepostConfirmOpen(true);
+      return;
+    }
+    setRepostCount((c) => c + 1);
+    onToggleRepost(post.id);
+  };
+
+  const confirmUnrepost = () => {
+    setRepostCount((c) => Math.max(0, c - 1));
+    onToggleRepost(post.id);
+  };
+
+  useEffect(() => {
+    getPostComments(post.id).then((comments) => {
+      setCommentsCount(comments.length);
+    });
+  }, []);
+
+  const handleLike = () => {
+    if (!currentUserId) return;
+    setLikeCount((c) => (liked ? Math.max(0, c - 1) : c + 1));
+    onToggleLike(post.id);
+  };
+
+  // ── Menu action handlers — invoked from the bottom-sheet ─────────────────
+  // Each handler does NOT close the sheet itself; PostActionsOverlay wraps
+  // every action so the sheet closes first, then the handler fires.
   const openInSpotify = () => {
-    closeMenu();
     if (post.songId) openSpotifyLink(`spotify:track:${post.songId}`, `https://open.spotify.com/track/${post.songId}`);
   };
   const searchArtistOnSpotify = () => {
-    closeMenu();
     const q = encodeURIComponent(post.artist ?? post.user ?? "");
     openSpotifyLink(`spotify:search:${q}`, `https://open.spotify.com/search/${encodeURIComponent(q)}`);
   };
-  const addToPlaylist = () => { closeMenu(); setPickerOpen(true); };
-  const viewPollResults = () => { closeMenu(); openDetail?.(); };
-  const viewUserProfile = () => {
-    closeMenu();
-    if (post.authorId) router.push({ pathname: "/user-profile", params: { userId: post.authorId } });
-  };
+  const addToPlaylist = () => { setPickerOpen(true); };
+  const viewPollResults = () => { openDetail?.(); };
   const toggleFollowUser = async () => {
-    closeMenu();
     if (!post.authorId) return;
     if (isFollowing) { setIsFollowing(false); await unfollowUser(post.authorId); }
     else { setIsFollowing(true); const r = await followUser(post.authorId); if (r.error) setIsFollowing(false); }
   };
-  const notInterested = () => { closeMenu(); onRemovePost(post.id); };
+  const notInterested = () => { onRemovePost(post.id); };
   const confirmDelete = () => {
-    closeMenu();
     Alert.alert("Delete post?", "This can't be undone.", [
       { text: "Cancel", style: "cancel" },
       {
@@ -86,65 +109,8 @@ export function ActionRow({ post }: { post: Post }) {
       },
     ]);
   };
-  const reportPost = () => { closeMenu(); Alert.alert("Reported", "Thanks — we'll review this post."); };
-  const comingSoon = (what: string) => () => { closeMenu(); Alert.alert("Coming soon", `${what} isn't available yet.`); };
-
-  useEffect(() => {
-    setLikeCount(post.likes);
-  }, [post.likes]);
-  const closeMenu = () => {
-    setFabMenuOpen(false);
-    setMoreOptionsOpen(false);
-  };
-  const handleLike = () => {
-    if (!currentUserId) return;
-    setLikeCount((c) => (liked ? Math.max(0, c - 1) : c + 1));
-    onToggleLike(post.id);
-  };
-
-  const openMenu = () => {
-    if (!moreButtonRef.current) {
-      setFabMenuOpen(true);
-
-      return;
-    }
-
-    const handle = findNodeHandle(moreButtonRef.current);
-    if (!handle) {
-      setFabMenuOpen(true);
-      return;
-    }
-
-    UIManager.measure(handle, (x, y, width, height, pageX, pageY) => {
-      const screenHeight = Dimensions.get("window").height;
-      const menuEstimatedHeight = 320; // approximate menu height
-      const spaceBelow = screenHeight - (pageY + height);
-      const spaceAbove = pageY;
-
-      if (spaceBelow < menuEstimatedHeight && spaceAbove > spaceBelow) {
-        // Not enough space below — render above the button
-        setMenuPosition({
-          bottom: screenHeight - pageY + 4,
-          top: undefined,
-          right: 16,
-        });
-      } else {
-        // Enough space below — render below button
-        setMenuPosition({
-          top: pageY + height + 4,
-          bottom: undefined,
-          right: 16,
-        });
-      }
-      setFabMenuOpen(true);
-    });
-  };
-
-  useEffect(() => {
-    getPostComments(post.id).then((comments) => {
-      setCommentsCount(comments.length);
-    });
-  }, []);
+  const reportPost = () => { Alert.alert("Reported", "Thanks — we'll review this post."); };
+  const comingSoon = (what: string) => () => { Alert.alert("Coming soon", `${what} isn't available yet.`); };
 
   return (
     <View style={styles.actionRow}>
@@ -177,347 +143,20 @@ export function ActionRow({ post }: { post: Post }) {
       <TouchableOpacity
         style={styles.actionBtn}
         activeOpacity={0.7}
-        onPress={() => {}}
+        onPress={handleRepost}
       >
-        <Ionicons name="repeat" size={25} color="rgba(255,255,255,0.7)" />
-        {post.shares > 0 && (
-          <Text style={styles.actionCount}>{post.shares}</Text>
+        <Ionicons
+          name="repeat"
+          size={25}
+          color={reposted ? "#1DB954" : "rgba(255,255,255,0.7)"}
+        />
+        {repostCount > 0 && (
+          <Text style={[styles.actionCount, reposted && { color: "#1DB954" }]}>
+            {repostCount}
+          </Text>
         )}
       </TouchableOpacity>
 
-      <Modal
-        transparent
-        visible={fabMenuOpen}
-        animationType="fade"
-        onRequestClose={() => setFabMenuOpen(false)}
-      >
-        <Pressable style={{ flex: 1 }} onPress={closeMenu}>
-          <View
-            style={[
-              profileSStyles.fabMenu,
-              {
-                position: "absolute",
-                top: menuPosition.top,
-                bottom: menuPosition.bottom,
-                right: menuPosition.right,
-                overflow: "visible",
-              },
-            ]}
-          >
-            {/* ─── Type specific — always visible ─── */}
-            {post.type === "music" && (
-              <>
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={addToPlaylist}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>
-                      Add to Playlist
-                    </Text>
-                  </View>
-                  <Ionicons name="musical-notes" size={18} color="#1DB954" />
-                </TouchableOpacity>
-                <View style={profileSStyles.fabMenuDivider} />
-
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={openInSpotify}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>
-                      Open in Spotify
-                    </Text>
-                  </View>
-                  <Ionicons name="open-outline" size={18} color="#1DB954" />
-                </TouchableOpacity>
-                <View style={profileSStyles.fabMenuDivider} />
-
-                <TouchableOpacity
-              style={profileSStyles.fabMenuItem}
-              activeOpacity={0.8}
-              onPress={searchArtistOnSpotify}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={profileSStyles.fabMenuTitle}>View Artist Profile</Text>
-              </View>
-              <Ionicons name="eye-outline" size={18} color="#1DB954" />
-            </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={comingSoon("Starting a Meet from a post")}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>
-                      Start a Meet with this
-                    </Text>
-                  </View>
-                  <FontAwesome5
-                    name="broadcast-tower"
-                    size={15}
-                    color="#AB00FF"
-                  />
-                </TouchableOpacity>
-                <View style={profileSStyles.fabMenuDivider} />
-              </>
-            )}
-
-            {post.type === "video" && (
-              <>
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={comingSoon("Saving media")}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>Save Video</Text>
-                  </View>
-                  <Ionicons name="download-outline" size={18} color="#AB00FF" />
-                </TouchableOpacity>
-                <View style={profileSStyles.fabMenuDivider} />
-              </>
-            )}
-
-            {post.type === "image" && (
-              <>
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={comingSoon("Saving media")}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>Save Image</Text>
-                  </View>
-                  <Ionicons name="image-outline" size={18} color="#AB00FF" />
-                </TouchableOpacity>
-                <View style={profileSStyles.fabMenuDivider} />
-              </>
-            )}
-
-            {post.type === "poll" && (
-              <>
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={viewPollResults}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>
-                      View Poll Results
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="bar-chart-outline"
-                    size={18}
-                    color="#AB00FF"
-                  />
-                </TouchableOpacity>
-                <View style={profileSStyles.fabMenuDivider} />
-              </>
-            )}
-
-            {/* ─── Universal always visible ─── */}
-            <TouchableOpacity
-              style={profileSStyles.fabMenuItem}
-              activeOpacity={0.8}
-              onPress={comingSoon("Collections")}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={profileSStyles.fabMenuTitle}>
-                  Save to Collection
-                </Text>
-              </View>
-              <Ionicons name="bookmark-outline" size={18} color="#AB00FF" />
-            </TouchableOpacity>
-            <View style={profileSStyles.fabMenuDivider} />
-
-            
-            <View style={profileSStyles.fabMenuDivider} />
-
-            {/* ─── More Options toggle ─── */}
-            <TouchableOpacity
-              style={profileSStyles.fabMenuItem}
-              activeOpacity={0.8}
-              onPress={() => setMoreOptionsOpen((prev) => !prev)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={profileSStyles.fabMenuTitle}>More Options</Text>
-              </View>
-              <Ionicons
-                name={moreOptionsOpen ? "chevron-up" : "chevron-down"}
-                size={16}
-                color="rgba(255,255,255,0.4)"
-                style={{ marginLeft: 8 }}
-              />
-            </TouchableOpacity>
-
-            {/* ─── Overlay dropdown — sits on top of menu ─── */}
-            {moreOptionsOpen && (
-              <View
-                style={{
-                  position: "absolute",
-                  bottom: "0%", // sits directly above the menu
-                  right: 0,
-                  width: "100%",
-                  backgroundColor: "#1A1A1A",
-                  borderRadius: 14,
-                  borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.08)",
-                  overflow: "hidden",
-                  zIndex: 99,
-                  // subtle shadow to lift it visually
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: -4 },
-                  shadowOpacity: 0.3,
-                  shadowRadius: 8,
-                  elevation: 10,
-                }}
-              >
-                {post.type === "music" && (
-                  <>
-                    <TouchableOpacity
-                      style={profileSStyles.fabMenuItem}
-                      activeOpacity={0.8}
-                      onPress={searchArtistOnSpotify}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={profileSStyles.fabMenuTitle}>
-                          Follow Artist
-                        </Text>
-                      </View>
-                      <Ionicons name="person-add" size={18} color="#AB00FF" />
-                    </TouchableOpacity>
-                    <View style={profileSStyles.fabMenuDivider} />
-                  </>
-                )}
-                {post.authorId !== currentUserId && (
-                  <>
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={toggleFollowUser}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>
-                      {isFollowing ? "Following" : "Follow"} {post.user}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name={isFollowing ? "checkmark" : "person-add-outline"}
-                    size={18}
-                    color="#AB00FF"
-                  />
-                </TouchableOpacity>
-                </>
-                )}
-                <View style={profileSStyles.fabMenuDivider} />
-
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={notInterested}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>
-                      Not Interested
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="eye-off-outline"
-                    size={18}
-                    color="rgba(255,255,255,0.4)"
-                  />
-                </TouchableOpacity>
-                <View style={profileSStyles.fabMenuDivider} />
-
-                {post.authorId !== currentUserId && (
-                  <>
-
-                <TouchableOpacity
-                  style={profileSStyles.fabMenuItem}
-                  activeOpacity={0.8}
-                  onPress={reportPost}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={profileSStyles.fabMenuTitle}>Report Post</Text>
-                  </View>
-                  <Ionicons
-                    name="flag-outline"
-                    size={18}
-                    color="rgba(255,255,255,0.4)"
-                  />
-                </TouchableOpacity>
-                </>
-                )}
-
-                {post.authorId === currentUserId && (
-                  <>
-                    <View style={profileSStyles.fabMenuDivider} />
-                    <TouchableOpacity
-                      style={profileSStyles.fabMenuItem}
-                      activeOpacity={0.8}
-                      onPress={comingSoon("Editing posts")}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={profileSStyles.fabMenuTitle}>
-                          Edit Post
-                        </Text>
-                      </View>
-                      <Ionicons
-                        name="create-outline"
-                        size={18}
-                        color="rgba(255,255,255,0.5)"
-                      />
-                    </TouchableOpacity>
-                    <View style={profileSStyles.fabMenuDivider} />
-                    <TouchableOpacity
-                      style={profileSStyles.fabMenuItem}
-                      activeOpacity={0.8}
-                      onPress={confirmDelete}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[
-                            profileSStyles.fabMenuTitle,
-                            { color: "#ff3b30" },
-                          ]}
-                        >
-                          Delete Post
-                        </Text>
-                      </View>
-                      <FontAwesome5
-                        name="trash-alt"
-                        size={15}
-                        color="#ff3b30"
-                      />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-              style={profileSStyles.fabMenuItem}
-              activeOpacity={0.8}
-              onPress={() => setMoreOptionsOpen((prev) => !prev)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={profileSStyles.fabMenuTitle}>Less Options</Text>
-              </View>
-              <Ionicons
-                name={moreOptionsOpen ? "chevron-up" : "chevron-down"}
-                size={16}
-                color="rgba(255,255,255,0.4)"
-                style={{ marginLeft: 8 }}
-              />
-            </TouchableOpacity>
-                  </>
-                )}
-              </View>
-            )}
-          </View>
-        </Pressable>
-      </Modal>
       <TouchableOpacity
         style={styles.actionBtn}
         activeOpacity={0.7}
@@ -534,12 +173,43 @@ export function ActionRow({ post }: { post: Post }) {
       </TouchableOpacity>
       <View style={{ flex: 1 }} />
       <TouchableOpacity
-        ref={moreButtonRef}
         activeOpacity={0.7}
-        onPress={openMenu}
+        onPress={() => setMenuOpen(true)}
       >
         <Text style={styles.moreIcon}>···</Text>
       </TouchableOpacity>
+
+      {unrepostConfirmOpen && (
+        <UnrepostConfirmOverlay
+          post={post}
+          onClose={() => setUnrepostConfirmOpen(false)}
+          onConfirm={confirmUnrepost}
+        />
+      )}
+
+      {menuOpen && (
+        <PostActionsOverlay
+          post={post}
+          isOwnPost={isOwnPost}
+          isFollowing={isFollowing}
+          onClose={() => setMenuOpen(false)}
+          handlers={{
+            onAddToPlaylist: addToPlaylist,
+            onOpenInSpotify: openInSpotify,
+            onViewArtist: searchArtistOnSpotify,
+            onStartMeet: comingSoon("Starting a Meet from a post"),
+            onFollowArtist: comingSoon("Following the artist"),
+            onSaveMedia: comingSoon("Saving media"),
+            onViewPollResults: viewPollResults,
+            onSaveToCollection: comingSoon("Collections"),
+            onToggleFollowUser: toggleFollowUser,
+            onReportPost: reportPost,
+            onNotInterested: notInterested,
+            onEditPost: comingSoon("Editing posts"),
+            onDeletePost: confirmDelete,
+          }}
+        />
+      )}
 
       <AddToPlaylistSheet
         visible={pickerOpen}

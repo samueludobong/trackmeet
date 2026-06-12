@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { MusicStoryCard } from "../components/stories/MusicStoryCard";
+import { useStoryAudioPool } from "../hooks/useStoryAudioPool";
 import { SW } from "../lib/feed/dimensions";
 
 const CARD_SIZE = Math.min(SW - 80, 320);
+// Stable empty preload window so the audio pool effect doesn't churn each render.
+const NO_PRELOAD: string[] = [];
 
 export default function StoryCardPickerScreen() {
   const router = useRouter();
@@ -15,6 +18,8 @@ export default function StoryCardPickerScreen() {
   }>();
 
   const [design, setDesign] = useState<number>(0);
+  const [durationSec, setDurationSec] = useState<number>(5);
+  const [muted, setMuted] = useState(false);
   const [me, setMe] = useState<{ id: string; username: string; display_name: string | null; avatar_url: string | null } | null>(null);
 
   useEffect(() => {
@@ -35,15 +40,23 @@ export default function StoryCardPickerScreen() {
     [songId, songName, songArtist, songAlbumArt],
   );
 
+  // Preview the song while picking a style, so you hear what you're posting.
+  // Pause when this screen is backgrounded (e.g. the canvas is pushed on top)
+  // so its audio doesn't double with the next screen's.
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(useCallback(() => { setFocused(true); return () => setFocused(false); }, []));
+  useStoryAudioPool({ activeSongId: songId ? song.id : null, preloadSongIds: NO_PRELOAD, paused: !focused, muted });
+
   const goNext = () => {
     router.push({
-      pathname: "/story-text-editor",
+      pathname: "/story-canvas",
       params: {
         songId: song.id,
         songName: song.name,
         songArtist: song.artist,
         songAlbumArt: song.albumArt ?? "",
         cardDesign: String(design),
+        durationMs: String(durationSec * 1000),
       },
     });
   };
@@ -55,7 +68,9 @@ export default function StoryCardPickerScreen() {
           <Ionicons name="chevron-back" size={22} color="#fff" />
         </TouchableOpacity>
         <Text style={s.title}>Pick a card</Text>
-        <View style={s.iconBtn} />
+        <TouchableOpacity onPress={() => setMuted((m) => !m)} style={s.iconBtn} activeOpacity={0.7}>
+          <Ionicons name={muted ? "volume-mute" : "volume-high"} size={20} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       <View style={{ alignItems: "center", marginTop: 14 }}>
@@ -72,7 +87,7 @@ export default function StoryCardPickerScreen() {
         />
       </View>
 
-      <Text style={s.helper}>Pick a card. You'll add text on the next step.</Text>
+      <Text style={s.helper}>Pick a card. You&apos;ll arrange and customize it on the canvas next.</Text>
 
       <ScrollView
         horizontal
@@ -105,6 +120,24 @@ export default function StoryCardPickerScreen() {
 
       <View style={{ flex: 1 }} />
 
+      {/* Duration selector — how long the story shows. */}
+      <Text style={s.durationLabel}>Duration</Text>
+      <View style={s.durationRow}>
+        {[5, 15, 30].map((sec) => {
+          const active = durationSec === sec;
+          return (
+            <TouchableOpacity
+              key={sec}
+              activeOpacity={0.85}
+              onPress={() => setDurationSec(sec)}
+              style={[s.durationChip, active && s.durationChipActive]}
+            >
+              <Text style={[s.durationChipTxt, active && { color: "#fff" }]}>{sec}s</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       <TouchableOpacity activeOpacity={0.9} onPress={goNext} disabled={!me} style={[s.postBtn, !me && { opacity: 0.6 }]}>
         <Text style={s.postBtnTxt}>Next</Text>
         <Ionicons name="arrow-forward" size={16} color="#0D0D0D" />
@@ -124,6 +157,15 @@ const s = StyleSheet.create({
   thumbWrap: { padding: 6, borderRadius: 18, alignItems: "center", borderWidth: 2, borderColor: "transparent", gap: 6 },
   thumbWrapActive: { borderColor: "#AB00FF" },
   thumbLabel: { color: "rgba(255,255,255,0.5)", fontSize: 11, fontWeight: "700" },
+
+  durationLabel: { color: "rgba(255,255,255,0.5)", fontSize: 11, fontWeight: "700", textAlign: "center", marginBottom: 10, letterSpacing: 0.4, textTransform: "uppercase" },
+  durationRow: { flexDirection: "row", justifyContent: "center", gap: 10, marginBottom: 20 },
+  durationChip: {
+    minWidth: 64, paddingVertical: 10, borderRadius: 999, alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.12)",
+  },
+  durationChipActive: { backgroundColor: "rgba(171,0,255,0.18)", borderColor: "#AB00FF" },
+  durationChipTxt: { color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: "800" },
 
   postBtn: { backgroundColor: "#fff", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 16, paddingVertical: 14, borderRadius: 999 },
   postBtnTxt: { color: "#0D0D0D", fontSize: 14, fontWeight: "800" },

@@ -6,9 +6,12 @@ import { SW, SH } from "../lib/feed/dimensions";
 import { type NowPlayingTrack } from "./useNowPlaying";
 
 /** Spotify browse + playback control + canvas video for the host's live-meet screen. */
-export function useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs }: {
+export function useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, onControl }: {
   visible: boolean; accessToken: string | null; userId: string | null;
   track: NowPlayingTrack | null; liveProgressMs: number;
+  // In a co-controlled DM jam, fired before any playback action so the actor
+  // claims the "driver" role. Undefined (no-op) for normal host meets.
+  onControl?: () => void;
 }) {
   const slideAnim   = useRef(new Animated.Value(SH)).current;
   const musicSlideX = useRef(new Animated.Value(SW)).current;  // slides in from right
@@ -168,24 +171,28 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
 
   const handlePrev = async () => {
     if (!tok || ctrlLoading) return;
+    onControl?.();
     setCtrlLoading(true);
     await skipPrevious(tok);
     setTimeout(() => setCtrlLoading(false), 800);
   };
   const handleNext = async () => {
     if (!tok || ctrlLoading) return;
+    onControl?.();
     setCtrlLoading(true);
     await skipNext(tok);
     setTimeout(() => setCtrlLoading(false), 800);
   };
   const handlePlayPause = async () => {
     if (!tok || ctrlLoading || !track) return;
+    onControl?.();
     setCtrlLoading(true);
     await setPlayback(tok, !track.isPlaying);
     setTimeout(() => setCtrlLoading(false), 600);
   };
   const handlePlayTrack = async (t: SpotifyTrackResult) => {
     if (!tok) return;
+    onControl?.();
     setPlayingId(t.id);
     await playTrack(tok, `spotify:track:${t.id}`);
   };

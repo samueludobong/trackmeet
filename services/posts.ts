@@ -45,7 +45,7 @@ import { dbRowToPost } from "../lib/feed/helpers";
 import { type Post } from "../app/data/mock";
 
 const FEED_POST_SELECT =
-  "id, type, text, media_urls, media_aspect, song_id, song_name, song_artist, song_album_art, song_preview_url, poll_question, poll_options, voice_url, voice_duration_ms, voice_waveform, created_at, likes_count, comments_count, community_id, users!user_id(id, username, display_name, avatar_url, is_verified), communities!community_id(id, name, slug)";
+  "id, type, text, media_urls, media_aspect, song_id, song_name, song_artist, song_album_art, song_preview_url, poll_question, poll_options, voice_url, voice_duration_ms, voice_waveform, created_at, likes_count, comments_count, reposts_count, community_id, users!user_id(id, username, display_name, avatar_url, is_verified), communities!community_id(id, name, slug)";
 
 /** Fetch the latest feed posts (newest first). */
 export async function getFeedPosts(limit = 50): Promise<Post[]> {
@@ -71,6 +71,37 @@ export async function togglePostLike(postId: string, userId: string): Promise<{ 
   return data as { likes_count: number; liked: boolean };
 }
 
+/** Return the set of post ids the user has reposted. */
+export async function getRepostedPostIds(userId: string): Promise<Set<string>> {
+  const { data } = await supabase.from("post_reposts").select("post_id").eq("user_id", userId);
+  return new Set((data ?? []).map((r: any) => r.post_id));
+}
+
+/** Toggle a repost via the toggle_post_repost RPC; returns count + reposted state. */
+export async function togglePostRepost(postId: string, userId: string): Promise<{ reposts_count: number; reposted: boolean }> {
+  const { data, error } = await supabase.rpc("toggle_post_repost", { p_post_id: postId, p_user_id: userId });
+  if (error) throw error;
+  return data as { reposts_count: number; reposted: boolean };
+}
+
+/**
+ * Fetch the posts a user has reposted (most-recently reposted first). Used by
+ * the profile "Reposts" tab. Joins through post_reposts → posts so we get the
+ * full post data plus the repost timestamp for ordering.
+ */
+export async function getUserReposts(userId: string): Promise<Post[]> {
+  const { data, error } = await supabase
+    .from("post_reposts")
+    .select(`created_at, posts!post_id(${FEED_POST_SELECT})`)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? [])
+    .map((r: any) => (Array.isArray(r.posts) ? r.posts[0] : r.posts))
+    .filter(Boolean)
+    .map(dbRowToPost);
+}
+
 /** Delete a post (RLS restricts this to the owner). */
 export async function deletePost(postId: string): Promise<void> {
   const { error } = await supabase.from("posts").delete().eq("id", postId);
@@ -89,7 +120,20 @@ export function toggleCommentLike(commentId: string, userId: string) {
   return supabase.rpc("toggle_comment_like", { p_comment_id: commentId, p_user_id: userId });
 }
 
-/** Cast / change a poll vote via the SECURITY DEFINER RPC. */
-export async function voteOnPoll(postId: string, optId: string, prevOptId: string | null) {
-  return supabase.rpc("vote_on_poll", { p_post_id: postId, p_opt_id: optId, p_prev_opt_id: prevOptId });
+/** Cast / change a poll vote. The RPC is server-authoritative — it looks up
+ *  the user's existing vote in `poll_votes` and decides insert/change/no-op,
+ *  so the same user can't double-vote by remounting the card. */
+export async function voteOnPoll(postId: string, optId: string) {
+  return supabase.rpc("vote_on_poll", { p_post_id: postId, p_opt_id: optId });
+}
+
+/** Returns a Map of postId → optId for every poll the user has voted on. */
+export async function getMyPollVotes(userId: string): Promise<Map<string, string>> {
+  const { data } = await supabase
+    .from("poll_votes")
+    .select("post_id, opt_id")
+    .eq("user_id", userId);
+  const map = new Map<string, string>();
+  (data ?? []).forEach((r: any) => map.set(r.post_id, r.opt_id));
+  return map;
 }

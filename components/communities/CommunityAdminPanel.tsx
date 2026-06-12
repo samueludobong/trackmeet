@@ -7,7 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   updateCommunity, deleteCommunity,
-  getCommunityRules, getCommunityTags,
+  getCommunityRules, getCommunityTags, listJoinRequests,
   type Community, type CommunityArtist, type CommunityRole,
 } from "../../services/communities";
 import { adminStyles as a } from "./adminPanel.styles";
@@ -16,8 +16,10 @@ import { AdminPanelDetails } from "./AdminPanelDetails";
 import { AdminPanelSettings } from "./AdminPanelSettings";
 import { AdminPanelMembers } from "./AdminPanelMembers";
 import { AdminPanelPosts } from "./AdminPanelPosts";
+import { AdminPanelRequests } from "./AdminPanelRequests";
+import { AdminPanelInsights } from "./AdminPanelInsights";
 
-type Tab = "details" | "settings" | "members" | "posts" | "danger";
+type Tab = "details" | "settings" | "members" | "requests" | "posts" | "insights" | "danger";
 
 export function CommunityAdminPanel({
   community, userId, myRole, onClose, onUpdated, onDeleted,
@@ -31,7 +33,9 @@ export function CommunityAdminPanel({
   const [name, setName] = useState(community.name);
   const [description, setDescription] = useState(community.description ?? "");
   const [rules, setRules] = useState<string>("");
+  const [welcomeMessage, setWelcomeMessage] = useState<string>(community.welcome_message ?? "");
   const [tagsText, setTagsText] = useState<string>("");
+  const [requestCount, setRequestCount] = useState(0);
   const [imageUri, setImageUri] = useState<string | null>(community.avatar_url);
   const [imageUrl, setImageUrl] = useState<string | null>(community.avatar_url);
   const [bannerUri, setBannerUri] = useState<string | null>(community.banner_url);
@@ -51,6 +55,8 @@ export function CommunityAdminPanel({
   useEffect(() => {
     getCommunityRules(community.id).then((r) => setRules(r ?? ""));
     getCommunityTags(community.id).then((t) => setTagsText(t.join(", ")));
+    // Pending-request badge on the tab, even before opening it.
+    listJoinRequests(community.id).then((r) => setRequestCount(r.length)).catch(() => {});
   }, [community.id]);
 
   const save = async () => {
@@ -63,7 +69,7 @@ export function CommunityAdminPanel({
         bannerUrl, bannerColor,
         artistId: artist ? artist.id : undefined,
         isPrivate, allowPosts, allowAnyoneToPost, allowComments, allowOfftopic,
-        tags, rules,
+        tags, rules, welcomeMessage,
       });
       onUpdated(updated);
       Alert.alert("Saved", "Community updated.");
@@ -105,7 +111,9 @@ export function CommunityAdminPanel({
           <TabPill label="Details" icon="create-outline" active={tab === "details"} onPress={() => setTab("details")} />
           <TabPill label="Settings" icon="options-outline" active={tab === "settings"} onPress={() => setTab("settings")} />
           <TabPill label="Members" icon="people-outline" active={tab === "members"} onPress={() => setTab("members")} />
+          <TabPill label="Requests" icon="person-add-outline" active={tab === "requests"} onPress={() => setTab("requests")} badge={requestCount} />
           <TabPill label="Posts" icon="chatbubbles-outline" active={tab === "posts"} onPress={() => setTab("posts")} />
+          <TabPill label="Insights" icon="stats-chart-outline" active={tab === "insights"} onPress={() => setTab("insights")} />
           {myRole === "owner" && (
             <TabPill label="Danger" icon="warning-outline" active={tab === "danger"} onPress={() => setTab("danger")} danger />
           )}
@@ -122,6 +130,7 @@ export function CommunityAdminPanel({
                 name={name} setName={setName}
                 description={description} setDescription={setDescription}
                 rules={rules} setRules={setRules}
+                welcomeMessage={welcomeMessage} setWelcomeMessage={setWelcomeMessage}
                 tagsText={tagsText} setTagsText={setTagsText}
                 imageUri={imageUri} setImageUri={setImageUri} setImageUrl={setImageUrl}
                 bannerUri={bannerUri} setBannerUri={setBannerUri} setBannerUrl={setBannerUrl}
@@ -139,7 +148,9 @@ export function CommunityAdminPanel({
               />
             )}
             {tab === "members" && <AdminPanelMembers communityId={community.id} viewerId={userId} myRole={myRole} />}
+            {tab === "requests" && <AdminPanelRequests communityId={community.id} onCountChange={setRequestCount} />}
             {tab === "posts" && <AdminPanelPosts communityId={community.id} />}
+            {tab === "insights" && <AdminPanelInsights communityId={community.id} />}
             {tab === "danger" && (
               <View style={{ gap: 14 }}>
                 <Text style={a.helper}>Destructive actions. Be careful.</Text>

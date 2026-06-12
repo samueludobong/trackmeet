@@ -27,7 +27,8 @@
       "Bash(node scripts/exhook.mjs components/profile/SettingsOverlay.tsx useSettingsOverlay \"{ profile, userId, onClose, onProfileRefresh }: { profile: UserProfile | null; userId: string | null; onClose: \\(\\) => void; onProfileRefresh: \\(\\) => void }\" \"{ profile, userId, onClose, onProfileRefresh }\")",
       "Bash(node scripts/rmunused.mjs components/profile/SettingsOverlay.tsx hooks/useSettingsOverlay.ts)",
       "Bash(xargs grep -lE \"\\\\.interpolate\")",
-      "PowerShell(npx tsc --noEmit 2>&1 | Select-String -Pattern \"^\\\\S+\\\\.tsx?\\\\\\(\" | ForEach-Object { \\($_ -split '\\\\\\('\\)[0] } | Sort-Object -Unique)"
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-String -Pattern \"^\\\\S+\\\\.tsx?\\\\\\(\" | ForEach-Object { \\($_ -split '\\\\\\('\\)[0] } | Sort-Object -Unique)",
+      "Bash(grep -Ei \"groupChats|GroupChat|useGroupChat|CreateGroup|GroupSettings|app/feed.tsx|app\\\\\\\\\\\\\\\\feed.tsx\")"
     ]
   }
 }

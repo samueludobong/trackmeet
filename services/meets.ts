@@ -24,6 +24,10 @@ export type MeetRow = {
   position_updated_at: string | null
   talk_mode: boolean
   show_on_profile: boolean
+  // ── Private DM jam fields (null/false for normal meets) ──
+  conversation_id: string | null
+  is_personal: boolean
+  driver_id: string | null
 }
 
 export type LiveMeet = MeetRow & {
@@ -186,6 +190,8 @@ export const getActiveMeetForUser = async (
     const { data: meet } = await supabase
       .from('meets').select('*').eq('id', p.meet_id).eq('is_live', true).maybeSingle()
     if (!meet) continue
+    // Private DM jams are never surfaced as "in a meet" — they're personal.
+    if (meet.is_personal) continue
     const isHost = meet.host_id === userId
     // External viewers only see public participation — or any meet this user hosts.
     if (publicOnly && !p.is_public && !isHost) continue
@@ -209,6 +215,70 @@ export const leaveMeet = async (meetId: string): Promise<void> => {
     .update({ is_active: false, left_at: new Date().toISOString() })
     .eq('meet_id', meetId)
     .eq('user_id', user.id)
+}
+
+// ─── Private DM jams ───────────────────────────────────────────────────────────
+
+// Find the conversation's live jam, or create one. A jam is a personal (private,
+// hostless) meet scoped to a DM. The caller joins privately either way. No
+// follower/community notifications — it's not a broadcast.
+export const joinOrStartDmJam = async (
+  conversationId: string,
+): Promise<{ meetId?: string; error?: string }> => {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  // Existing live jam for this conversation?
+  const { data: existing } = await supabase
+    .from('meets')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('is_personal', true)
+    .eq('is_live', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (existing?.id) {
+    await joinMeet(existing.id, false)
+    return { meetId: existing.id }
+  }
+
+  // None yet — create it. host_id is just the creator (RLS lets either member
+  // write); driver starts as the creator.
+  const { data, error } = await supabase
+    .from('meets')
+    .insert({
+      host_id:         user.id,
+      name:            'Jam',
+      is_live:         true,
+      is_personal:     true,
+      conversation_id: conversationId,
+      driver_id:       user.id,
+    })
+    .select('id')
+    .single()
+  if (error || !data) return { error: error?.message ?? 'Could not start jam' }
+
+  await joinMeet(data.id, false)
+  return { meetId: data.id }
+}
+
+// Mark the current playback driver (auto driver-switch). Called when a member
+// takes a control action so the other member's client starts following them.
+export const setMeetDriver = async (meetId: string, driverId: string): Promise<void> => {
+  await supabase.from('meets').update({ driver_id: driverId }).eq('id', meetId)
+}
+
+// After a member leaves a jam, end it if nobody's left so it doesn't linger.
+export const endDmJamIfEmpty = async (meetId: string): Promise<void> => {
+  const count = await getActiveListenerCount(meetId)
+  if (count === 0) {
+    await supabase
+      .from('meets')
+      .update({ is_live: false, ended_at: new Date().toISOString() })
+      .eq('id', meetId)
+  }
 }
 
 export const getActiveListenerCount = async (meetId: string): Promise<number> => {
@@ -240,6 +310,7 @@ export const getLiveMeetsFromFollowing = async (): Promise<LiveMeet[]> => {
     .from('meets')
     .select('*')
     .eq('is_live', true)
+    .eq('is_personal', false)   // private DM jams never appear in discovery
     .in('host_id', hostIds)
     .order('created_at', { ascending: false })
 

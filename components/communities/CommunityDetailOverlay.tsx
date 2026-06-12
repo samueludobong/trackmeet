@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   Modal, View, Text, ScrollView, TouchableOpacity, TextInput,
-  ActivityIndicator, Platform, KeyboardAvoidingView,
+  ActivityIndicator, Platform, KeyboardAvoidingView, StyleSheet, Image, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,15 +11,22 @@ import {
   joinCommunity, leaveCommunity, isMember, getMyRole,
   getActiveTodayCount, getBroadcastingMembers, getLiveCommunityMeet,
   getNotificationPref, setNotificationPref, slugify,
+  getCommunityRules, getMyLikedCommunityPostIds, toggleCommunityPostLike,
+  setCommunityPostPinned, setCommunityPostAnnouncement, deleteCommunityPost,
+  requestToJoin, cancelJoinRequest, getMyJoinRequestStatus,
   type Community, type CommunityPost, type CommunityRole,
   type BroadcastingMember, type LiveCommunityMeet, type CommunityNotificationPref,
+  type JoinRequestStatus,
 } from "../../services/communities";
+import { searchSpotifyTracks, getValidSpotifyToken, type SpotifyTrackResult } from "../../lib/spotify";
 import { CommunityPostCard } from "./CommunityPostCard";
 import { CommunityAdminPanel } from "./CommunityAdminPanel";
 import { CommunityBanner } from "./CommunityBanner";
 import { CommunityToast } from "./CommunityToast";
 import { CommunityActionRow } from "./CommunityActionRow";
 import { CommunityAvatar } from "./CommunityAvatar";
+import { CommunityCommentsSheet } from "./CommunityCommentsSheet";
+import { CommunityMembersSheet } from "./CommunityMembersSheet";
 import { NowPlayingRow } from "./NowPlayingRow";
 import { NowPlayingGrid } from "./NowPlayingGrid";
 import { LiveMeetCard } from "./LiveMeetCard";
@@ -43,6 +50,7 @@ export function CommunityDetailOverlay({
   const [joined, setJoined] = useState(false);
   const [notifPref, setNotifPref] = useState<CommunityNotificationPref>("all");
   const [toastVisible, setToastVisible] = useState(true);
+  const [welcomeToast, setWelcomeToast] = useState(false);
   const [memberCount, setMemberCount] = useState(community.member_count);
   const [activeToday, setActiveToday] = useState(0);
   const [broadcasting, setBroadcasting] = useState<BroadcastingMember[]>([]);
@@ -52,9 +60,28 @@ export function CommunityDetailOverlay({
   const [gridOpen, setGridOpen] = useState(false);
   const [live, setLive] = useState<Community>(community);
 
+  // Phase 3: likes, comments, rules, members directory, private join requests.
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [commentsPost, setCommentsPost] = useState<CommunityPost | null>(null);
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [rules, setRules] = useState<string | null>(null);
+  const [rulesExpanded, setRulesExpanded] = useState(false);
+  const [joinReqStatus, setJoinReqStatus] = useState<JoinRequestStatus | null>(null);
+
+  // Composer extras: attach a song + (admins) announcement flag.
+  const [attachedSong, setAttachedSong] = useState<SpotifyTrackResult | null>(null);
+  const [songSearchOpen, setSongSearchOpen] = useState(false);
+  const [songQuery, setSongQuery] = useState("");
+  const [songResults, setSongResults] = useState<SpotifyTrackResult[]>([]);
+  const [songSearching, setSongSearching] = useState(false);
+  const [isAnnouncement, setIsAnnouncement] = useState(false);
+
   const slug = live.slug || slugify(live.name);
-  const canPost = joined && live.allow_anyone_to_post && live.allow_posts && !!userId;
   const isAdmin = myRole === "owner" || myRole === "moderator";
+  const canPost = joined && (live.allow_anyone_to_post || isAdmin) && live.allow_posts && !!userId;
+  const canComment = joined && live.allow_comments && !!userId;
+  // Private + not a member → join goes through the request queue.
+  const requestMode = live.is_private && !joined;
 
   useEffect(() => {
     let active = true;
@@ -66,33 +93,140 @@ export function CommunityDetailOverlay({
       getActiveTodayCount(community.id),
       getBroadcastingMembers(community.id),
       getLiveCommunityMeet(community.id),
-    ]).then(([p, m, r, np, at, br, lm]) => {
+      getCommunityRules(community.id),
+    ]).then(async ([p, m, r, np, at, br, lm, ru]) => {
       if (!active) return;
       setPosts(p); setJoined(m); setMyRole(r); setNotifPref(np);
-      setActiveToday(at); setBroadcasting(br); setLiveMeet(lm);
+      setActiveToday(at); setBroadcasting(br); setLiveMeet(lm); setRules(ru);
+      if (userId) {
+        const [likes, reqStatus] = await Promise.all([
+          getMyLikedCommunityPostIds(userId, p.map((x) => x.id)),
+          community.is_private && !m ? getMyJoinRequestStatus(community.id, userId) : Promise.resolve(null),
+        ]);
+        if (!active) return;
+        setLikedIds(likes);
+        setJoinReqStatus(reqStatus);
+      }
     }).finally(() => active && setLoading(false));
     return () => { active = false; };
   }, [community.id, userId]);
 
   const toggleJoined = async () => {
     if (!userId) return;
+    // Private community: request / cancel-request instead of instant join.
+    if (requestMode) {
+      if (joinReqStatus === "pending") {
+        setJoinReqStatus(null);
+        try { await cancelJoinRequest(community.id, userId); }
+        catch { setJoinReqStatus("pending"); }
+      } else {
+        setJoinReqStatus("pending");
+        try { await requestToJoin(community.id, userId); }
+        catch { setJoinReqStatus(null); }
+      }
+      return;
+    }
     const next = !joined;
     setJoined(next); setMemberCount((c) => Math.max(0, c + (next ? 1 : -1)));
-    try { if (next) await joinCommunity(community.id, userId); else await leaveCommunity(community.id, userId); }
+    try {
+      if (next) {
+        await joinCommunity(community.id, userId);
+        if (live.welcome_message) setWelcomeToast(true);
+      } else {
+        await leaveCommunity(community.id, userId);
+      }
+    }
     catch { setJoined(!next); setMemberCount((c) => Math.max(0, c + (next ? -1 : 1))); }
   };
+
   const cyclePref = async (next: CommunityNotificationPref) => {
     if (!userId) return;
     const prev = notifPref; setNotifPref(next);
     try { await setNotificationPref(community.id, userId, next); } catch { setNotifPref(prev); }
   };
-  const handlePost = async () => {
-    if (!userId || !text.trim() || posting) return;
-    setPosting(true); const body = text.trim(); setText("");
+
+  const runSongSearch = async (q: string) => {
+    setSongQuery(q);
+    if (!userId || q.trim().length < 2) { setSongResults([]); return; }
+    setSongSearching(true);
     try {
-      const post = await createCommunityPost(community.id, userId, { text: body });
+      const token = await getValidSpotifyToken(userId);
+      if (token) setSongResults(await searchSpotifyTracks(token, q.trim(), 6));
+    } catch { /* results stay empty */ }
+    finally { setSongSearching(false); }
+  };
+
+  const handlePost = async () => {
+    if (!userId || (!text.trim() && !attachedSong) || posting) return;
+    setPosting(true);
+    const body = text.trim(); setText("");
+    const song = attachedSong; setAttachedSong(null);
+    const announce = isAnnouncement; setIsAnnouncement(false);
+    setSongSearchOpen(false); setSongQuery(""); setSongResults([]);
+    try {
+      const post = await createCommunityPost(community.id, userId, {
+        text: body || null,
+        song: song ? { id: song.id, name: song.name, artist: song.artist, albumArt: song.albumArt } : null,
+        isAnnouncement: announce && isAdmin,
+      });
       setPosts((prev) => [post, ...prev]);
-    } catch { setText(body); } finally { setPosting(false); }
+    } catch (e: any) {
+      setText(body); setAttachedSong(song); setIsAnnouncement(announce);
+      Alert.alert("Couldn't post", e?.message ?? "Try again.");
+    } finally { setPosting(false); }
+  };
+
+  // ── Per-post actions (likes, pins, announcements, delete) ────────────────────
+  const toggleLike = async (post: CommunityPost) => {
+    if (!userId) return;
+    const isLiked = likedIds.has(post.id);
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      if (isLiked) next.delete(post.id); else next.add(post.id);
+      return next;
+    });
+    setPosts((prev) => prev.map((p) =>
+      p.id === post.id ? { ...p, likes_count: Math.max(0, p.likes_count + (isLiked ? -1 : 1)) } : p));
+    try { await toggleCommunityPostLike(post.id, userId, !isLiked); }
+    catch {
+      setLikedIds((prev) => {
+        const next = new Set(prev);
+        if (isLiked) next.add(post.id); else next.delete(post.id);
+        return next;
+      });
+      setPosts((prev) => prev.map((p) =>
+        p.id === post.id ? { ...p, likes_count: Math.max(0, p.likes_count + (isLiked ? 1 : -1)) } : p));
+    }
+  };
+
+  const togglePin = async (post: CommunityPost) => {
+    const pin = !post.pinned_at;
+    try {
+      await setCommunityPostPinned(post.id, pin);
+      setPosts(await getCommunityPosts(community.id));
+    } catch (e: any) { Alert.alert("Couldn't update pin", e?.message ?? "Try again."); }
+  };
+
+  const toggleAnnouncement = async (post: CommunityPost) => {
+    const next = !post.is_announcement;
+    setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, is_announcement: next } : p)));
+    try { await setCommunityPostAnnouncement(post.id, next); }
+    catch { setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, is_announcement: !next } : p))); }
+  };
+
+  const deletePost = (post: CommunityPost) => {
+    Alert.alert("Delete post?", "This permanently removes the post.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete", style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteCommunityPost(post.id);
+            setPosts((prev) => prev.filter((p) => p.id !== post.id));
+          } catch (e: any) { Alert.alert("Couldn't delete", e?.message ?? "Try again."); }
+        },
+      },
+    ]);
   };
 
   return (
@@ -106,7 +240,14 @@ export function CommunityDetailOverlay({
           <View style={{ width: 38 }} />
         </View>
 
-        <CommunityToast visible={toastVisible && notifPref !== "muted"} slug={slug} onDismiss={() => setToastVisible(false)} />
+        <CommunityToast visible={toastVisible && notifPref !== "muted" && !welcomeToast} slug={slug} onDismiss={() => setToastVisible(false)} />
+        <CommunityToast
+          visible={welcomeToast}
+          slug={slug}
+          icon="hand-left"
+          message={live.welcome_message ?? `Welcome to /${slug}!`}
+          onDismiss={() => setWelcomeToast(false)}
+        />
 
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <ScrollView showsVerticalScrollIndicator={false}
@@ -129,9 +270,21 @@ export function CommunityDetailOverlay({
 
             <CommunityActionRow joined={joined} notifPref={notifPref} isAdmin={isAdmin} canJoin={!!userId}
               slug={slug} communityName={live.name}
+              requestMode={requestMode} requested={joinReqStatus === "pending"}
               onToggleJoin={toggleJoined} onCyclePref={cyclePref} onOpenSettings={() => setAdminOpen(true)} />
 
             {!!live.description && <Text style={s.description}>{live.description}</Text>}
+
+            {!!rules && (
+              <TouchableOpacity style={x.rulesCard} activeOpacity={0.85} onPress={() => setRulesExpanded((v) => !v)}>
+                <View style={x.rulesHead}>
+                  <Ionicons name="shield-checkmark-outline" size={15} color="#AB00FF" />
+                  <Text style={x.rulesTitle}>Community Rules</Text>
+                  <Ionicons name={rulesExpanded ? "chevron-up" : "chevron-down"} size={15} color="rgba(255,255,255,0.4)" />
+                </View>
+                {rulesExpanded && <Text style={x.rulesBody}>{rules}</Text>}
+              </TouchableOpacity>
+            )}
 
             {live.genres?.length > 0 && (
               <View style={s.genreRow}>
@@ -142,7 +295,10 @@ export function CommunityDetailOverlay({
             )}
 
             <View style={s.statsRow}>
-              <Stat number={fmtCount(memberCount)} label="Members" />
+              <TouchableOpacity style={s.stat} activeOpacity={0.7} onPress={() => setMembersOpen(true)}>
+                <Text style={s.statNumber} numberOfLines={1}>{fmtCount(memberCount)}</Text>
+                <Text style={s.statLabel}>Members ›</Text>
+              </TouchableOpacity>
               <View style={s.statDivider} />
               <Stat number={fmtCount(live.post_count || posts.length)} label="Posts" />
               <View style={s.statDivider} />
@@ -152,15 +308,86 @@ export function CommunityDetailOverlay({
             <NowPlayingRow members={broadcasting} onSeeAll={() => setGridOpen(true)} />
 
             {canPost && (
-              <View style={s.composer}>
-                <TextInput style={s.composerInput}
-                  placeholder={`Share something in /${slug}…`}
-                  placeholderTextColor="rgba(255,255,255,0.35)"
-                  value={text} onChangeText={setText} multiline />
-                <TouchableOpacity style={[s.postBtn, (!text.trim() || posting) && { opacity: 0.5 }]}
-                  onPress={handlePost} disabled={!text.trim() || posting} activeOpacity={0.85}>
-                  {posting ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={16} color="#fff" />}
-                </TouchableOpacity>
+              <View>
+                <View style={s.composer}>
+                  <TextInput style={s.composerInput}
+                    placeholder={`Share something in /${slug}…`}
+                    placeholderTextColor="rgba(255,255,255,0.35)"
+                    value={text} onChangeText={setText} multiline />
+                  <TouchableOpacity
+                    style={x.composerIconBtn}
+                    onPress={() => setSongSearchOpen((v) => !v)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="musical-notes" size={16} color={attachedSong || songSearchOpen ? "#1DB954" : "rgba(255,255,255,0.6)"} />
+                  </TouchableOpacity>
+                  {isAdmin && (
+                    <TouchableOpacity
+                      style={x.composerIconBtn}
+                      onPress={() => setIsAnnouncement((v) => !v)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="megaphone" size={16} color={isAnnouncement ? "#FFD24A" : "rgba(255,255,255,0.6)"} />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={[s.postBtn, ((!text.trim() && !attachedSong) || posting) && { opacity: 0.5 }]}
+                    onPress={handlePost} disabled={(!text.trim() && !attachedSong) || posting} activeOpacity={0.85}>
+                    {posting ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={16} color="#fff" />}
+                  </TouchableOpacity>
+                </View>
+
+                {isAnnouncement && (
+                  <Text style={x.announceNote}>📢 Posting as an announcement</Text>
+                )}
+
+                {attachedSong && (
+                  <View style={x.attachedChip}>
+                    {attachedSong.albumArt
+                      ? <Image source={{ uri: attachedSong.albumArt }} style={x.attachedArt} />
+                      : <View style={[x.attachedArt, { backgroundColor: "rgba(29,185,84,0.18)" }]} />}
+                    <View style={{ flex: 1 }}>
+                      <Text style={x.attachedName} numberOfLines={1}>{attachedSong.name}</Text>
+                      <Text style={x.attachedArtist} numberOfLines={1}>{attachedSong.artist}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setAttachedSong(null)} hitSlop={8}>
+                      <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {songSearchOpen && !attachedSong && (
+                  <View style={x.songSearch}>
+                    <View style={x.songSearchRow}>
+                      <Ionicons name="search" size={14} color="rgba(255,255,255,0.35)" />
+                      <TextInput
+                        style={x.songSearchInput}
+                        placeholder="Search a song to attach…"
+                        placeholderTextColor="rgba(255,255,255,0.3)"
+                        value={songQuery}
+                        onChangeText={runSongSearch}
+                        autoCapitalize="none"
+                      />
+                      {songSearching && <ActivityIndicator size="small" color="#1DB954" />}
+                    </View>
+                    {songResults.map((t) => (
+                      <TouchableOpacity
+                        key={t.id}
+                        style={x.songResult}
+                        activeOpacity={0.8}
+                        onPress={() => { setAttachedSong(t); setSongSearchOpen(false); setSongQuery(""); setSongResults([]); }}
+                      >
+                        {t.albumArt
+                          ? <Image source={{ uri: t.albumArt }} style={x.attachedArt} />
+                          : <View style={[x.attachedArt, { backgroundColor: "rgba(29,185,84,0.18)" }]} />}
+                        <View style={{ flex: 1 }}>
+                          <Text style={x.attachedName} numberOfLines={1}>{t.name}</Text>
+                          <Text style={x.attachedArtist} numberOfLines={1}>{t.artist}</Text>
+                        </View>
+                        <Ionicons name="add-circle-outline" size={18} color="#1DB954" />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
               </View>
             )}
 
@@ -172,7 +399,20 @@ export function CommunityDetailOverlay({
                 </View>
               ) : (
                 <View style={{ gap: 12, paddingHorizontal: 16, marginTop: 12 }}>
-                  {posts.map((p) => <CommunityPostCard key={p.id} post={p} />)}
+                  {posts.map((p) => (
+                    <CommunityPostCard
+                      key={p.id}
+                      post={p}
+                      userId={userId}
+                      liked={likedIds.has(p.id)}
+                      onToggleLike={userId ? () => toggleLike(p) : undefined}
+                      onOpenComments={() => setCommentsPost(p)}
+                      canModerate={isAdmin}
+                      onTogglePin={isAdmin ? () => togglePin(p) : undefined}
+                      onToggleAnnouncement={isAdmin ? () => toggleAnnouncement(p) : undefined}
+                      onDelete={(isAdmin || p.author?.id === userId) ? () => deletePost(p) : undefined}
+                    />
+                  ))}
                 </View>
               )}
           </ScrollView>
@@ -186,6 +426,23 @@ export function CommunityDetailOverlay({
         {gridOpen && (
           <NowPlayingGrid members={broadcasting} communityName={live.name} viewerId={userId} onClose={() => setGridOpen(false)} />
         )}
+        {membersOpen && (
+          <CommunityMembersSheet communityId={live.id} communityName={live.name} onClose={() => setMembersOpen(false)} />
+        )}
+        {commentsPost && (
+          <CommunityCommentsSheet
+            post={commentsPost}
+            userId={userId}
+            canComment={canComment}
+            canModerate={isAdmin}
+            onClose={() => setCommentsPost(null)}
+            onCountChange={(delta) =>
+              setPosts((prev) => prev.map((p) =>
+                p.id === commentsPost.id
+                  ? { ...p, comments_count: Math.max(0, p.comments_count + delta) }
+                  : p))}
+          />
+        )}
       </View>
     </Modal>
   );
@@ -198,3 +455,55 @@ function Stat({ number, label }: { number: string; label: string }) {
     </View>
   );
 }
+
+// Local styles for the phase-3 additions (rules card, composer extras).
+const x = StyleSheet.create({
+  rulesCard: {
+    marginHorizontal: 16, marginTop: 12,
+    backgroundColor: "rgba(171,0,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(171,0,255,0.2)",
+    borderRadius: 14, padding: 12,
+  },
+  rulesHead: { flexDirection: "row", alignItems: "center", gap: 7 },
+  rulesTitle: { flex: 1, fontSize: 13, fontWeight: "800", color: "#fff" },
+  rulesBody: { fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 19, marginTop: 10 },
+
+  composerIconBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center", justifyContent: "center",
+    alignSelf: "flex-end", marginBottom: 2,
+  },
+  announceNote: {
+    fontSize: 11, fontWeight: "700", color: "#FFD24A",
+    paddingHorizontal: 22, marginTop: 6,
+  },
+
+  attachedChip: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    marginHorizontal: 16, marginTop: 8,
+    backgroundColor: "rgba(29,185,84,0.08)",
+    borderWidth: 1, borderColor: "rgba(29,185,84,0.2)",
+    borderRadius: 12, padding: 8,
+  },
+  attachedArt: { width: 36, height: 36, borderRadius: 7 },
+  attachedName: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  attachedArtist: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 1 },
+
+  songSearch: {
+    marginHorizontal: 16, marginTop: 8,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 14, padding: 8, gap: 6,
+  },
+  songSearchRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 8,
+  },
+  songSearchInput: { flex: 1, height: 38, color: "#fff", fontSize: 13 },
+  songResult: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    paddingHorizontal: 8, paddingVertical: 6,
+    borderRadius: 10,
+  },
+});

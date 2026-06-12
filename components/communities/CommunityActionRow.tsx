@@ -15,9 +15,11 @@ const PREF_ICON: Record<CommunityNotificationPref, keyof typeof Ionicons.glyphMa
   muted: "notifications-off",
 };
 
-/** Action row: Join/Joined • bell-tri-state • share • settings (admins only). */
+/** Action row: Join/Joined • bell-tri-state • share • settings (admins only).
+ *  Private communities use request mode: Request to Join → Requested (tap to cancel). */
 export function CommunityActionRow({
   joined, notifPref, isAdmin, canJoin, slug, communityName,
+  requestMode = false, requested = false,
   onToggleJoin, onCyclePref, onOpenSettings,
 }: {
   joined: boolean;
@@ -26,6 +28,10 @@ export function CommunityActionRow({
   canJoin: boolean;
   slug: string;
   communityName: string;
+  /** Private community + viewer not a member → join goes through a request. */
+  requestMode?: boolean;
+  /** Viewer has a pending join request. */
+  requested?: boolean;
   onToggleJoin: () => void;
   onCyclePref: (next: CommunityNotificationPref) => void;
   onOpenSettings: () => void;
@@ -33,16 +39,20 @@ export function CommunityActionRow({
   const share = () => {
     Share.share({ message: `Check out ${communityName} on Track Meet — /${slug}` }).catch(() => {});
   };
+  const joinLabel = requestMode
+    ? (requested ? "Requested ✓" : "Request to Join")
+    : (joined ? "Joined" : "Join");
+  const joinActive = requestMode ? requested : joined;
   return (
     <View style={styles.row}>
       <TouchableOpacity
-        style={[styles.joinPill, joined && styles.joinPillActive]}
+        style={[styles.joinPill, joinActive && styles.joinPillActive]}
         activeOpacity={0.85}
         onPress={onToggleJoin}
         disabled={!canJoin}
       >
-        <Text style={[styles.joinText, joined && styles.joinTextActive]}>
-          {joined ? "Joined" : "Join"}
+        <Text style={[styles.joinText, joinActive && styles.joinTextActive]}>
+          {joinLabel}
         </Text>
       </TouchableOpacity>
 

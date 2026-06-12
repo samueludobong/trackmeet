@@ -1,0 +1,16 @@
+-- Free-form story canvas (Instagram-style editor).
+-- When set, the viewer ignores the legacy fixed layout / overlay_* columns and
+-- replays this layout instead.  JSON shape (v1):
+--   {
+--     "v": 1,
+--     "bg": { "type": "gradient", "colors": ["#hex", ...] },
+--     "elements": [
+--       { "type": "card", "x": 0, "y": 0, "scale": 1, "rotation": 0 },
+--       { "type": "text", "text": "...", "font": "heavy", "color": "#fff",
+--         "bg": false, "x": 0.1, "y": -0.2, "scale": 1.4, "rotation": 0.3 }
+--     ]
+--   }
+-- x/y are offsets from the canvas centre normalised by canvas width/height so
+-- the layout reproduces proportionally on any screen size; rotation is radians.
+-- Element order is z-order (first = bottom).
+alter table public.stories add column if not exists canvas jsonb;

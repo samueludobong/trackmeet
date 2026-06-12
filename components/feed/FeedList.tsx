@@ -5,9 +5,10 @@ import { styles } from "../../lib/feed/styles";
 import { type Post } from "../../app/data/mock";
 import { FeedStoriesStrip } from "./FeedStoriesStrip";
 import { SwipeablePost } from "../post/SwipeablePost";
-import { FeedAudioCtx } from "../../lib/feed/contexts";
+import { FeedAudioCtx, OpenVideoFeedCtx } from "../../lib/feed/contexts";
 import { useFeedPreviewPlayer } from "../../hooks/useFeedPreviewPlayer";
 import { useUserSettings } from "../../hooks/useUserSettings";
+import { VideoFeedViewer } from "../post/VideoFeedViewer";
 
 // Viewability — a card has to be majority-visible before we treat it as active.
 const VIEWABILITY = { itemVisiblePercentThreshold: 60, minimumViewTime: 150 };
@@ -51,6 +52,20 @@ export function FeedList({
   }, [settingsLoading, settings.muteAudioOnStart]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
+  // Full-screen TikTok-style video viewer. Holds the post id we opened on; the
+  // viewer pages through every video post in the feed starting there.
+  const [videoViewerId, setVideoViewerId] = useState<string | null>(null);
+  const videoPosts = useMemo(
+    () => feedPosts.filter((p) => p.type === "video" && p.mediaUrls?.[0]),
+    [feedPosts],
+  );
+  const videoStartIndex = useMemo(() => {
+    if (videoViewerId == null) return 0;
+    const i = videoPosts.findIndex((p) => p.id === videoViewerId);
+    return i < 0 ? 0 : i;
+  }, [videoViewerId, videoPosts]);
+  const viewerOpen = videoViewerId != null;
+
   // Compute the warm pool: PRELOAD_RADIUS neighbours either side of the active card
   // (the active card itself loads via setActive). Keeps the post-id list stable
   // unless the active actually changes so the hook's effect doesn't churn.
@@ -65,12 +80,14 @@ export function FeedList({
     return out;
   }, [feedPosts, activeIndex]);
 
-  const { activePostId, setActive } = useFeedPreviewPlayer({ muted, paused: !focused, preloadIds });
+  // Pause all feed playback while the full-screen viewer owns the screen, so we
+  // never have the inline card and the viewer running at once.
+  const { activePostId, setActive } = useFeedPreviewPlayer({ muted, paused: !focused || viewerOpen, preloadIds });
 
-  // While the feed is blurred, hide the active id from consumers so VideoCards
-  // see `isActive === false` and pause too. The audio hook keeps the id around
-  // internally so the same sound resumes when focus returns.
-  const exposedActiveId = focused ? activePostId : null;
+  // While the feed is blurred (or the full-screen viewer is up), hide the active
+  // id from consumers so VideoCards see `isActive === false` and pause too. The
+  // audio hook keeps the id around internally so the same sound resumes after.
+  const exposedActiveId = focused && !viewerOpen ? activePostId : null;
 
   // FlatList's onViewableItemsChanged identity must be stable, so route through
   // a ref that always points at the latest setActive (avoids stale closures).
@@ -92,6 +109,7 @@ export function FeedList({
 
   return (
     <FeedAudioCtx.Provider value={{ muted, toggleMuted, videosMuted, toggleVideosMuted, activePostId: exposedActiveId }}>
+     <OpenVideoFeedCtx.Provider value={setVideoViewerId}>
       <FlatList
         data={feedPosts}
         keyExtractor={(item) => item.id}
@@ -120,6 +138,15 @@ export function FeedList({
         )}
         ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
       />
+
+      {viewerOpen && videoPosts.length > 0 && (
+        <VideoFeedViewer
+          posts={videoPosts}
+          startIndex={videoStartIndex}
+          onClose={() => setVideoViewerId(null)}
+        />
+      )}
+     </OpenVideoFeedCtx.Provider>
     </FeedAudioCtx.Provider>
   );
 }

@@ -21,6 +21,7 @@ export type Community = {
   allow_offtopic: boolean;
   member_count: number;
   post_count: number;
+  welcome_message: string | null;
   created_at: string;
 };
 
@@ -41,10 +42,13 @@ export type CreateCommunityInput = {
   allowComments?: boolean;
   allowOfftopic?: boolean;
   tags?: string[];
+  rules?: string | null;
+  welcomeMessage?: string | null;
 };
 
-const SELECT =
-  "id, name, slug, description, avatar_url, banner_url, banner_color, genres, artist_id, created_by, is_private, allow_posts, allow_anyone_to_post, allow_comments, allow_offtopic, member_count, post_count, created_at";
+export const COMMUNITY_SELECT =
+  "id, name, slug, description, avatar_url, banner_url, banner_color, genres, artist_id, created_by, is_private, allow_posts, allow_anyone_to_post, allow_comments, allow_offtopic, member_count, post_count, welcome_message, created_at";
+const SELECT = COMMUNITY_SELECT;
 
 /** Slug from a community name: lowercase, alphanumerics + hyphens, no leading/trailing dashes. */
 export function slugify(input: string): string {
@@ -112,6 +116,8 @@ export async function createCommunity(userId: string, input: CreateCommunityInpu
       allow_comments: input.allowComments ?? true,
       allow_offtopic: input.allowOfftopic ?? true,
       tags: input.tags ?? [],
+      rules: input.rules?.trim() || null,
+      welcome_message: input.welcomeMessage?.trim() || null,
     })
     .select(SELECT)
     .single();
@@ -282,6 +288,7 @@ export type CommunityPostAuthor = {
 
 export type CommunityPost = {
   id: string;
+  community_id?: string;
   text: string | null;
   song_id: string | null;
   song_name: string | null;
@@ -291,6 +298,8 @@ export type CommunityPost = {
   comments_count: number;
   reposts_count: number;
   views_count: number;
+  pinned_at: string | null;
+  is_announcement: boolean;
   created_at: string;
   author: CommunityPostAuthor;
   /** Computed: posts with >50 likes or >20 comments in last 24h. */
@@ -313,11 +322,12 @@ function withHotFlag(p: CommunityPost): CommunityPost {
 }
 
 const POST_SELECT =
-  "id, text, song_id, song_name, song_artist, song_album_art, likes_count, comments_count, views_count, created_at, users!user_id(id, username, display_name, avatar_url, is_verified)";
+  "id, community_id, text, song_id, song_name, song_artist, song_album_art, likes_count, comments_count, views_count, pinned_at, is_announcement, created_at, users!user_id(id, username, display_name, avatar_url, is_verified)";
 
 function normalizePost(r: any): CommunityPost {
   return withHotFlag({
     id: r.id,
+    community_id: r.community_id,
     text: r.text ?? null,
     song_id: r.song_id ?? null,
     song_name: r.song_name ?? null,
@@ -327,12 +337,14 @@ function normalizePost(r: any): CommunityPost {
     comments_count: r.comments_count ?? 0,
     reposts_count: r.reposts_count ?? 0,
     views_count: r.views_count ?? 0,
+    pinned_at: r.pinned_at ?? null,
+    is_announcement: r.is_announcement ?? false,
     created_at: r.created_at,
     author: r.users,
   });
 }
 
-/** Engagement-ranked feed for a community (with 2h recency boost). */
+/** Engagement-ranked feed for a community (2h recency boost); pinned posts first. */
 export async function getCommunityPosts(communityId: string, limit = 50): Promise<CommunityPost[]> {
   const { data, error } = await supabase
     .from("community_posts")
@@ -342,13 +354,20 @@ export async function getCommunityPosts(communityId: string, limit = 50): Promis
     .limit(limit);
   if (error) return [];
   const posts = (data ?? []).map(normalizePost);
-  return posts.sort((a, b) => rankScore(b) - rankScore(a));
+  const pinned = posts.filter((p) => p.pinned_at)
+    .sort((a, b) => new Date(b.pinned_at!).getTime() - new Date(a.pinned_at!).getTime());
+  const rest = posts.filter((p) => !p.pinned_at).sort((a, b) => rankScore(b) - rankScore(a));
+  return [...pinned, ...rest];
 }
 
 export async function createCommunityPost(
   communityId: string,
   userId: string,
-  input: { text?: string | null; song?: { id: string; name: string; artist: string | null; albumArt: string | null } | null },
+  input: {
+    text?: string | null;
+    song?: { id: string; name: string; artist: string | null; albumArt: string | null } | null;
+    isAnnouncement?: boolean;
+  },
 ): Promise<CommunityPost> {
   const { data, error } = await supabase
     .from("community_posts")
@@ -360,6 +379,7 @@ export async function createCommunityPost(
       song_name: input.song?.name ?? null,
       song_artist: input.song?.artist ?? null,
       song_album_art: input.song?.albumArt ?? null,
+      is_announcement: input.isAnnouncement ?? false,
     })
     .select(POST_SELECT)
     .single();
@@ -470,6 +490,7 @@ export type CommunityUpdate = {
   allowOfftopic?: boolean;
   tags?: string[];
   rules?: string | null;
+  welcomeMessage?: string | null;
 };
 
 /** Caller's role in a community, or null if not a member. */
@@ -500,6 +521,7 @@ export async function updateCommunity(communityId: string, patch: CommunityUpdat
   if (patch.allowOfftopic !== undefined) row.allow_offtopic = patch.allowOfftopic;
   if (patch.tags !== undefined) row.tags = patch.tags;
   if (patch.rules !== undefined) row.rules = patch.rules?.trim() || null;
+  if (patch.welcomeMessage !== undefined) row.welcome_message = patch.welcomeMessage?.trim() || null;
 
   const { data, error } = await supabase
     .from("communities")
@@ -571,6 +593,270 @@ export async function transferOwnership(communityId: string, fromUserId: string,
 export async function deleteCommunityPost(postId: string): Promise<void> {
   const { error } = await supabase.from("community_posts").delete().eq("id", postId);
   if (error) throw error;
+}
+
+// ── Post likes ────────────────────────────────────────────────────────────────
+
+/** Which of `postIds` the viewer has liked. Pass the visible feed's ids. */
+export async function getMyLikedCommunityPostIds(userId: string, postIds: string[]): Promise<Set<string>> {
+  if (!postIds.length) return new Set();
+  const { data } = await supabase
+    .from("community_post_likes")
+    .select("post_id")
+    .eq("user_id", userId)
+    .in("post_id", postIds);
+  return new Set((data ?? []).map((r: any) => r.post_id as string));
+}
+
+/** Like/unlike. Returns the liked state actually persisted. */
+export async function toggleCommunityPostLike(postId: string, userId: string, like: boolean): Promise<boolean> {
+  if (like) {
+    const { error } = await supabase.from("community_post_likes").insert({ post_id: postId, user_id: userId });
+    if (error && (error as any).code !== "23505") throw error;
+    return true;
+  }
+  const { error } = await supabase
+    .from("community_post_likes")
+    .delete()
+    .eq("post_id", postId)
+    .eq("user_id", userId);
+  if (error) throw error;
+  return false;
+}
+
+// ── Post comments ─────────────────────────────────────────────────────────────
+
+export type CommunityPostComment = {
+  id: string;
+  post_id: string;
+  text: string;
+  created_at: string;
+  author: CommunityPostAuthor;
+};
+
+const COMMENT_SELECT =
+  "id, post_id, text, created_at, users!user_id(id, username, display_name, avatar_url, is_verified)";
+
+export async function getCommunityPostComments(postId: string, limit = 100): Promise<CommunityPostComment[]> {
+  const { data, error } = await supabase
+    .from("community_post_comments")
+    .select(COMMENT_SELECT)
+    .eq("post_id", postId)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (error) return [];
+  return (data ?? []).map((r: any) => ({
+    id: r.id, post_id: r.post_id, text: r.text, created_at: r.created_at, author: r.users,
+  }));
+}
+
+export async function addCommunityPostComment(postId: string, userId: string, text: string): Promise<CommunityPostComment> {
+  const { data, error } = await supabase
+    .from("community_post_comments")
+    .insert({ post_id: postId, user_id: userId, text: text.trim() })
+    .select(COMMENT_SELECT)
+    .single();
+  if (error) throw error;
+  const r: any = data;
+  return { id: r.id, post_id: r.post_id, text: r.text, created_at: r.created_at, author: r.users };
+}
+
+export async function deleteCommunityPostComment(commentId: string): Promise<void> {
+  const { error } = await supabase.from("community_post_comments").delete().eq("id", commentId);
+  if (error) throw error;
+}
+
+// ── Pins + announcements (admin) ──────────────────────────────────────────────
+
+export async function setCommunityPostPinned(postId: string, pinned: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("community_posts")
+    .update({ pinned_at: pinned ? new Date().toISOString() : null })
+    .eq("id", postId);
+  if (error) throw error;
+}
+
+export async function setCommunityPostAnnouncement(postId: string, isAnnouncement: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("community_posts")
+    .update({ is_announcement: isAnnouncement })
+    .eq("id", postId);
+  if (error) throw error;
+}
+
+// ── Join requests (private communities) ───────────────────────────────────────
+
+export type JoinRequestStatus = "pending" | "approved" | "denied";
+
+export type CommunityJoinRequest = {
+  community_id: string;
+  user_id: string;
+  message: string | null;
+  status: JoinRequestStatus;
+  created_at: string;
+  user: CommunityPostAuthor;
+};
+
+export async function requestToJoin(communityId: string, userId: string, message?: string | null): Promise<void> {
+  const { error } = await supabase
+    .from("community_join_requests")
+    .insert({ community_id: communityId, user_id: userId, message: message?.trim() || null });
+  // 23505 — request already exists; treat as success (status unchanged).
+  if (error && (error as any).code !== "23505") throw error;
+}
+
+export async function cancelJoinRequest(communityId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("community_join_requests")
+    .delete()
+    .eq("community_id", communityId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+/** Viewer's request status for this community, or null if none. */
+export async function getMyJoinRequestStatus(communityId: string, userId: string): Promise<JoinRequestStatus | null> {
+  const { data } = await supabase
+    .from("community_join_requests")
+    .select("status")
+    .eq("community_id", communityId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data?.status as JoinRequestStatus | undefined) ?? null;
+}
+
+export async function listJoinRequests(communityId: string): Promise<CommunityJoinRequest[]> {
+  const { data, error } = await supabase
+    .from("community_join_requests")
+    .select("community_id, user_id, message, status, created_at, users!user_id(id, username, display_name, avatar_url, is_verified)")
+    .eq("community_id", communityId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: true });
+  if (error) return [];
+  return (data ?? []).map((r: any) => ({
+    community_id: r.community_id, user_id: r.user_id, message: r.message,
+    status: r.status, created_at: r.created_at, user: r.users,
+  }));
+}
+
+/** Approve atomically (marks approved + inserts membership) via SECURITY DEFINER RPC. */
+export async function approveJoinRequest(communityId: string, userId: string): Promise<void> {
+  const { error } = await supabase.rpc("approve_community_join_request", { cid: communityId, uid: userId });
+  if (error) throw error;
+}
+
+export async function denyJoinRequest(communityId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("community_join_requests")
+    .update({ status: "denied", resolved_at: new Date().toISOString() })
+    .eq("community_id", communityId)
+    .eq("user_id", userId)
+    .eq("status", "pending");
+  if (error) throw error;
+}
+
+// ── Bans ──────────────────────────────────────────────────────────────────────
+
+export type CommunityBan = {
+  community_id: string;
+  user_id: string;
+  reason: string | null;
+  created_at: string;
+  user: CommunityPostAuthor;
+};
+
+/** Ban = insert ban row + remove membership. Banned users can't rejoin or post (RLS). */
+export async function banMember(communityId: string, userId: string, reason?: string | null): Promise<void> {
+  const { error } = await supabase
+    .from("community_bans")
+    .insert({ community_id: communityId, user_id: userId, banned_by: (await supabase.auth.getUser()).data.user?.id ?? null, reason: reason?.trim() || null });
+  if (error && (error as any).code !== "23505") throw error;
+  await removeMember(communityId, userId).catch(() => {});
+  // Clear any stale join request so a future unban lets them request again.
+  await supabase.from("community_join_requests").delete()
+    .eq("community_id", communityId).eq("user_id", userId);
+}
+
+export async function unbanMember(communityId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("community_bans")
+    .delete()
+    .eq("community_id", communityId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function listBans(communityId: string): Promise<CommunityBan[]> {
+  const { data, error } = await supabase
+    .from("community_bans")
+    .select("community_id, user_id, reason, created_at, users!user_id(id, username, display_name, avatar_url, is_verified)")
+    .eq("community_id", communityId)
+    .order("created_at", { ascending: false });
+  if (error) return [];
+  return (data ?? []).map((r: any) => ({
+    community_id: r.community_id, user_id: r.user_id, reason: r.reason,
+    created_at: r.created_at, user: r.users,
+  }));
+}
+
+// ── Insights (admin analytics, computed from existing tables) ─────────────────
+
+export type CommunityInsights = {
+  /** New members per day, oldest→newest, 7 entries. */
+  joinsPerDay: { day: string; count: number }[];
+  /** Posts per day, oldest→newest, 7 entries. */
+  postsPerDay: { day: string; count: number }[];
+  totalLikes: number;
+  totalComments: number;
+  topPosters: { user: CommunityPostAuthor; posts: number }[];
+};
+
+export async function getCommunityInsights(communityId: string): Promise<CommunityInsights> {
+  const since = new Date(Date.now() - 7 * 24 * 3600_000);
+  since.setHours(0, 0, 0, 0);
+
+  const [{ data: joins }, { data: posts }] = await Promise.all([
+    supabase.from("community_members").select("joined_at").eq("community_id", communityId).gte("joined_at", since.toISOString()),
+    supabase.from("community_posts")
+      .select("created_at, likes_count, comments_count, users!user_id(id, username, display_name, avatar_url, is_verified)")
+      .eq("community_id", communityId).gte("created_at", since.toISOString()),
+  ]);
+
+  const dayKey = (d: Date) => d.toLocaleDateString([], { weekday: "short" });
+  const days: { day: string; start: number; end: number }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - i);
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    days.push({ day: dayKey(start), start: start.getTime(), end: end.getTime() });
+  }
+  const bucket = (rows: { t: number }[]) =>
+    days.map(({ day, start, end }) => ({ day, count: rows.filter((r) => r.t >= start && r.t < end).length }));
+
+  const joinTimes = (joins ?? []).map((r: any) => ({ t: new Date(r.joined_at).getTime() }));
+  const postRows = (posts ?? []) as any[];
+  const postTimes = postRows.map((r) => ({ t: new Date(r.created_at).getTime() }));
+
+  let totalLikes = 0, totalComments = 0;
+  const byPoster = new Map<string, { user: CommunityPostAuthor; posts: number }>();
+  for (const r of postRows) {
+    totalLikes += r.likes_count ?? 0;
+    totalComments += r.comments_count ?? 0;
+    const u = r.users as CommunityPostAuthor | null;
+    if (u?.id) {
+      const cur = byPoster.get(u.id) ?? { user: u, posts: 0 };
+      cur.posts += 1;
+      byPoster.set(u.id, cur);
+    }
+  }
+  const topPosters = [...byPoster.values()].sort((a, b) => b.posts - a.posts).slice(0, 5);
+
+  return {
+    joinsPerDay: bucket(joinTimes),
+    postsPerDay: bucket(postTimes),
+    totalLikes,
+    totalComments,
+    topPosters,
+  };
 }
 
 // ── Discovery / Phase 2 ───────────────────────────────────────────────────────

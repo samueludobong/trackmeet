@@ -4,6 +4,7 @@ export type CuratedPlaylist = {
   id: string;
   user_id: string;
   name: string;
+  description: string | null;
   image_url: string | null;
   tags: string[];
   show_on_profile: boolean;

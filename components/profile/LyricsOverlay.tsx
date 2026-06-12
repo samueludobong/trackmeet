@@ -69,6 +69,8 @@ export function LyricsOverlay({
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
   const [failed, setFailed] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
+  // Which line is being pressed (owner tap-to-seek), for a subtle shadow cue.
+  const [pressedIdx, setPressedIdx] = useState<number | null>(null);
   const [introProgress, setIntroProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -406,12 +408,19 @@ export function LyricsOverlay({
                 ))}
               </View>
             ) : (
+              
               <Text
                 key={`${i}-${line.timeMs}`}
                 onLayout={(e) => { lineY.current[i] = e.nativeEvent.layout.y; }}
                 onPress={isOwner ? () => handleSeek(line.timeMs) : undefined}
+                onPressIn={isOwner ? () => setPressedIdx(i) : undefined}
+                onPressOut={isOwner ? () => setPressedIdx(null) : undefined}
                 suppressHighlighting
-                style={[styles.lyricLine, i === activeIdx ? styles.lyricActive : styles.lyricIdle]}
+                style={[
+                  styles.lyricLine,
+                  i === activeIdx ? styles.lyricActive : styles.lyricIdle,
+                  pressedIdx === i && styles.lyricPressed,
+                ]}
               >
                 {line.text || "♪"}
               </Text>
@@ -664,7 +673,22 @@ const styles = StyleSheet.create({
     marginVertical: 11, textAlign: "left",
   },
   lyricActive: { color: "#fff" },
-  lyricIdle: { color: "rgba(255,255,255,0.32)" },
+  lyricIdle: {
+    color: "#fff",
+    opacity: 0.28,
+    textShadowColor: "rgba(255,255,255,0.18)",
+    textShadowOffset: { width: 4, height: 0 },
+    textShadowRadius: 15,
+  },
+  // Press feedback for tap-to-seek: brighten + a soft glow so the tapped line
+  // visibly lifts while held.
+  lyricPressed: {
+    color: "rgba(0, 0, 0, 0.1)",
+    textShadowColor: "rgba(0, 0, 0, 0.35)",
+    opacity: 0.92,
+    textShadowOffset: { width: 0, height: 5 },
+    textShadowRadius: 16,
+  },
   lyricPlain: { fontSize: 22, lineHeight: 30, color: "rgba(255,255,255,0.9)", marginVertical: 4 },
 
   // Intro "…" indicator — three dots that fill in as the lead-in plays out.

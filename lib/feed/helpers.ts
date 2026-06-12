@@ -49,6 +49,7 @@ export function dbRowToPost(row: any): Post {
     likes: row.likes_count ?? 0,
     comments: row.comments_count ?? 0,
     shares: 0,
+    reposts: row.reposts_count ?? 0,
     communityId: row.community_id ?? null,
     communityName: (Array.isArray(row.communities) ? row.communities[0] : row.communities)?.name ?? null,
     communitySlug: (Array.isArray(row.communities) ? row.communities[0] : row.communities)?.slug ?? null,

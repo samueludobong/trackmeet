@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { type CommunityPost } from "../../services/communities";
 import { SongPreviewSheet } from "../SongPreviewSheet";
@@ -22,15 +22,63 @@ const initials = (a: CommunityPost["author"]) => {
 
 export function CommunityPostCard({
   post, accessToken, userId,
+  liked = false, onToggleLike, onOpenComments,
+  canModerate = false, onTogglePin, onToggleAnnouncement, onDelete,
 }: {
   post: CommunityPost;
   accessToken?: string | null;
   userId?: string | null;
+  /** Viewer has liked this post (wired by the parent via getMyLikedCommunityPostIds). */
+  liked?: boolean;
+  onToggleLike?: () => void;
+  onOpenComments?: () => void;
+  /** Viewer is an owner/moderator — unlocks pin/announce/delete in the ··· menu. */
+  canModerate?: boolean;
+  onTogglePin?: () => void;
+  onToggleAnnouncement?: () => void;
+  onDelete?: () => void;
 }) {
   const a = post.author;
   const [previewOpen, setPreviewOpen] = useState(false);
+
+  const isAuthor = !!userId && a?.id === userId;
+  const hasMenu = canModerate || (isAuthor && !!onDelete);
+  const openMenu = () => {
+    const options: any[] = [];
+    if (canModerate && onTogglePin) {
+      options.push({ text: post.pinned_at ? "Unpin post" : "Pin post", onPress: onTogglePin });
+    }
+    if (canModerate && onToggleAnnouncement) {
+      options.push({
+        text: post.is_announcement ? "Remove announcement" : "Mark as announcement",
+        onPress: onToggleAnnouncement,
+      });
+    }
+    if ((canModerate || isAuthor) && onDelete) {
+      options.push({ text: "Delete post", style: "destructive", onPress: onDelete });
+    }
+    options.push({ text: "Cancel", style: "cancel" });
+    Alert.alert("Post options", undefined, options);
+  };
+
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, post.is_announcement && styles.cardAnnouncement]}>
+      {(post.pinned_at || post.is_announcement) && (
+        <View style={styles.badgeRow}>
+          {!!post.pinned_at && (
+            <View style={styles.badge}>
+              <Ionicons name="pin" size={11} color="#AB00FF" />
+              <Text style={styles.badgeText}>Pinned</Text>
+            </View>
+          )}
+          {post.is_announcement && (
+            <View style={[styles.badge, styles.badgeAnnouncement]}>
+              <Ionicons name="megaphone" size={11} color="#FFD24A" />
+              <Text style={[styles.badgeText, { color: "#FFD24A" }]}>Announcement</Text>
+            </View>
+          )}
+        </View>
+      )}
       <View style={styles.cardHead}>
         {a.avatar_url ? (
           <Image source={{ uri: a.avatar_url }} style={styles.cardAvatar} />
@@ -47,7 +95,13 @@ export function CommunityPostCard({
           <Text style={styles.cardTime}>{relTime(post.created_at)}</Text>
         </View>
         {post.is_hot && <Text style={styles.hotFlame}>🔥</Text>}
-        <Ionicons name="ellipsis-horizontal" size={18} color="rgba(255,255,255,0.4)" />
+        {hasMenu ? (
+          <TouchableOpacity onPress={openMenu} hitSlop={8}>
+            <Ionicons name="ellipsis-horizontal" size={18} color="rgba(255,255,255,0.4)" />
+          </TouchableOpacity>
+        ) : (
+          <Ionicons name="ellipsis-horizontal" size={18} color="rgba(255,255,255,0.4)" />
+        )}
       </View>
 
       {!!post.text && <Text style={styles.cardText}>{post.text}</Text>}
@@ -93,8 +147,13 @@ export function CommunityPostCard({
       )}
 
       <View style={styles.reactRow}>
-        <Chip icon="thumbs-up-outline" count={post.likes_count} />
-        <Chip icon="chatbubble-outline" count={post.comments_count} />
+        <Chip
+          icon={liked ? "heart" : "heart-outline"}
+          count={post.likes_count}
+          color={liked ? "#FF3B6F" : undefined}
+          onPress={onToggleLike}
+        />
+        <Chip icon="chatbubble-outline" count={post.comments_count} onPress={onOpenComments} />
         <Chip icon="repeat-outline" count={post.reposts_count ?? 0} />
         <View style={{ flex: 1 }} />
         {post.views_count >= 10 && (
@@ -108,11 +167,16 @@ export function CommunityPostCard({
   );
 }
 
-function Chip({ icon, count }: { icon: keyof typeof Ionicons.glyphMap; count: number }) {
+function Chip({ icon, count, color, onPress }: {
+  icon: keyof typeof Ionicons.glyphMap;
+  count: number;
+  color?: string;
+  onPress?: () => void;
+}) {
   return (
-    <TouchableOpacity style={styles.chip} activeOpacity={0.7}>
-      <Ionicons name={icon} size={15} color="rgba(255,255,255,0.6)" />
-      <Text style={styles.chipText}>{count}</Text>
+    <TouchableOpacity style={styles.chip} activeOpacity={0.7} onPress={onPress} disabled={!onPress}>
+      <Ionicons name={icon} size={15} color={color ?? "rgba(255,255,255,0.6)"} />
+      <Text style={[styles.chipText, color ? { color } : null]}>{count}</Text>
     </TouchableOpacity>
   );
 }
@@ -122,6 +186,18 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.045)", borderRadius: 20,
     borderWidth: 1, borderColor: "rgba(255,255,255,0.07)", padding: 14,
   },
+  cardAnnouncement: {
+    borderColor: "rgba(255,210,74,0.35)",
+    backgroundColor: "rgba(255,210,74,0.05)",
+  },
+  badgeRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  badge: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "rgba(171,0,255,0.12)", borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  badgeAnnouncement: { backgroundColor: "rgba(255,210,74,0.12)" },
+  badgeText: { fontSize: 11, fontWeight: "800", color: "#AB00FF" },
   cardHead: { flexDirection: "row", alignItems: "center", gap: 11 },
   cardAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#222" },
   cardAvatarFallback: { backgroundColor: "rgba(171,0,255,0.3)", alignItems: "center", justifyContent: "center" },

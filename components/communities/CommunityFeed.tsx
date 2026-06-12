@@ -4,10 +4,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { ds, profileStyles } from "../../lib/feed/localStyles";
 import {
   getCommunityFeed, getJoinedCommunitiesWithUnread, getDiscoverCommunities,
-  joinCommunity,
-  type CommunityFeedItem, type Community, type CommunityCard,
+  joinCommunity, getMyLikedCommunityPostIds, toggleCommunityPostLike,
+  type CommunityFeedItem, type Community, type CommunityCard, type CommunityPost,
 } from "../../services/communities";
 import { CommunityPostCard } from "./CommunityPostCard";
+import { CommunityCommentsSheet } from "./CommunityCommentsSheet";
 import { CommunityDetailOverlay } from "./CommunityDetailOverlay";
 import { JoinedCommunitiesRow } from "./JoinedCommunitiesRow";
 import { DiscoverCommunityCard } from "./DiscoverCommunityCard";
@@ -53,6 +54,42 @@ export function CommunityFeed({ userId }: { userId: string | null }) {
   const [loading, setLoading] = useState(!cached && !!userId);
   const [refreshing, setRefreshing] = useState(false);
   const [openCommunity, setOpenCommunity] = useState<Community | null>(null);
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  // Post whose comment thread is open + its community (for the allow_comments gate).
+  const [commentsFor, setCommentsFor] = useState<{ post: CommunityPost; community: Community } | null>(null);
+
+  // Hydrate which visible posts the viewer already liked.
+  useEffect(() => {
+    if (!userId || !items.length) return;
+    let active = true;
+    getMyLikedCommunityPostIds(userId, items.map((i) => i.post.id))
+      .then((set) => { if (active) setLikedIds(set); });
+    return () => { active = false; };
+  }, [userId, items]);
+
+  const toggleLike = async (post: CommunityPost) => {
+    if (!userId) return;
+    const isLiked = likedIds.has(post.id);
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      if (isLiked) next.delete(post.id); else next.add(post.id);
+      return next;
+    });
+    setItems((prev) => prev.map((it) => it.post.id === post.id
+      ? { ...it, post: { ...it.post, likes_count: Math.max(0, it.post.likes_count + (isLiked ? -1 : 1)) } }
+      : it));
+    try { await toggleCommunityPostLike(post.id, userId, !isLiked); }
+    catch {
+      setLikedIds((prev) => {
+        const next = new Set(prev);
+        if (isLiked) next.add(post.id); else next.delete(post.id);
+        return next;
+      });
+      setItems((prev) => prev.map((it) => it.post.id === post.id
+        ? { ...it, post: { ...it.post, likes_count: Math.max(0, it.post.likes_count + (isLiked ? 1 : -1)) } }
+        : it));
+    }
+  };
 
   useEffect(() => {
     if (!userId) { setLoading(false); return; }
@@ -144,7 +181,13 @@ export function CommunityFeed({ userId }: { userId: string | null }) {
                   <Ionicons name="people" size={13} color="rgba(255,255,255,0.5)" style={{ marginRight: 6 }} />
                   <Text style={profileStyles.repostLabelText}>From /{community.slug ?? community.name}</Text>
                 </TouchableOpacity>
-                <CommunityPostCard post={post} />
+                <CommunityPostCard
+                  post={post}
+                  userId={userId}
+                  liked={likedIds.has(post.id)}
+                  onToggleLike={userId ? () => toggleLike(post) : undefined}
+                  onOpenComments={() => setCommentsFor({ post, community })}
+                />
               </View>
             ))}
           </View>
@@ -156,6 +199,20 @@ export function CommunityFeed({ userId }: { userId: string | null }) {
           community={openCommunity}
           userId={userId}
           onClose={() => setOpenCommunity(null)}
+        />
+      )}
+      {commentsFor && (
+        <CommunityCommentsSheet
+          post={commentsFor.post}
+          userId={userId}
+          // This feed only shows communities the viewer joined, so membership holds.
+          canComment={!!userId && commentsFor.community.allow_comments}
+          canModerate={false}
+          onClose={() => setCommentsFor(null)}
+          onCountChange={(delta) =>
+            setItems((prev) => prev.map((it) => it.post.id === commentsFor.post.id
+              ? { ...it, post: { ...it.post, comments_count: Math.max(0, it.post.comments_count + delta) } }
+              : it))}
         />
       )}
     </View>

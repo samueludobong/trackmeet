@@ -1,10 +1,11 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { useChatDetail } from "../../hooks/useChatDetail";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { sendSpotifyTrackMessage, type ConversationInfo, type DbMessage } from "../../services/messages";
 import { chatStyles } from "../../lib/feed/localStyles";
+import { useOpenJam } from "../../lib/feed/contexts";
 import { NowPlayingBanner } from "../../components/feed/NowPlayingBanner";
 import { SpotifyTrackCard } from "../../components/messages/SpotifyTrackCard";
 import { SwipeToReply } from "../../components/messages/SwipeToReply";
@@ -12,10 +13,20 @@ import { TypingBubble } from "../../components/messages/TypingBubble";
 
 export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onClose: () => void }) {
   const {
-    slideX, msgText, setMsgText, msgs, setMsgs, currentUserId, setCurUid, loading, setLoading, isOtherTyping, setOtherTyping, replyTo, setReplyTo, flatRef, channelRef, userIdRef, typingOutRef, otherTypingOutRef, broadcastTyping, handleTextChange, handleClose, pan, sendMessage, fmtTime, otherName, otherInitials
+    slideX, msgText, setMsgText, msgs, setMsgs, currentUserId, setCurUid, loading, setLoading, isOtherTyping, setOtherTyping, replyTo, setReplyTo, flatRef, channelRef, userIdRef, typingOutRef, otherTypingOutRef, onScroll, scrollToBottom, onContentSizeChange, broadcastTyping, handleTextChange, handleClose, pan, sendMessage, fmtTime, otherName, otherInitials
   } = useChatDetail(conv, onClose);
 
-  
+  // Freeze the list's vertical scroll while a reply-swipe is in flight. Done
+  // imperatively via the ref (no setState) so toggling it doesn't re-render the
+  // whole list and hitch the very first frame of the swipe.
+  const setSwiping = useCallback((active: boolean) => {
+    flatRef.current?.setNativeProps({ scrollEnabled: !active });
+  }, [flatRef]);
+
+  // Start/join the private co-listening "jam" with this person.
+  const openJam = useOpenJam();
+
+
 
   return (
     <Animated.View
@@ -47,7 +58,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
             </View>
           </View>
 
-          <TouchableOpacity style={chatStyles.jamBtn} activeOpacity={0.8}>
+          <TouchableOpacity style={chatStyles.jamBtn} activeOpacity={0.8} onPress={() => openJam?.(conv.conversationId, conv.otherUser)}>
             <Ionicons name="musical-notes" size={12} color="#0D0D0D" />
             <Text style={chatStyles.jamBtnText}>Jam</Text>
           </TouchableOpacity>
@@ -68,13 +79,15 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
             <FlatList
               ref={flatRef}
               data={msgs}
-              style={{ gap: 14 }}
               keyExtractor={(m) => m.id}
+              style={{ flex: 1 }}
               contentContainerStyle={chatStyles.messagesContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
-              onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: true })}
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+              onContentSizeChange={onContentSizeChange}
               renderItem={({ item: msg, index }) => {
                 const fromMe = msg.sender_id === currentUserId;
                 const prev = msgs[index - 1];
@@ -82,21 +95,29 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                 const firstInGroup = !prev || (prev.sender_id === currentUserId) !== fromMe;
                 const lastInGroup  = !next || (next.sender_id === currentUserId) !== fromMe;
                 const senderName   = fromMe ? "You" : otherName;
+                // One consistent vertical rhythm for every content type: a clear
+                // gap when the sender changes, a tight gap within a run.
+                const topGap = firstInGroup ? 14 : 6;
 
                 // ── Spotify track card ──────────────────────────────────────
                 if (msg.type === "spotify_track" && msg.spotify_track_id) {
                   return (
-                    <SwipeToReply onReply={() => setReplyTo({
+                    <SwipeToReply fromMe={fromMe} onActiveChange={setSwiping} onReply={() => setReplyTo({
                       id: msg.id,
-                      preview: `🎵 ${msg.spotify_track_name ?? "Track"}`,
+                      // Stored quote text stays self-describing even without the
+                      // rich UI (e.g. once persisted on the replying message).
+                      preview: `🎵 ${msg.spotify_track_name ?? "Track"}${msg.spotify_track_artist ? ` — ${msg.spotify_track_artist}` : ""}`,
                       senderName,
+                      kind: "song",
+                      subtitle: msg.spotify_track_artist ?? undefined,
+                      albumArt: msg.spotify_album_art,
                     })}>
-                      <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: firstInGroup ? 12 : 3 }]}>
+                      <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: topGap }]}>
                         <SpotifyTrackCard
                           track={{ id: msg.spotify_track_id, name: msg.spotify_track_name ?? "Unknown", artist: msg.spotify_track_artist ?? "Unknown", albumArt: msg.spotify_album_art }}
                           fromMe={fromMe}
                         />
-                        <Text style={[chatStyles.bubbleTime, fromMe && chatStyles.bubbleTimeMe, { paddingHorizontal: 4, marginTop: 3 }]}>
+                        <Text style={[chatStyles.bubbleTime, fromMe && chatStyles.bubbleTimeMe, { paddingHorizontal: 4, marginTop: 4 }]}>
                           {fmtTime(msg.created_at)}
                         </Text>
                       </View>
@@ -105,23 +126,41 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                 }
 
                 // ── Regular text bubble ─────────────────────────────────────
-                const bubbleRadius = fromMe
-                  ? { borderTopRightRadius: firstInGroup ? 6 : 18, borderBottomRightRadius: lastInGroup ? 18 : 6 }
-                  : { borderTopLeftRadius:  firstInGroup ? 6 : 18, borderBottomLeftRadius:  lastInGroup ? 18 : 6 };
+                // Who the quoted message is from — derived from the thread so we
+                // don't need to persist a sender name on every reply.
+                const repliedMsg = msg.reply_to_id ? msgs.find((m) => m.id === msg.reply_to_id) : null;
+                const repliedToMe = !!repliedMsg && repliedMsg.sender_id === currentUserId;
+                const repliedName = repliedMsg ? (repliedToMe ? "You" : otherName) : null;
+                // Album art of the replied-to message, if it was a song — shown
+                // as a thumbnail in the quote instead of just the 🎵 text.
+                const repliedArt = repliedMsg?.type === "spotify_track" ? repliedMsg.spotify_album_art : null;
                 return (
-                  <SwipeToReply onReply={() => setReplyTo({
+                  <SwipeToReply fromMe={fromMe} onActiveChange={setSwiping} onReply={() => setReplyTo({
                     id: msg.id,
                     preview: msg.body ?? "",
                     senderName,
+                    kind: "text",
                   })}>
-                    <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: firstInGroup ? 12 : 3 }]}>
+                    <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: topGap }]}>
                       {!!msg.reply_to_preview && (
-                        <View style={[chatStyles.replyQuote, fromMe && chatStyles.replyQuoteMe]}>
-                          <View style={chatStyles.replyQuoteAccent} />
-                          <Text style={chatStyles.replyQuoteText} numberOfLines={2}>{msg.reply_to_preview}</Text>
-                        </View>
+                        <>
+                          {!!repliedName && (
+                            <View style={[chatStyles.replyHeader, fromMe && chatStyles.replyHeaderMe]}>
+                              <Ionicons name="arrow-undo" size={12} color="rgba(255,255,255,0.4)" />
+                              <Text style={chatStyles.replyHeaderName} numberOfLines={1}>{repliedName}</Text>
+                            </View>
+                          )}
+                          <View style={[chatStyles.replyQuote, chatStyles.replyQuoteDetached, fromMe && chatStyles.replyQuoteDetachedMe, repliedToMe && chatStyles.replyQuoteDetachedSelf]}>
+                            <View style={[chatStyles.replyQuoteBody, chatStyles.replyQuoteBodyDetached, !!repliedArt && chatStyles.replyQuoteBodyRow]}>
+                              {!!repliedArt && <Image source={{ uri: repliedArt }} style={chatStyles.replyQuoteArt} />}
+                              <Text style={[chatStyles.replyQuoteText, fromMe && chatStyles.replyQuoteTextMe, !!repliedArt && { flex: 1 }]} numberOfLines={2}>
+                                {repliedArt ? msg.reply_to_preview.replace(/^🎵\s*/, "") : msg.reply_to_preview}
+                              </Text>
+                            </View>
+                          </View>
+                        </>
                       )}
-                      <View style={[chatStyles.bubble, fromMe ? chatStyles.bubbleMe : chatStyles.bubbleThem, bubbleRadius]}>
+                      <View style={[chatStyles.bubble, fromMe ? chatStyles.bubbleMe : chatStyles.bubbleThem, fromMe ? chatStyles.bubbleSelfEnd : chatStyles.bubbleSelfStart]}>
                         <Text style={[chatStyles.bubbleText, fromMe && chatStyles.bubbleTextMe]}>{msg.body}</Text>
                         <Text style={[chatStyles.bubbleTime, fromMe && chatStyles.bubbleTimeMe]}>{fmtTime(msg.created_at)}</Text>
                       </View>
@@ -144,7 +183,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                 created_at: new Date().toISOString(),
               };
               setMsgs(prev => [...prev, optimistic]);
-              setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 60);
+              scrollToBottom();
               const result = await sendSpotifyTrackMessage(conv.conversationId, {
                 id: t.id, name: t.name, artist: t.artist, albumArt: t.albumArt,
               });
@@ -154,9 +193,23 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
           {!!replyTo && (
             <View style={chatStyles.replyBar}>
               <View style={chatStyles.replyBarAccent} />
+              {replyTo.kind === "song" && !!replyTo.albumArt && (
+                <Image source={{ uri: replyTo.albumArt }} style={chatStyles.replyBarArt} />
+              )}
               <View style={{ flex: 1 }}>
-                <Text style={chatStyles.replyBarName}>{replyTo.senderName}</Text>
-                <Text style={chatStyles.replyBarPreview} numberOfLines={1}>{replyTo.preview}</Text>
+                <Text style={chatStyles.replyBarName} numberOfLines={1}>
+                  {replyTo.kind === "song" ? `Replying to ${replyTo.senderName}'s song` : `Replying to ${replyTo.senderName}`}
+                </Text>
+                {replyTo.kind === "song" ? (
+                  <View style={chatStyles.replyBarSongRow}>
+                    <Text style={chatStyles.replyBarSongTitle} numberOfLines={1}>{replyTo.preview.replace(/^🎵\s*/, "").split(" — ")[0]}</Text>
+                    {!!replyTo.subtitle && (
+                      <Text style={chatStyles.replyBarSongArtist} numberOfLines={1}> · {replyTo.subtitle}</Text>
+                    )}
+                  </View>
+                ) : (
+                  <Text style={chatStyles.replyBarPreview} numberOfLines={1}>{replyTo.preview}</Text>
+                )}
               </View>
               <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="close" size={16} color="rgba(255,255,255,0.4)" />

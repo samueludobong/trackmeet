@@ -2,11 +2,8 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "../lib/supabase";
-import { getCommunityBySlug, type Community } from "../services/communities";
+import { getCommunityBySlug, COMMUNITY_SELECT, type Community } from "../services/communities";
 import { CommunityDetailOverlay } from "../components/communities/CommunityDetailOverlay";
-
-const COMMUNITY_SELECT =
-  "id, name, slug, description, avatar_url, banner_url, banner_color, genres, artist_id, created_by, is_private, allow_posts, allow_anyone_to_post, allow_comments, allow_offtopic, member_count, post_count, created_at";
 
 /** Route /community?id=... or /community?slug=... — used by tappable community tags. */
 export default function CommunityRoute() {

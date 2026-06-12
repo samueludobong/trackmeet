@@ -488,6 +488,39 @@ export type SpotifyTrackResult = {
   previewUrl: string | null
 }
 
+/**
+ * Recommended tracks seeded by IDs from an existing playlist. Spotify
+ * deprecated /v1/recommendations for newly-registered apps in Nov 2024,
+ * so if we get a 403/404 we silently fall back to the user's top tracks
+ * (still genre-aligned because Spotify's "top" model already weights taste).
+ */
+export const getRecommendedTracks = async (
+  accessToken: string,
+  seedTrackIds: string[],
+  limit = 30,
+): Promise<SpotifyTrackResult[]> => {
+  if (seedTrackIds.length === 0) return getUserTopTracks(accessToken, limit);
+  const seeds = seedTrackIds.slice(0, 5).join(',');
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/recommendations?seed_tracks=${seeds}&limit=${limit}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) return getUserTopTracks(accessToken, limit);
+    const data = await res.json();
+    return (data.tracks ?? []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      artist: item.artists?.[0]?.name ?? '',
+      albumArt: item.album?.images?.[0]?.url ?? null,
+      durationMs: item.duration_ms,
+      previewUrl: item.preview_url ?? null,
+    }));
+  } catch {
+    return getUserTopTracks(accessToken, limit);
+  }
+};
+
 // Top tracks for the signed-in user (short_term ≈ last 4 weeks).
 // Used as a "popular" feed when the app has nothing more global to show.
 // Requires user-top-read scope (already in SPOTIFY_SCOPES).
@@ -1170,6 +1203,51 @@ export const playTrackAt = async (accessToken: string, trackUri: string, positio
     console.log('[Spotify] playTrackAt error:', e)
   }
 }
+
+/**
+ * Play a list of Spotify track URIs as a queue. Picks the user's active device
+ * (or the first available one), then PUTs the URIs to /me/player/play so the
+ * Spotify app starts playing immediately.
+ *
+ * Returns:
+ *   - { ok: true }                      — playback started
+ *   - { ok: false, reason: 'no-device' } — user must open Spotify on a device
+ *   - { ok: false, reason: 'error', message } — anything else (premium req, etc.)
+ *
+ * Spotify caps a single play request at 100 URIs; we slice to that.
+ */
+export const playTracks = async (
+  accessToken: string,
+  trackUris: string[],
+): Promise<{ ok: true } | { ok: false; reason: 'no-device' | 'error'; message?: string }> => {
+  if (trackUris.length === 0) return { ok: false, reason: 'error', message: 'No tracks to play.' };
+  const uris = trackUris.slice(0, 100);
+  const body = JSON.stringify({ uris });
+  const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+
+  const attempt = async (deviceId?: string) => {
+    const url = deviceId
+      ? `https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`
+      : 'https://api.spotify.com/v1/me/player/play';
+    return fetch(url, { method: 'PUT', headers, body });
+  };
+
+  try {
+    let res = await attempt();
+    if (res.status === 404) {
+      // No active device — pick one and retry.
+      const deviceId = await pickTargetDevice(accessToken);
+      if (!deviceId) return { ok: false, reason: 'no-device' };
+      res = await attempt(deviceId);
+    }
+    if (res.status === 204 || res.status === 202 || res.ok) return { ok: true };
+    if (res.status === 403) return { ok: false, reason: 'error', message: 'Spotify Premium required.' };
+    const text = await res.text().catch(() => '');
+    return { ok: false, reason: 'error', message: text || `Spotify returned ${res.status}` };
+  } catch (e: any) {
+    return { ok: false, reason: 'error', message: e?.message ?? 'Network error' };
+  }
+};
 
 // Play a specific track immediately by its Spotify URI (e.g. "spotify:track:<id>").
 // Requires an active Spotify device; silently no-ops if none is available.

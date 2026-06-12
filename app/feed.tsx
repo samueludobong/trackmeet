@@ -6,7 +6,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import * as SecureStore from 'expo-secure-store'
 
 // ─── Extracted shared foundation (see lib/feed/*) ─────────────────────────────
-import { OpenMeetCtx, HostMeetCtx, NowPlayingCtx, FeedUserCtx, PostActionsCtx } from '../lib/feed/contexts';
+import { OpenMeetCtx, HostMeetCtx, JamCtx, NowPlayingCtx, FeedUserCtx, PostActionsCtx } from '../lib/feed/contexts';
 import { styles } from '../lib/feed/styles';
 
 // FeedUserCtx is consumed by external screens via `import { FeedUserCtx } from "./feed"`.
@@ -19,6 +19,8 @@ import { BottomNav } from "../components/feed/BottomNav";
 import { PostComposerSheet } from "../components/feed/PostComposerSheet";
 import { PostDetailOverlay } from "../components/post/PostDetailOverlay";
 import { ChatDetailView } from "../components/messages/ChatDetailView";
+import { GroupChatDetailView } from "../components/messages/GroupChatDetailView";
+import { type GroupChat } from "../services/groupChats";
 import { JoinMeetPrompt } from "../components/meets/JoinMeetPrompt";
 import { MeetListenerScreen } from "../components/meets/MeetListenerScreen";
 import { MeetLiveScreen } from "../components/meets/MeetLiveScreen";
@@ -52,8 +54,11 @@ const hidden = { display: "none" as const };
 export default function FeedScreen() {
   // Instantiate once at the top level so token cache + needsReconnect survive tab switches
   const {
-    nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, fetchFeedPosts, onToggleLike, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight
+    nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, jamMeetId, jamOther, jamToken, jamMinimized, setJamMinimized, openJam, closeJam, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, repostedPostIds, onToggleRepost, pollVotes, onVoteOnPoll, fetchFeedPosts, onToggleLike, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight
   } = useFeedScreen();
+
+  // Open group chat (mounted at root like the DM ChatDetailView to avoid clipping).
+  const [openGroup, setOpenGroup] = useState<GroupChat | null>(null);
 
   // On the Feed tab, stack the minimized MeetMiniBar directly above the floating
   // quick-post composer: its bottom = composer bottom + composer height + gap.
@@ -75,16 +80,18 @@ export default function FeedScreen() {
 
   return (
     <NowPlayingCtx.Provider value={nowPlaying}>
-    <FeedUserCtx.Provider value={{ currentUserId: currentUser?.id ?? null, likedPostIds, onToggleLike }}>
+    <FeedUserCtx.Provider value={{ currentUserId: currentUser?.id ?? null, likedPostIds, onToggleLike, repostedPostIds, onToggleRepost, pollVotes, onVoteOnPoll }}>
     <PostActionsCtx.Provider value={{ onRemovePost: (id) => setFeedPosts((prev) => prev.filter((p) => p.id !== id)) }}>
     <OpenMeetCtx.Provider value={openListenerMeet}>
     <HostMeetCtx.Provider value={openHostMeet}>
+    <JamCtx.Provider value={openJam}>
     <View style={styles.container}>
       <SafeAreaView style={{ flex: 1 }} edges={[]}>
         {visited.has("Feed") && (
           <TabScreen active={onFeed}>
             <FeedDrawer
               userId={currentUser?.id ?? null}
+              focused={onFeed}
               feedContent={
                 <FeedList
                   feedPosts={feedPosts}
@@ -118,7 +125,7 @@ export default function FeedScreen() {
         )}
         {visited.has("Messages") && (
           <TabScreen active={activeNav === "Messages"}>
-            <MessagesView onOpenChat={setOpenConv} />
+            <MessagesView onOpenChat={setOpenConv} onOpenGroup={setOpenGroup} />
           </TabScreen>
         )}
       </SafeAreaView>
@@ -160,6 +167,9 @@ export default function FeedScreen() {
         <PostDetailOverlay post={detailPost} onClose={() => setDetailPost(null)} />
       )}      {openConv && (
         <ChatDetailView conv={openConv} onClose={() => setOpenConv(null)} />
+      )}
+      {openGroup && (
+        <GroupChatDetailView group={openGroup} userId={currentUser?.id ?? null} onClose={() => setOpenGroup(null)} />
       )}      <JoinMeetPrompt
         visible={!!joinPromptMeetId}
         onCancel={() => setJoinPromptMeetId(null)}
@@ -207,7 +217,29 @@ export default function FeedScreen() {
           bottom={onFeed ? meetBarBottom : undefined}
         />
       )}
+      {/* Private DM jam — hostless co-listening; reuses the meet control screen */}
+      <MeetLiveScreen
+        visible={!!jamMeetId}
+        meetId={jamMeetId}
+        accessToken={jamToken}
+        userId={currentUser?.id ?? null}
+        minimized={jamMinimized}
+        jam={{ otherName: jamOther?.display_name || jamOther?.username || "Jam" }}
+        onMinimize={() => setJamMinimized(true)}
+        onClose={closeJam}
+      />
+      {jamMeetId && jamMinimized && (
+        <MeetMiniBar
+          key={`jambar-${quickReplyPost ? "q" : ""}${detailPost ? "d" : ""}${openConv ? "c" : ""}`}
+          albumArt={nowPlaying.track?.albumArt ?? null}
+          title={jamOther?.display_name || jamOther?.username || "Jam"}
+          subtitle={nowPlaying.track?.name ?? "Jamming"}
+          onExpand={() => setJamMinimized(false)}
+          bottom={onFeed ? meetBarBottom : undefined}
+        />
+      )}
     </View>
+    </JamCtx.Provider>
     </HostMeetCtx.Provider>
     </OpenMeetCtx.Provider>
     </PostActionsCtx.Provider>

@@ -5,10 +5,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { getActiveStories, deleteStory, type Story } from "../services/stories";
 import { MusicStoryCard } from "../components/stories/MusicStoryCard";
+import { StoryCanvasRenderer } from "../components/stories/StoryCanvasRenderer";
+import { DeleteStoryConfirmOverlay } from "../components/stories/DeleteStoryConfirmOverlay";
 import { AddToPlaylistSheet } from "../components/AddToPlaylistSheet";
+import { useStoryAudioPool } from "../hooks/useStoryAudioPool";
+import { useDragDownToClose } from "../hooks/useDragDownToClose";
 import { SW, SH } from "../lib/feed/dimensions";
 
-const STORY_DURATION_MS = 5000;
+const DEFAULT_STORY_DURATION_MS = 5000;
 const CARD_SIZE = Math.min(SW - 32, SH * 0.55);
 
 export default function StoryViewerScreen() {
@@ -21,6 +25,8 @@ export default function StoryViewerScreen() {
   const [idx, setIdx]         = useState(0);
   const [paused, setPaused]   = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [muted, setMuted]     = useState(false);
 
   const progress = useRef(new Animated.Value(0)).current;
 
@@ -41,13 +47,50 @@ export default function StoryViewerScreen() {
 
   const current = stories[idx];
 
-  // Animate progress + advance on completion
+  // Pooled song-preview audio, mirroring the feed: play the current story's
+  // song and preload the neighbours so advancing is instant. Non-neighbour
+  // sounds are evicted by the hook.
+  const preloadSongIds = useMemo(() => {
+    const out: string[] = [];
+    for (let i = idx - 1; i <= idx + 2; i++) {
+      if (i < 0 || i >= stories.length || i === idx) continue;
+      const sid = stories[i]?.songId;
+      if (sid && !out.includes(sid)) out.push(sid);
+    }
+    return out;
+  }, [stories, idx]);
+
+  useStoryAudioPool({ activeSongId: current?.songId ?? null, preloadSongIds, paused, muted });
+
+  // Swipe down to dismiss — the screen follows the finger, fades + scales, and
+  // closes past the threshold (otherwise springs back).
+  const { dragY, panHandlers } = useDragDownToClose({ onClose: () => router.back(), distance: SH });
+  const dragOpacity = dragY.interpolate({ inputRange: [0, SH * 0.5], outputRange: [1, 0.4], extrapolate: "clamp" });
+  const dragScale   = dragY.interpolate({ inputRange: [0, SH], outputRange: [1, 0.88], extrapolate: "clamp" });
+  const dragRadius  = dragY.interpolate({ inputRange: [0, 120], outputRange: [0, 24], extrapolate: "clamp" });
+
+  // Track the live progress value so a long-press pause can resume from where
+  // it stopped instead of restarting the bar.
+  const progressValRef = useRef(0);
+  useEffect(() => {
+    const id = progress.addListener(({ value }) => { progressValRef.current = value; });
+    return () => progress.removeListener(id);
+  }, [progress]);
+
+  // Animate progress + advance on completion. On a new story we start from 0;
+  // on resume-after-pause (same story) we continue from the frozen position
+  // over the remaining time, so the bar stays in sync with the audio.
+  const lastStoryIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!current || paused) return;
-    progress.setValue(0);
+    const total = current.durationMs || DEFAULT_STORY_DURATION_MS;
+    const isNewStory = lastStoryIdRef.current !== current.id;
+    lastStoryIdRef.current = current.id;
+    const from = isNewStory ? 0 : progressValRef.current;
+    if (isNewStory) progress.setValue(0);
     const anim = Animated.timing(progress, {
       toValue: 1,
-      duration: STORY_DURATION_MS,
+      duration: Math.max(0, total * (1 - from)),
       useNativeDriver: false,
     });
     anim.start(({ finished }) => {
@@ -110,8 +153,22 @@ export default function StoryViewerScreen() {
   const isMine = me && current.userId === me;
   const liked  = false;
 
+  const isMusic = current.type === "music" && current.songId && current.songName && current.songArtist;
+  const hasCanvas = isMusic && current.canvas != null;
+
   return (
     <View style={s.root}>
+     <Animated.View
+       style={{
+         flex: 1,
+         backgroundColor: "#000",
+         overflow: "hidden",
+         borderRadius: dragRadius,
+         opacity: dragOpacity,
+         transform: [{ translateY: dragY }, { scale: dragScale }],
+       }}
+       {...panHandlers}
+     >
       {/* Tap zones for prev/next + long-press to pause */}
       <View style={StyleSheet.absoluteFillObject}>
         <TouchableOpacity
@@ -132,80 +189,118 @@ export default function StoryViewerScreen() {
         />
       </View>
 
-      {/* Progress bars */}
-      <View style={s.progressRow} pointerEvents="none">
-        {stories.map((_, i) => (
-          <View key={i} style={s.progressTrack}>
-            <Animated.View
-              style={[
-                s.progressFill,
-                i < idx
-                  ? { width: "100%" }
-                  : i === idx
-                    ? { width: progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) }
-                    : { width: "0%" },
-              ]}
-            />
-          </View>
-        ))}
-      </View>
+      {/* Free-form canvas stories replay the author's full-screen layout. The
+          renderer fills the screen so positions match the composer exactly. */}
+      {hasCanvas && (
+        <StoryCanvasRenderer
+          canvas={current.canvas!}
+          design={current.cardDesign}
+          song={{
+            id: current.songId!,
+            name: current.songName!,
+            artist: current.songArtist!,
+            albumArt: current.songAlbumArt,
+          }}
+          author={{
+            username: current.author.username,
+            display_name: current.author.display_name,
+            avatar_url: current.author.avatar_url,
+          }}
+          showActions={!isMine}
+          liked={liked}
+          onAddToPlaylist={onAddToPlaylist}
+          onShare={onShare}
+        />
+      )}
 
-      {/* Top bar — author + close */}
-      <View style={s.headerRow} pointerEvents="box-none">
-        <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View style={s.avatarFallback}>
-            <Text style={{ color: "#fff", fontWeight: "800" }}>
-              {(current.author.display_name || current.author.username || "?").trim().slice(0, 1).toUpperCase()}
-            </Text>
-          </View>
-          <View>
-            <Text style={s.authorName} numberOfLines={1}>
-              {current.author.display_name || current.author.username || "anon"}
-            </Text>
-            <Text style={s.timeTxt}>{relativeTime(current.createdAt)}</Text>
-          </View>
+      {/* Progress + author chrome floats above the canvas */}
+      <View style={s.chrome} pointerEvents="box-none">
+        <View style={s.progressRow} pointerEvents="none">
+          {stories.map((_, i) => (
+            <View key={i} style={s.progressTrack}>
+              <Animated.View
+                style={[
+                  s.progressFill,
+                  i < idx
+                    ? { width: "100%" }
+                    : i === idx
+                      ? { width: progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) }
+                      : { width: "0%" },
+                ]}
+              />
+            </View>
+          ))}
         </View>
-        {isMine && (
-          <TouchableOpacity onPress={onDelete} style={s.iconBtn} activeOpacity={0.7}>
-            <Ionicons name="trash-outline" size={20} color="#fff" />
+
+        <View style={s.headerRow} pointerEvents="box-none">
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={s.avatarFallback}>
+              <Text style={{ color: "#fff", fontWeight: "800" }}>
+                {(current.author.display_name || current.author.username || "?").trim().slice(0, 1).toUpperCase()}
+              </Text>
+            </View>
+            <View>
+              <Text style={s.authorName} numberOfLines={1}>
+                {current.author.display_name || current.author.username || "anon"}
+              </Text>
+              <Text style={s.timeTxt}>{relativeTime(current.createdAt)}</Text>
+            </View>
+          </View>
+          {current.songId && (
+            <TouchableOpacity onPress={() => setMuted((m) => !m)} style={s.iconBtn} activeOpacity={0.7}>
+              <Ionicons name={muted ? "volume-mute" : "volume-high"} size={20} color="#fff" />
+            </TouchableOpacity>
+          )}
+          {isMine && (
+            <TouchableOpacity
+              onPress={() => { setPaused(true); setConfirmDelete(true); }}
+              style={s.iconBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="trash-outline" size={20} color="#fff" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={() => router.back()} style={s.iconBtn} activeOpacity={0.7}>
+            <Ionicons name="close" size={24} color="#fff" />
           </TouchableOpacity>
-        )}
-        <TouchableOpacity onPress={() => router.back()} style={s.iconBtn} activeOpacity={0.7}>
-          <Ionicons name="close" size={24} color="#fff" />
-        </TouchableOpacity>
+        </View>
       </View>
 
-      {/* The card itself */}
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }} pointerEvents="box-none">
-        {current.type === "music" && current.songId && current.songName && current.songArtist ? (
-          <MusicStoryCard
-            design={current.cardDesign}
-            song={{
-              id: current.songId,
-              name: current.songName,
-              artist: current.songArtist,
-              albumArt: current.songAlbumArt,
-            }}
-            author={{
-              username: current.author.username,
-              display_name: current.author.display_name,
-              avatar_url: current.author.avatar_url,
-            }}
-            size={CARD_SIZE}
-            showActions={!isMine}
-            liked={liked}
-            onAddToPlaylist={onAddToPlaylist}
-            onShare={onShare}
-            overlayText={current.overlayText}
-            overlayFont={current.overlayFont}
-            overlayColor={current.overlayColor}
-          />
-        ) : (
-          <View style={{ padding: 24 }}>
-            <Text style={{ color: "rgba(255,255,255,0.5)" }}>Unsupported story type.</Text>
-          </View>
-        )}
-      </View>
+      {/* Legacy stories (no canvas) keep the centered fixed-layout card */}
+      {!hasCanvas && (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }} pointerEvents="box-none">
+          {isMusic ? (
+            <MusicStoryCard
+              design={current.cardDesign}
+              song={{
+                id: current.songId!,
+                name: current.songName!,
+                artist: current.songArtist!,
+                albumArt: current.songAlbumArt,
+              }}
+              author={{
+                username: current.author.username,
+                display_name: current.author.display_name,
+                avatar_url: current.author.avatar_url,
+              }}
+              size={CARD_SIZE}
+              showActions={!isMine}
+              liked={liked}
+              onAddToPlaylist={onAddToPlaylist}
+              onShare={onShare}
+              overlayText={current.overlayText}
+              overlayFont={current.overlayFont}
+              overlayColor={current.overlayColor}
+            />
+          ) : (
+            <View style={{ padding: 24 }}>
+              <Text style={{ color: "rgba(255,255,255,0.5)" }}>Unsupported story type.</Text>
+            </View>
+          )}
+        </View>
+      )}
+
+     </Animated.View>
 
       <AddToPlaylistSheet
         visible={pickerOpen}
@@ -218,6 +313,13 @@ export default function StoryViewerScreen() {
           albumArt: current.songAlbumArt ?? null,
         } : null}
       />
+
+      {confirmDelete && (
+        <DeleteStoryConfirmOverlay
+          onConfirm={onDelete}
+          onClose={() => { setConfirmDelete(false); setPaused(false); }}
+        />
+      )}
     </View>
   );
 }
@@ -233,7 +335,10 @@ function relativeTime(iso: string): string {
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#000", paddingTop: 50 },
+  root: { flex: 1, backgroundColor: "#000" },
+  // Top padding lives on the chrome (not the root) so full-screen canvas
+  // stories use the exact same coordinate space as the composer.
+  chrome: { paddingTop: 50 },
 
   progressRow: { flexDirection: "row", gap: 4, paddingHorizontal: 12, marginBottom: 8 },
   progressTrack: { flex: 1, height: 3, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.18)", overflow: "hidden" },

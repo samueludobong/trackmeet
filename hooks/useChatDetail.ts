@@ -12,13 +12,37 @@ export function useChatDetail(conv: ConversationInfo, onClose: () => void) {
   const [currentUserId, setCurUid]     = useState<string | null>(null);
   const [loading,       setLoading]    = useState(true);
   const [isOtherTyping, setOtherTyping]= useState(false);
-  const [replyTo, setReplyTo]          = useState<{ id: string; preview: string; senderName: string } | null>(null);
+  const [replyTo, setReplyTo]          = useState<{ id: string; preview: string; senderName: string; kind?: "text" | "song"; subtitle?: string; albumArt?: string | null } | null>(null);
 
   const flatRef          = useRef<FlatList<DbMessage>>(null);
   const channelRef       = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const userIdRef        = useRef<string | null>(null);
   const typingOutRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const otherTypingOutRef= useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether the list is pinned near the bottom — drives auto-scroll so we only
+  // jump to new messages when the user isn't scrolled up reading history.
+  const atBottomRef      = useRef(true);
+
+  const onScroll = (e: { nativeEvent: { layoutMeasurement: { height: number }; contentOffset: { y: number }; contentSize: { height: number } } }) => {
+    const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+    atBottomRef.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 120;
+  };
+
+  /** Force a scroll to the newest message (open + when *you* send). */
+  const scrollToBottom = (animated = true) => {
+    atBottomRef.current = true;
+    // Fire across a few frames: a freshly-added row (or the whole list on open)
+    // isn't measured on the first tick, so a single scrollToEnd lands short.
+    requestAnimationFrame(() => flatRef.current?.scrollToEnd({ animated }));
+    setTimeout(() => flatRef.current?.scrollToEnd({ animated }), 120);
+  };
+
+  /** Keep the view pinned to the newest message as content grows (FlatList
+   *  onContentSizeChange) — but only while the user is already at the bottom,
+   *  so scrolling up to read history isn't yanked back down. */
+  const onContentSizeChange = () => {
+    if (atBottomRef.current) flatRef.current?.scrollToEnd({ animated: false });
+  };
 
   // Slide in + load messages + subscribe to realtime + broadcast
   useEffect(() => {
@@ -34,7 +58,10 @@ export function useChatDetail(conv: ConversationInfo, onClose: () => void) {
       if (!active) return;
       setMsgs(loaded);
       setLoading(false);
-      setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 60);
+      // The list mounts on this render; pin to the newest message across a few
+      // frames as rows (and any avatars) finish measuring.
+      atBottomRef.current = true;
+      [0, 120, 300].forEach((t) => setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), t));
     })();
 
     const ch = supabase
@@ -45,7 +72,8 @@ export function useChatDetail(conv: ConversationInfo, onClose: () => void) {
         (payload) => {
           const msg = payload.new as DbMessage;
           setMsgs(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
-          setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 60);
+          // Only follow incoming messages when already at the bottom.
+          if (atBottomRef.current) setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 60);
         })
       // Typing indicator (broadcast — no DB write needed)
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
@@ -95,15 +123,20 @@ export function useChatDetail(conv: ConversationInfo, onClose: () => void) {
     Animated.timing(slideX, { toValue: SW, duration: 260, useNativeDriver: true }).start(onClose);
   };
 
-  // Swipe right to dismiss whole chat
+  // Edge swipe right to dismiss the chat. Kept to a tight left-edge band so a
+  // right-swipe further into the screen is free to reply to the other person's
+  // messages instead of closing. Captured so a quick flick beats the scroll.
+  const wantsClose = (g: { dx: number; dy: number; moveX: number }) =>
+    (g.moveX - g.dx) < 24 && g.dx > 6 && g.dx > Math.abs(g.dy) * 1.2;
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, { dx, dy }) => dx > 10 && dx > Math.abs(dy) * 2,
+      onMoveShouldSetPanResponderCapture: (_, g) => wantsClose(g),
+      onMoveShouldSetPanResponder: (_, g) => wantsClose(g),
       onShouldBlockNativeResponder: () => false,
       onPanResponderMove: (_, { dx }) => { if (dx > 0) slideX.setValue(dx); },
       onPanResponderRelease: (_, { dx, vx }) => {
-        if (dx > SW * 0.35 || vx > 0.8) handleClose();
+        if (dx > SW * 0.3 || vx > 0.45) handleClose();
         else Animated.spring(slideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 220 }).start();
       },
     })
@@ -129,7 +162,7 @@ export function useChatDetail(conv: ConversationInfo, onClose: () => void) {
       created_at: new Date().toISOString(),
     };
     setMsgs(prev => [...prev, optimistic]);
-    setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 60);
+    scrollToBottom();
     const result = await sendTextMessage(conv.conversationId, text, reply ?? undefined);
     if (result) setMsgs(prev => [...prev.filter(m => m.id !== tempId), result]);
   };
@@ -138,5 +171,5 @@ export function useChatDetail(conv: ConversationInfo, onClose: () => void) {
   const otherName = conv.otherUser.display_name || conv.otherUser.username;
   const otherInitials = otherName.trim().split(/\s+/).map(p => p[0]?.toUpperCase() ?? '').slice(0, 2).join('');
 
-  return { slideX, msgText, setMsgText, msgs, setMsgs, currentUserId, setCurUid, loading, setLoading, isOtherTyping, setOtherTyping, replyTo, setReplyTo, flatRef, channelRef, userIdRef, typingOutRef, otherTypingOutRef, broadcastTyping, handleTextChange, handleClose, pan, sendMessage, fmtTime, otherName, otherInitials };
+  return { slideX, msgText, setMsgText, msgs, setMsgs, currentUserId, setCurUid, loading, setLoading, isOtherTyping, setOtherTyping, replyTo, setReplyTo, flatRef, channelRef, userIdRef, typingOutRef, otherTypingOutRef, atBottomRef, onScroll, scrollToBottom, onContentSizeChange, broadcastTyping, handleTextChange, handleClose, pan, sendMessage, fmtTime, otherName, otherInitials };
 }

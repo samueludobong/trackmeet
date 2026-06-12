@@ -17,7 +17,7 @@ import { MeetSummaryScreen } from "../../components/meets/MeetSummaryScreen";
 const lyricsBand = { position: "absolute" as const, top: 96, left: 0, right: 0, bottom: 104 };
 
 export function MeetLiveScreen({
-  visible, onClose, meetId, meetName, accessToken, userId, minimized = false, onMinimize,
+  visible, onClose, meetId, meetName, accessToken, userId, minimized = false, onMinimize, jam,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -27,20 +27,25 @@ export function MeetLiveScreen({
   userId: string | null;
   minimized?: boolean;
   onMinimize?: () => void;
+  // Set for a private DM jam: hostless, co-controlled. `otherName` titles the bar.
+  jam?: { otherName: string | null };
 }) {
   const apiTokenRef = useRef<string | null>(null);
+  // useMeetHost's jam mode needs the viewer id; only enable it when we have one.
+  const jamConfig = React.useMemo(() => (jam && userId ? { userId } : undefined), [jam, userId]);
   const {
     track, liveProgressMs, listenerCount, messages, chatInput, setChatInput,
     talkOn, ending, summary, reactions, sendReaction, removeReaction, handleSendChat,
-    handleToggleTalk, handleEndMeet, closeAll,
-  } = useMeetHost({ visible, meetId, accessToken, getApiToken: () => apiTokenRef.current, onClose });
+    handleToggleTalk, handleEndMeet, closeAll, becomeDriver,
+  } = useMeetHost({ visible, meetId, accessToken, getApiToken: () => apiTokenRef.current, onClose, jam: jamConfig });
 
   const {
     slideAnim, musicSlideX, canvasUrl, setCanvasUrl, ctrlLoading, setCtrlLoading, pickerOpen, setPickerOpen, apiToken, setApiToken, playlists, setPlaylists, playlistsLoading, setPlaylistsLoading, selectedPlaylist, setSelectedPlaylist, playlistTracks, setPlaylistTracks, tracksLoading, setTracksLoading, tracksError, setTracksError, searchQuery, setSearchQuery, searchResults, setSearchResults, searchLoading, setSearchLoading, playingId, setPlayingId, player, openMusicPicker, closeMusicPicker, pickerOpenRef, musicPan, selectPlaylist, tok, handlePrev, handleNext, handlePlayPause, handlePlayTrack, fmtMs, progressPct, isSearching, showTracks, p2Loading, p2Title
-  } = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs });
+  } = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, onControl: jamConfig ? becomeDriver : undefined });
   apiTokenRef.current = apiToken;
 
   const [lyricsOpen, setLyricsOpen] = useState(false);
+  const title = jam ? (jam.otherName || "Jam") : (meetName ?? "My Meet");
 
   // When minimized the hooks above keep running (realtime, audio, sync) but we
   // don't render the Modal at all. A Modal with visible={false} still creates a
@@ -70,14 +75,14 @@ export function MeetLiveScreen({
           <View style={mlStyles.topLeft}>
             <LinearGradient colors={["#AB00FF", "#FF6C1A"]} style={mlStyles.avatarRing}>
               <View style={mlStyles.avatarInner}>
-                <Text style={mlStyles.avatarInitial}>{(meetName ?? "M").slice(0, 1).toUpperCase()}</Text>
+                <Text style={mlStyles.avatarInitial}>{(title ?? "M").slice(0, 1).toUpperCase()}</Text>
               </View>
             </LinearGradient>
             <View>
-              <Text style={mlStyles.hostName}>{meetName ?? "My Meet"}</Text>
+              <Text style={mlStyles.hostName}>{title}</Text>
               <View style={mlStyles.listenerRow}>
                 <View style={mlStyles.liveDotSm} />
-                <Text style={mlStyles.listenerText}>{listenerCount} listening</Text>
+                <Text style={mlStyles.listenerText}>{jam ? "You both control" : `${listenerCount} listening`}</Text>
               </View>
             </View>
           </View>
@@ -89,7 +94,7 @@ export function MeetLiveScreen({
               <Ionicons name="musical-notes" size={17} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity style={mlStyles.endBtn} activeOpacity={0.8} onPress={handleEndMeet} disabled={ending}>
-              <Text style={mlStyles.endBtnText}>{ending ? "Ending…" : "End"}</Text>
+              <Text style={mlStyles.endBtnText}>{jam ? (ending ? "Leaving…" : "Leave") : (ending ? "Ending…" : "End")}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={onMinimize ?? onClose}>
               <Ionicons name="chevron-down" size={19} color="#fff" />

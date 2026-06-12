@@ -25,8 +25,21 @@ const ITEMS: { key: Section; label: string; icon: keyof typeof Ionicons.glyphMap
  * Push-style sidebar drawer for the Feed tab. Edge-swipe right opens it (sliding
  * the content over to reveal the sidebar); swipe left — or tapping the pushed
  * content / a sidebar item — closes it. Sidebar tabs switch the content area.
+ *
+ * `focused`: must be `true` for any swipe gesture to be claimed. The FeedDrawer
+ * lives inside a hidden TabScreen when the user is on another tab, but in some
+ * RN edge cases (Modal overlays, native-modal touch propagation) the
+ * PanResponder can still receive move events from gestures that *should* be
+ * handled by another screen. Gating on `focused` makes it impossible to open
+ * the drawer accidentally from outside the Feed tab.
  */
-export function FeedDrawer({ feedContent, userId }: { feedContent: ReactNode; userId: string | null }) {
+export function FeedDrawer({
+  feedContent, userId, focused = true,
+}: {
+  feedContent: ReactNode;
+  userId: string | null;
+  focused?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   const [section, setSection] = useState<Section>("feed");
   const [open, setOpen] = useState(false);
@@ -34,6 +47,10 @@ export function FeedDrawer({ feedContent, userId }: { feedContent: ReactNode; us
   const tx = useRef(new Animated.Value(0)).current;
   const openRef = useRef(false);
   const startX = useRef(0);
+  // Mirrored into a ref so the PanResponder (created once via useRef) reads
+  // the latest value without recreating itself on every focus change.
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
 
   const animateTo = (toValue: number) => {
     openRef.current = toValue > 0;
@@ -44,6 +61,10 @@ export function FeedDrawer({ feedContent, userId }: { feedContent: ReactNode; us
   const pan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_e, g) => {
+        // Hard block: refuse every gesture when the Feed tab isn't focused.
+        // This catches the "right-swipe on Profile/playlist detail accidentally
+        // opens the sidebar when I switch back to Feed" bug.
+        if (!focusedRef.current) return false;
         const horizontal = Math.abs(g.dx) > THRESHOLD && Math.abs(g.dx) > Math.abs(g.dy) * 1.4;
         if (!horizontal) return false;
         // Closing: a left swipe anywhere while open. Opening: a right swipe that
@@ -53,13 +74,16 @@ export function FeedDrawer({ feedContent, userId }: { feedContent: ReactNode; us
       },
       onPanResponderGrant: () => { tx.stopAnimation((v) => { startX.current = v; }); },
       onPanResponderMove: (_e, g) => {
+        if (!focusedRef.current) return;
         tx.setValue(Math.max(0, Math.min(W, startX.current + g.dx)));
       },
       onPanResponderRelease: (_e, g) => {
+        if (!focusedRef.current) { animateTo(0); return; }
         const next = startX.current + g.dx;
         if (g.vx > 0.3 || (g.vx > -0.3 && next > W * 0.45)) animateTo(W);
         else animateTo(0);
       },
+      onPanResponderTerminate: () => { animateTo(0); },
     }),
   ).current;
 

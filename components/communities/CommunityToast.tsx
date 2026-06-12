@@ -2,13 +2,16 @@ import React, { useEffect, useRef } from "react";
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-/** Auto-dismissing push-notification toast (3s) — slides down, fades out, dismissable. */
+/** Auto-dismissing push-notification toast (3s) — slides down, fades out, dismissable.
+ *  Pass `message` to override the default notifications copy (e.g. a welcome message). */
 export function CommunityToast({
-  visible, slug, onDismiss,
+  visible, slug, onDismiss, message, icon = "notifications",
 }: {
   visible: boolean;
   slug: string;
   onDismiss: () => void;
+  message?: string;
+  icon?: keyof typeof Ionicons.glyphMap;
 }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const ty = useRef(new Animated.Value(-12)).current;
@@ -31,10 +34,14 @@ export function CommunityToast({
   if (!visible) return null;
   return (
     <Animated.View style={[styles.toast, { opacity, transform: [{ translateY: ty }] }]}>
-      <Ionicons name="notifications" size={14} color="#AB00FF" />
-      <Text style={styles.text}>
-        Push notifications for <Text style={styles.slug}>/{slug}</Text> are on.
-      </Text>
+      <Ionicons name={icon} size={14} color="#AB00FF" />
+      {message ? (
+        <Text style={styles.text} numberOfLines={3}>{message}</Text>
+      ) : (
+        <Text style={styles.text}>
+          Push notifications for <Text style={styles.slug}>/{slug}</Text> are on.
+        </Text>
+      )}
       <TouchableOpacity onPress={onDismiss} hitSlop={10} style={styles.close}>
         <Ionicons name="close" size={14} color="rgba(255,255,255,0.6)" />
       </TouchableOpacity>

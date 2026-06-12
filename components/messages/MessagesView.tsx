@@ -1,23 +1,25 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { feedCache } from "../../lib/feed/caches";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Pressable, PanResponder, RefreshControl, Image } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Pressable, RefreshControl, Image } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { getConversations, type ConversationInfo } from "../../services/messages";
 import { getFollowingNowListening, type NowListeningUser } from "../../services/follows";
+import { getFollowingNotes, type Note } from "../../services/notes";
+import { CreateNoteOverlay } from "../../components/messages/CreateNoteOverlay";
+import { NoteViewOverlay } from "../../components/messages/NoteViewOverlay";
+import { useNowPlayingCtx } from "../../lib/feed/contexts";
 import { ds, msgStyles } from "../../lib/feed/localStyles";
-import { styles as feedStyles } from "../../lib/feed/styles";
 import { MESSAGES_TABS } from "../../constants/messages";
 import { MSG_HEADER_H } from "../../constants/feedLayout";
 import { NAVBAR_H, BOTTOM_INSET } from "../../lib/feed/dimensions";
 import { type MessagesTab } from "../../types/messages";
 import { DirectMessagesList } from "../../components/messages/DirectMessagesList";
 import { GroupChatsList } from "../../components/messages/GroupChatsList";
-import { CommunityList } from "../../components/messages/CommunityList";
+import { getMyGroupChats, type GroupChat } from "../../services/groupChats";
 import { SongPreviewSheet } from "../../components/SongPreviewSheet";
 import { useViewer } from "../../hooks/useViewer";
-import { MESSAGES_UNREAD } from "../../app/data/mock";
 
-export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationInfo) => void }) {
+export function MessagesView({ onOpenChat, onOpenGroup }: { onOpenChat: (conv: ConversationInfo) => void; onOpenGroup?: (g: GroupChat) => void }) {
   const [activeTab, setActiveTab] = useState<MessagesTab>("Messages");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownAnim = useRef(new Animated.Value(0)).current;
@@ -28,18 +30,34 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
   const [convsLoading,  setConvsLoading]  = useState(!feedCache.conversations);
   const [convsRefreshing, setConvsRefreshing] = useState(false);
 
-  // Now-listening: viewer + followed users currently broadcasting
+  // Real group-chat count for the switcher badge (no dummy numbers).
+  const [groupCount, setGroupCount] = useState(0);
+  useEffect(() => { getMyGroupChats().then((g) => setGroupCount(g.length)).catch(() => {}); }, []);
+
+  // Now-listening strip: viewer + followed users' live broadcasts AND notes.
   const [listening, setListening] = useState<NowListeningUser[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [noteOverlayOpen, setNoteOverlayOpen] = useState(false);
+  const [viewNote, setViewNote] = useState<Note | null>(null);
   const [previewSong, setPreviewSong] = useState<{ id: string; name: string; artist: string; albumArt: string | null } | null>(null);
-  const { currentUserId, spotifyToken } = useViewer();
+  const { currentUserId, currentUser, spotifyToken } = useViewer();
+  // My own now-playing comes from the LIVE player context — never cached into
+  // the notes DB. While it's playing it replaces my note card; when it stops my
+  // stored note (text or pinned song) shows again.
+  const { track: liveTrack } = useNowPlayingCtx();
 
   const refreshListening = useCallback(async () => {
     try {
-      setListening(await getFollowingNowListening());
+      const [live, ns] = await Promise.all([getFollowingNowListening(), getFollowingNotes()]);
+      setListening(live);
+      setNotes(ns);
     } catch {
       setListening([]);
+      setNotes([]);
     }
   }, []);
+
+  const myNote = notes.find((n) => n.isMe) ?? null;
 
   useEffect(() => {
     if (feedCache.conversations) return;
@@ -70,13 +88,32 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
 
   const openPreview = (u: NowListeningUser) => {
     if (!u.song_id || !u.song_name) return;
-    setPreviewSong({
-      id: u.song_id,
-      name: u.song_name,
-      artist: u.song_artist ?? "",
-      albumArt: u.song_album_art,
-    });
+    setPreviewSong({ id: u.song_id, name: u.song_name, artist: u.song_artist ?? "", albumArt: u.song_album_art });
   };
+
+  // Merge notes + live broadcasts into one strip. Now-playing REPLACES a note
+  // while someone is listening, and their note returns when they stop. My slot
+  // comes first (my live song, else my note, else a "+"), then everyone else's
+  // live songs, then the notes of people who aren't currently listening.
+  //
+  // My live song is read straight from the player context (not the DB cache),
+  // so the card reflects what I'm actually playing right now.
+  const myLive: NowListeningUser | null = liveTrack?.isPlaying
+    ? {
+        id: currentUserId ?? "me",
+        username: null,
+        display_name: "You",
+        avatar_url: currentUser?.avatarUrl ?? null,
+        song_id: liveTrack.id,
+        song_name: liveTrack.name,
+        song_artist: liveTrack.artist,
+        song_album_art: liveTrack.albumArt,
+        isMe: true,
+      }
+    : null;
+  const liveOthers = listening.filter((u) => !u.isMe);
+  const liveOtherIds = new Set(liveOthers.map((u) => u.id));
+  const noteOthers = notes.filter((n) => !n.isMe && !liveOtherIds.has(n.user_id));
 
   const openDropdown = () => {
     setDropdownOpen(true);
@@ -115,35 +152,11 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
           <Animated.View style={{ transform: [{ rotate: chevronRotate }], marginTop: 4 }}>
             <Ionicons name="chevron-down" size={18} color="rgba(255,255,255,0.55)" />
           </Animated.View>
+          <View style={msgStyles.headerRedDot} />
         </TouchableOpacity>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <TouchableOpacity style={ds.iconBtn} activeOpacity={0.7}>
-            <Ionicons name="search-outline" size={18} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={ds.iconBtn} activeOpacity={0.7}>
-            <Ionicons name="create-outline" size={18} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* ── Now Playing stories strip ── */}
-      <View style={msgStyles.nowPlayingSection}>
-        <Text style={msgStyles.nowPlayingLabel}>Now Listening</Text>
-        {listening.length === 0 ? (
-          <Text style={{ paddingHorizontal: 16, paddingBottom: 12, color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
-            Nobody you follow is broadcasting right now.
-          </Text>
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={msgStyles.nowPlayingRow}
-          >
-            {listening.map((u) => (
-              <NowListeningBubble key={u.id} user={u} onPress={() => openPreview(u)} />
-            ))}
-          </ScrollView>
-        )}
+        <TouchableOpacity style={ds.iconBtn} activeOpacity={0.7}>
+          <Ionicons name="create-outline" size={18} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       {/* Backdrop to close dropdown */}
@@ -166,7 +179,7 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
         >
           {MESSAGES_TABS.map((tab, i) => {
             const active = tab === activeTab;
-            const count  = MESSAGES_UNREAD[tab] ?? 0;
+            const count  = tab === "Messages" ? conversations.length : tab === "Group Chats" ? groupCount : 0;
             return (
               <TouchableOpacity
                 key={tab}
@@ -209,9 +222,50 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
           ) : undefined
         }
       >
+        {/* Search pill */}
+        <TouchableOpacity style={msgStyles.searchBar} activeOpacity={0.7}>
+          <Ionicons name="search" size={18} color="rgba(255,255,255,0.4)" />
+          <Text style={msgStyles.searchPlaceholder}>Search</Text>
+        </TouchableOpacity>
+
+        {/* ── Notes + now-listening strip ── */}
+        <View style={msgStyles.nowPlayingSection}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={msgStyles.nowPlayingRow}
+          >
+            {/* My slot: my live song (if listening) → my note → "+" to create. */}
+            <MySlot
+              live={myLive}
+              note={myNote}
+              avatarUrl={currentUser?.avatarUrl ?? null}
+              initials={currentUser?.initials ?? "?"}
+              onPress={() => setNoteOverlayOpen(true)}
+            />
+            {/* Live listeners first (now-playing replaces their note). */}
+            {liveOthers.map((u) => (
+              <LiveBubble key={`live-${u.id}`} user={u} onPress={() => openPreview(u)} />
+            ))}
+            {/* Then notes of people who aren't currently listening. */}
+            {noteOthers.map((n) => (
+              <NoteBubble key={`note-${n.id}`} note={n} onPress={() => setViewNote(n)} />
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* "Messages | Requests" sub-header */}
+        {activeTab === "Messages" && (
+          <View style={msgStyles.listHeaderRow}>
+            <Text style={msgStyles.listHeaderActive}>Messages</Text>
+            <TouchableOpacity activeOpacity={0.7}>
+              <Text style={msgStyles.listHeaderMuted}>Requests</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {activeTab === "Messages"    && <DirectMessagesList conversations={conversations} loading={convsLoading} onSelect={onOpenChat} />}
-        {activeTab === "Group Chats" && <GroupChatsList />}
-        {activeTab === "Community"   && <CommunityList />}
+        {activeTab === "Group Chats" && <GroupChatsList onOpenGroup={onOpenGroup} />}
       </ScrollView>
 
       <SongPreviewSheet
@@ -221,35 +275,176 @@ export function MessagesView({ onOpenChat }: { onOpenChat: (conv: ConversationIn
         accessToken={spotifyToken}
         userId={currentUserId}
       />
+
+      {noteOverlayOpen && currentUserId && (
+        <CreateNoteOverlay
+          userId={currentUserId}
+          existing={myNote}
+          onClose={() => setNoteOverlayOpen(false)}
+          onSaved={refreshListening}
+        />
+      )}
+
+      {viewNote && (
+        <NoteViewOverlay note={viewNote} onClose={() => setViewNote(null)} />
+      )}
     </View>
   );
 }
 
-// ─── Now-listening bubble ────────────────────────────────────────────────────
-function NowListeningBubble({ user, onPress }: { user: NowListeningUser; onPress: () => void }) {
-  const initial = (user.display_name || user.username || "?").trim().slice(0, 1).toUpperCase();
+// ─── Strip note bubble — shared speech-bubble shell ───────────────────────────
+// `bubble` is the floating speech bubble (text or song); the avatar + badge +
+// name sit beneath. `color` tints the bubble + tail. Live now-playing uses a
+// different shell (LiveVisual) so it never looks like a note.
+function NoteShell({
+  bubble, avatar, badge, name, color, onPress,
+}: {
+  bubble: React.ReactNode;
+  avatar: React.ReactNode;
+  badge?: React.ReactNode;
+  name: string;
+  color?: string | null;
+  onPress?: () => void;
+}) {
+  const tint = color ? { backgroundColor: color } : null;
   return (
-    <TouchableOpacity style={feedStyles.nowPlayingItem} activeOpacity={0.8} onPress={onPress}>
-      <View style={[feedStyles.storyRing, { borderColor: user.isMe ? "#CAFF00" : "#AB00FF" }]}>
-        {user.song_album_art ? (
-          <Image source={{ uri: user.song_album_art }} style={feedStyles.storyAvatar} />
-        ) : user.avatar_url ? (
-          <Image source={{ uri: user.avatar_url }} style={feedStyles.storyAvatar} />
-        ) : (
-          <View style={[feedStyles.storyAvatar, { backgroundColor: "rgba(171,0,255,0.18)", alignItems: "center", justifyContent: "center" }]}>
-            <Text style={[feedStyles.storyInitials, { color: "#AB00FF" }]}>{initial}</Text>
-          </View>
-        )}
-        <View style={[feedStyles.nowPlayingBadge, { backgroundColor: user.isMe ? "#CAFF00" : "#AB00FF" }]}>
-          <FontAwesome5 name="music" size={8} color="#0D0D0D" />
+    <TouchableOpacity style={msgStyles.noteItem} activeOpacity={0.8} onPress={onPress}>
+      <View style={msgStyles.noteBubbleSlot}>
+        <View style={[msgStyles.noteBubble, tint]}>
+          {bubble}
+          <View style={[msgStyles.noteTailBig, tint]} />
+          <View style={[msgStyles.noteTailSmall, tint]} />
         </View>
       </View>
-      <Text style={feedStyles.storyName} numberOfLines={1}>
-        {user.isMe ? "You" : (user.display_name || user.username || "anon")}
-      </Text>
-      <Text style={feedStyles.storyArtistSub} numberOfLines={1}>{user.song_name}</Text>
+      <View style={msgStyles.noteAvatarWrap}>
+        {avatar}
+        {badge}
+      </View>
+      <Text style={msgStyles.noteName} numberOfLines={1}>{name}</Text>
     </TouchableOpacity>
   );
+}
+
+function Avatar({ uri, initials }: { uri: string | null; initials: string }) {
+  return uri ? (
+    <Image source={{ uri }} style={msgStyles.noteAvatar} />
+  ) : (
+    <View style={[msgStyles.noteAvatar, msgStyles.noteAvatarFallback]}>
+      <Text style={msgStyles.noteAvatarInitials}>{initials}</Text>
+    </View>
+  );
+}
+
+// A note's bubble content — song (art thumb + name) vs plain text.
+function NoteBubbleContent({ note }: { note: Note }) {
+  if (note.type === "song") {
+    return (
+      <>
+        {note.song_album_art ? (
+          <Image source={{ uri: note.song_album_art }} style={msgStyles.noteBubbleArt} />
+        ) : (
+          <FontAwesome5 name="music" size={9} color={note.color ? "#fff" : "#AB00FF"} style={{ marginRight: 5 }} />
+        )}
+        <Text style={msgStyles.noteBubbleText} numberOfLines={2}>{note.song_name}</Text>
+      </>
+    );
+  }
+  return <Text style={msgStyles.noteBubbleText} numberOfLines={2}>{note.text}</Text>;
+}
+
+// My slot: my live song (now-playing) → my note → a "+" prompt. Always tappable
+// to open the note editor (the purple badge signals it's mine to manage).
+function MySlot({
+  live, note, avatarUrl, initials, onPress,
+}: {
+  live: NowListeningUser | null;
+  note: Note | null;
+  avatarUrl: string | null;
+  initials: string;
+  onPress: () => void;
+}) {
+  const editBadge = (
+    <View style={[msgStyles.noteCornerBadge, msgStyles.noteAddBadge]}>
+      <Ionicons name={note ? "pencil" : "add"} size={note ? 10 : 13} color="#fff" />
+    </View>
+  );
+  // Listening now → show my now-playing, but keep the editable badge + label.
+  if (live) {
+    return <LiveVisual user={live} name="Your note" badge={editBadge} onPress={onPress} />;
+  }
+  return (
+    <NoteShell
+      onPress={onPress}
+      name="Your note"
+      color={note?.color}
+      avatar={<Avatar uri={avatarUrl} initials={initials} />}
+      badge={editBadge}
+      bubble={
+        note ? <NoteBubbleContent note={note} />
+             : <Text style={[msgStyles.noteBubbleText, { color: "rgba(255,255,255,0.55)" }]}>Note</Text>
+      }
+    />
+  );
+}
+
+// Someone else's note (only shown when they're not currently listening).
+function NoteBubble({ note, onPress }: { note: Note; onPress: () => void }) {
+  const initial = (note.display_name || note.username || "?").trim().slice(0, 1).toUpperCase();
+  return (
+    <NoteShell
+      onPress={onPress}
+      name={note.display_name || note.username || "anon"}
+      color={note.color}
+      avatar={<Avatar uri={note.avatar_url} initials={initial} />}
+      bubble={<NoteBubbleContent note={note} />}
+    />
+  );
+}
+
+// Live now-playing visual — deliberately distinct from notes: the *album art*
+// fills the ringed avatar (green ring), a green "now-playing" pill replaces the
+// speech bubble, and a green music badge sits on the avatar.
+function LiveVisual({
+  user, name, badge, onPress,
+}: {
+  user: NowListeningUser;
+  name: string;
+  badge?: React.ReactNode;
+  onPress: () => void;
+}) {
+  const initial = (user.display_name || user.username || "?").trim().slice(0, 1).toUpperCase();
+  return (
+    <TouchableOpacity style={msgStyles.noteItem} activeOpacity={0.8} onPress={onPress}>
+      <View style={msgStyles.noteBubbleSlot}>
+        <View style={msgStyles.liveSongPill}>
+          <FontAwesome5 name="music" size={9} color="#2ED158" />
+          <Text style={msgStyles.liveSongPillText} numberOfLines={2}>{user.song_name}</Text>
+        </View>
+      </View>
+      <View style={msgStyles.noteAvatarWrap}>
+        {user.song_album_art ? (
+          <Image source={{ uri: user.song_album_art }} style={[msgStyles.noteAvatar, msgStyles.noteAvatarLiveRing]} />
+        ) : user.avatar_url ? (
+          <Image source={{ uri: user.avatar_url }} style={[msgStyles.noteAvatar, msgStyles.noteAvatarLiveRing]} />
+        ) : (
+          <View style={[msgStyles.noteAvatar, msgStyles.noteAvatarFallback, msgStyles.noteAvatarLiveRing]}>
+            <Text style={msgStyles.noteAvatarInitials}>{initial}</Text>
+          </View>
+        )}
+        {badge ?? (
+          <View style={[msgStyles.noteCornerBadge, msgStyles.noteLiveBadge]}>
+            <FontAwesome5 name="music" size={9} color="#0D0D0D" />
+          </View>
+        )}
+      </View>
+      <Text style={msgStyles.noteName} numberOfLines={1}>{name}</Text>
+    </TouchableOpacity>
+  );
+}
+
+// A live broadcaster in the strip.
+function LiveBubble({ user, onPress }: { user: NowListeningUser; onPress: () => void }) {
+  return <LiveVisual user={user} name={user.display_name || user.username || "anon"} onPress={onPress} />;
 }
 
 

@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { getActiveStories, type Story } from "../../services/stories";
 import { useNowPlaying } from "../../hooks/useNowPlaying";
+import { prefetchSongPreview } from "../../lib/songPreview";
 import { styles } from "../../lib/feed/styles";
 
 /**
@@ -48,7 +49,12 @@ export function FeedStoriesStrip() {
   const myStories = meId ? byAuthor.get(meId) ?? [] : [];
   const others    = [...byAuthor.entries()].filter(([id]) => id !== meId);
 
-  const openViewer = (authorId: string) => router.push({ pathname: "/story-viewer", params: { authorId } });
+  const openViewer = (authorId: string) => {
+    // Warm the first story's preview during the open animation so audio is
+    // ready by the time the viewer mounts.
+    prefetchSongPreview(byAuthor.get(authorId)?.[0]?.songId);
+    router.push({ pathname: "/story-viewer", params: { authorId } });
+  };
 
   const shareCurrentSong = () => {
     if (!track) return;

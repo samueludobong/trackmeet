@@ -7,6 +7,7 @@ import { Inter_900Black } from '@expo-google-fonts/inter';
 import { Pacifico_400Regular } from '@expo-google-fonts/pacifico';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
@@ -43,6 +44,7 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -54,11 +56,12 @@ export default function RootLayout() {
         <Stack.Screen name="spotify-callback" options={{ headerShown: false, animation: 'none' }} />
         <Stack.Screen name="story-composer"    options={{ headerShown: false, animation: 'slide_from_bottom' }} />
         <Stack.Screen name="story-card-picker" options={{ headerShown: false, animation: 'slide_from_right' }} />
-        <Stack.Screen name="story-text-editor" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="story-canvas"      options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="story-viewer"      options={{ headerShown: false, animation: 'fade' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
