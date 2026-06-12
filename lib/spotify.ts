@@ -764,6 +764,7 @@ export type SpotifyAlbum = {
   releaseDate: string
   totalTracks: number
   imageUrl: string | null
+  artist?: string | null   // primary artist (album-search results only)
 }
 
 export type SpotifyAlbumTrack = {
@@ -840,6 +841,55 @@ export const getAlbumTracks = async (
       trackNumber: t.track_number,
       durationMs: t.duration_ms,
       previewUrl: t.preview_url ?? null,
+    }))
+  } catch { return [] }
+}
+
+// Search Spotify for multiple artists (Artists tab).
+export const searchSpotifyArtists = async (
+  accessToken: string,
+  query: string,
+  limit = 20,
+): Promise<SpotifyArtistInfo[]> => {
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=artist&limit=${limit}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.artists?.items ?? []).map((a: any) => ({
+      id: a.id,
+      name: a.name,
+      imageUrl: a.images?.[0]?.url ?? null,
+      genres: a.genres ?? [],
+      followersCount: a.followers?.total ?? 0,
+    }))
+  } catch { return [] }
+}
+
+// Search Spotify for albums (Albums tab). Album search results carry the album
+// art + name; the artist name is the primary artist.
+export const searchSpotifyAlbums = async (
+  accessToken: string,
+  query: string,
+  limit = 20,
+): Promise<SpotifyAlbum[]> => {
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=album&limit=${limit}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    )
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.albums?.items ?? []).map((a: any) => ({
+      id: a.id,
+      name: a.name,
+      albumType: a.album_type,
+      releaseDate: a.release_date,
+      totalTracks: a.total_tracks,
+      imageUrl: a.images?.[0]?.url ?? null,
+      artist: a.artists?.[0]?.name ?? null,
     }))
   } catch { return [] }
 }

@@ -1,9 +1,11 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import { useChatDetail } from "../../hooks/useChatDetail";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { sendSpotifyTrackMessage, type ConversationInfo, type DbMessage } from "../../services/messages";
+import { getActiveDmJam } from "../../services/meets";
+import { supabase } from "../../lib/supabase";
 import { chatStyles } from "../../lib/feed/localStyles";
 import { useOpenJam } from "../../lib/feed/contexts";
 import { NowPlayingBanner } from "../../components/feed/NowPlayingBanner";
@@ -25,6 +27,37 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
 
   // Start/join the private co-listening "jam" with this person.
   const openJam = useOpenJam();
+  // Whether a live jam exists for this conversation (so the other person can
+  // connect), and a loading flag while we start/join one.
+  const [jamId, setJamId] = useState<string | null>(null);
+  const [startingJam, setStartingJam] = useState(false);
+
+  // Learn about the conversation's jam in real time: the moment either person
+  // starts one the other sees it here and can join; it clears when it ends.
+  useEffect(() => {
+    let active = true;
+    getActiveDmJam(conv.conversationId).then((id) => { if (active) setJamId(id); });
+    const ch = supabase
+      .channel(`conv-jam-${conv.conversationId}`)
+      .on("postgres_changes",
+        { event: "*", schema: "public", table: "meets", filter: `conversation_id=eq.${conv.conversationId}` },
+        (payload: any) => {
+          if (!active) return;
+          const row = payload.new;
+          if (payload.eventType === "DELETE") { setJamId(null); return; }
+          if (row?.is_personal && row?.is_live) setJamId(row.id);
+          else setJamId((cur) => (row && cur === row.id ? null : cur));
+        })
+      .subscribe();
+    return () => { active = false; supabase.removeChannel(ch); };
+  }, [conv.conversationId]);
+
+  const handleJam = async () => {
+    if (startingJam) return;
+    setStartingJam(true);
+    try { await openJam?.(conv.conversationId, conv.otherUser); }
+    finally { setStartingJam(false); }
+  };
 
 
 
@@ -58,9 +91,11 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
             </View>
           </View>
 
-          <TouchableOpacity style={chatStyles.jamBtn} activeOpacity={0.8} onPress={() => openJam?.(conv.conversationId, conv.otherUser)}>
-            <Ionicons name="musical-notes" size={12} color="#0D0D0D" />
-            <Text style={chatStyles.jamBtnText}>Jam</Text>
+          <TouchableOpacity style={[chatStyles.jamBtn, jamId && chatStyles.jamBtnActive]} activeOpacity={0.8} onPress={handleJam} disabled={startingJam}>
+            {startingJam
+              ? <ActivityIndicator size="small" color="#0D0D0D" />
+              : <Ionicons name="musical-notes" size={12} color="#0D0D0D" />}
+            <Text style={chatStyles.jamBtnText}>{jamId ? "Live" : "Jam"}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={chatStyles.headerIconBtn} activeOpacity={0.7}>
             <Ionicons name="call-outline" size={17} color="#fff" />
@@ -69,6 +104,20 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
             <Ionicons name="videocam-outline" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
+
+        {/* A live jam in this conversation — tap to connect / resume. */}
+        {jamId && (
+          <TouchableOpacity style={chatStyles.jamBanner} activeOpacity={0.85} onPress={handleJam} disabled={startingJam}>
+            <View style={chatStyles.jamBannerDot} />
+            <Ionicons name="musical-notes" size={15} color="#fff" />
+            <Text style={chatStyles.jamBannerText} numberOfLines={1}>
+              {startingJam ? "Connecting…" : `Jam in progress with ${otherName}`}
+            </Text>
+            {startingJam
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <View style={chatStyles.jamBannerJoin}><Text style={chatStyles.jamBannerJoinText}>Join</Text></View>}
+          </TouchableOpacity>
+        )}
 
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           {loading ? (

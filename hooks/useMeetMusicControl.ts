@@ -1,17 +1,17 @@
 import { useRef, useState, useEffect } from "react";
 import { Animated, PanResponder } from "react-native";
 import { useVideoPlayer } from "expo-video";
-import { searchSpotifyTracks, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, skipPrevious, skipNext, setPlayback, playTrack, fetchSpotifyCanvas, type SpotifyTrackResult, type SpotifyPlaylist } from "../lib/spotify";
+import { searchSpotifyTracks, searchSpotifyArtists, searchSpotifyAlbums, getArtistAlbums, getAlbumTracks, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, skipPrevious, skipNext, setPlayback, playTrack, playTracks, fetchSpotifyCanvas, type SpotifyTrackResult, type SpotifyPlaylist, type SpotifyArtistInfo, type SpotifyAlbum, type SpotifyAlbumTrack } from "../lib/spotify";
 import { SW, SH } from "../lib/feed/dimensions";
 import { type NowPlayingTrack } from "./useNowPlaying";
 
 /** Spotify browse + playback control + canvas video for the host's live-meet screen. */
-export function useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, onControl }: {
+export function useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl = true }: {
   visible: boolean; accessToken: string | null; userId: string | null;
   track: NowPlayingTrack | null; liveProgressMs: number;
-  // In a co-controlled DM jam, fired before any playback action so the actor
-  // claims the "driver" role. Undefined (no-op) for normal host meets.
-  onControl?: () => void;
+  // In a DM jam, false when this person doesn't hold the stage → playback
+  // actions are blocked. Always true for normal host meets.
+  canControl?: boolean;
 }) {
   const slideAnim   = useRef(new Animated.Value(SH)).current;
   const musicSlideX = useRef(new Animated.Value(SW)).current;  // slides in from right
@@ -34,6 +34,19 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   const [searchResults,    setSearchResults]    = useState<SpotifyTrackResult[]>([]);
   const [searchLoading,    setSearchLoading]    = useState(false);
   const [playingId,        setPlayingId]        = useState<string | null>(null);
+
+  // ── Search tabs: Songs / Artists / Albums ──────────────────────────────────
+  const [searchType,    setSearchType]    = useState<'songs' | 'artists' | 'albums'>('songs');
+  const [artistResults, setArtistResults] = useState<SpotifyArtistInfo[]>([]);
+  const [albumResults,  setAlbumResults]  = useState<SpotifyAlbum[]>([]);
+  // Artists tab drill-in → the tapped artist's albums.
+  const [selectedArtist,     setSelectedArtist]     = useState<SpotifyArtistInfo | null>(null);
+  const [artistAlbums,       setArtistAlbums]       = useState<SpotifyAlbum[]>([]);
+  const [artistAlbumsLoading,setArtistAlbumsLoading]= useState(false);
+  // Inline album dropdown → cached tracks per album + which one is open.
+  const [expandedAlbumId,  setExpandedAlbumId]  = useState<string | null>(null);
+  const [albumTracks,      setAlbumTracks]      = useState<Record<string, SpotifyAlbumTrack[]>>({});
+  const [albumTracksLoad,  setAlbumTracksLoad]  = useState<string | null>(null);
 
   // Canvas video player — always created at hook level; source swapped when found
   const player = useVideoPlayer(null, (p) => { p.loop = true; });
@@ -123,19 +136,20 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
     });
   }, [apiToken]);
 
-  // ── Search debounce ──────────────────────────────────────────────────────
+  // ── Search debounce (per active tab) ───────────────────────────────────────
   useEffect(() => {
     const q = searchQuery.trim();
-    if (!q) { setSearchResults([]); return; }
+    if (!q) { setSearchResults([]); setArtistResults([]); setAlbumResults([]); return; }
     const t = setTimeout(async () => {
       if (!apiToken) return;
       setSearchLoading(true);
-      const res = await searchSpotifyTracks(apiToken, q);
-      setSearchResults(res);
+      if (searchType === 'songs')        setSearchResults(await searchSpotifyTracks(apiToken, q));
+      else if (searchType === 'artists') setArtistResults(await searchSpotifyArtists(apiToken, q));
+      else                               setAlbumResults(await searchSpotifyAlbums(apiToken, q));
       setSearchLoading(false);
     }, 400);
     return () => clearTimeout(t);
-  }, [searchQuery, apiToken]);
+  }, [searchQuery, apiToken, searchType]);
 
   // ── Playlist drill-down ──────────────────────────────────────────────────
   // tracksLoading is set to true synchronously by selectPlaylist() before this fires.
@@ -170,31 +184,72 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   const tok = apiToken ?? accessToken;
 
   const handlePrev = async () => {
-    if (!tok || ctrlLoading) return;
-    onControl?.();
+    if (!canControl || !tok || ctrlLoading) return;
     setCtrlLoading(true);
     await skipPrevious(tok);
     setTimeout(() => setCtrlLoading(false), 800);
   };
   const handleNext = async () => {
-    if (!tok || ctrlLoading) return;
-    onControl?.();
+    if (!canControl || !tok || ctrlLoading) return;
     setCtrlLoading(true);
     await skipNext(tok);
     setTimeout(() => setCtrlLoading(false), 800);
   };
   const handlePlayPause = async () => {
-    if (!tok || ctrlLoading || !track) return;
-    onControl?.();
+    if (!canControl || !tok || ctrlLoading || !track) return;
     setCtrlLoading(true);
     await setPlayback(tok, !track.isPlaying);
     setTimeout(() => setCtrlLoading(false), 600);
   };
   const handlePlayTrack = async (t: SpotifyTrackResult) => {
-    if (!tok) return;
-    onControl?.();
+    if (!canControl || !tok) return;
     setPlayingId(t.id);
     await playTrack(tok, `spotify:track:${t.id}`);
+  };
+
+  // ── Search tabs + album/artist browse ──────────────────────────────────────
+  const selectTab = (tab: 'songs' | 'artists' | 'albums') => {
+    setSearchType(tab);
+    setSelectedArtist(null);
+    setExpandedAlbumId(null);
+  };
+
+  // Artists tab → drill into the tapped artist's albums.
+  const selectArtist = async (a: SpotifyArtistInfo) => {
+    setSelectedArtist(a);
+    setExpandedAlbumId(null);
+    setArtistAlbums([]);
+    setArtistAlbumsLoading(true);
+    const albums = await getArtistAlbums(tok ?? '', a.id);
+    setArtistAlbums(albums);
+    setArtistAlbumsLoading(false);
+  };
+  const clearArtist = () => { setSelectedArtist(null); setArtistAlbums([]); setExpandedAlbumId(null); };
+
+  // Toggle an album's inline dropdown, lazy-loading its tracks once.
+  const toggleAlbum = async (albumId: string) => {
+    if (expandedAlbumId === albumId) { setExpandedAlbumId(null); return; }
+    setExpandedAlbumId(albumId);
+    if (!albumTracks[albumId]) {
+      setAlbumTracksLoad(albumId);
+      const tracks = await getAlbumTracks(tok ?? '', albumId);
+      setAlbumTracks((prev) => ({ ...prev, [albumId]: tracks }));
+      setAlbumTracksLoad(null);
+    }
+  };
+
+  // Queue + play an entire album ("Play all").
+  const playAlbum = async (albumId: string) => {
+    if (!canControl || !tok) return;
+    const tracks = albumTracks[albumId] ?? await getAlbumTracks(tok, albumId);
+    const uris = tracks.map((t) => `spotify:track:${t.id}`);
+    if (uris.length) { setPlayingId(tracks[0]?.id ?? null); await playTracks(tok, uris); }
+  };
+  // Play a single album track.
+  const playAlbumTrack = async (trackId: string) => {
+    if (!canControl || !tok) return;
+    setPlayingId(trackId);
+    await playTrack(tok, `spotify:track:${trackId}`);
   };
 
   // ── Progress ─────────────────────────────────────────────────────────────
@@ -210,5 +265,9 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   const p2Loading    = isSearching ? searchLoading : showTracks ? tracksLoading : playlistsLoading;
   const p2Title      = isSearching ? "Search" : showTracks ? (selectedPlaylist?.name ?? "Playlist") : "Your Music";
 
-  return { slideAnim, musicSlideX, canvasUrl, setCanvasUrl, ctrlLoading, setCtrlLoading, pickerOpen, setPickerOpen, apiToken, setApiToken, playlists, setPlaylists, playlistsLoading, setPlaylistsLoading, selectedPlaylist, setSelectedPlaylist, playlistTracks, setPlaylistTracks, tracksLoading, setTracksLoading, tracksError, setTracksError, searchQuery, setSearchQuery, searchResults, setSearchResults, searchLoading, setSearchLoading, playingId, setPlayingId, player, openMusicPicker, closeMusicPicker, pickerOpenRef, musicPan, selectPlaylist, tok, handlePrev, handleNext, handlePlayPause, handlePlayTrack, fmtMs, progressPct, isSearching, showTracks, p2Loading, p2Title };
+  return { slideAnim, musicSlideX, canvasUrl, setCanvasUrl, ctrlLoading, setCtrlLoading, pickerOpen, setPickerOpen, apiToken, setApiToken, playlists, setPlaylists, playlistsLoading, setPlaylistsLoading, selectedPlaylist, setSelectedPlaylist, playlistTracks, setPlaylistTracks, tracksLoading, setTracksLoading, tracksError, setTracksError, searchQuery, setSearchQuery, searchResults, setSearchResults, searchLoading, setSearchLoading, playingId, setPlayingId, player, openMusicPicker, closeMusicPicker, pickerOpenRef, musicPan, selectPlaylist, tok, handlePrev, handleNext, handlePlayPause, handlePlayTrack, fmtMs, progressPct, isSearching, showTracks, p2Loading, p2Title,
+    // Tabs + album/artist browse
+    searchType, selectTab, artistResults, albumResults, selectedArtist, selectArtist, clearArtist, artistAlbums, artistAlbumsLoading, expandedAlbumId, albumTracks, albumTracksLoad, toggleAlbum, playAlbum, playAlbumTrack };
 }
+
+export type MeetMusicControl = ReturnType<typeof useMeetMusicControl>;

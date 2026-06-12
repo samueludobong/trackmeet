@@ -219,6 +219,21 @@ export const leaveMeet = async (meetId: string): Promise<void> => {
 
 // ─── Private DM jams ───────────────────────────────────────────────────────────
 
+// The conversation's currently-live jam, if any (used to surface a "join"
+// prompt to the other person). Does not join — read-only.
+export const getActiveDmJam = async (conversationId: string): Promise<string | null> => {
+  const { data } = await supabase
+    .from('meets')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('is_personal', true)
+    .eq('is_live', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return data?.id ?? null
+}
+
 // Find the conversation's live jam, or create one. A jam is a personal (private,
 // hostless) meet scoped to a DM. The caller joins privately either way. No
 // follower/community notifications — it's not a broadcast.
@@ -229,19 +244,10 @@ export const joinOrStartDmJam = async (
   if (!user) return { error: 'Not authenticated' }
 
   // Existing live jam for this conversation?
-  const { data: existing } = await supabase
-    .from('meets')
-    .select('id')
-    .eq('conversation_id', conversationId)
-    .eq('is_personal', true)
-    .eq('is_live', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (existing?.id) {
-    await joinMeet(existing.id, false)
-    return { meetId: existing.id }
+  const existingId = await getActiveDmJam(conversationId)
+  if (existingId) {
+    await joinMeet(existingId, false)
+    return { meetId: existingId }
   }
 
   // None yet — create it. host_id is just the creator (RLS lets either member
@@ -264,9 +270,9 @@ export const joinOrStartDmJam = async (
   return { meetId: data.id }
 }
 
-// Mark the current playback driver (auto driver-switch). Called when a member
-// takes a control action so the other member's client starts following them.
-export const setMeetDriver = async (meetId: string, driverId: string): Promise<void> => {
+// Set (or release, with null) the playback "stage" holder. Only the holder can
+// control playback; releasing frees it for the other member to take.
+export const setMeetDriver = async (meetId: string, driverId: string | null): Promise<void> => {
   await supabase.from('meets').update({ driver_id: driverId }).eq('id', meetId)
 }
 

@@ -97,7 +97,11 @@ export type SyncStatus = {
 export async function sanityCheckSync(
   accessToken: string,
   state: MeetTrackState,
+  opts?: { driftMs?: number; cooldownMs?: number },
 ): Promise<SyncStatus> {
+  // Jams pass tighter values for snappier sync; meets use the defaults.
+  const driftTolerance = opts?.driftMs ?? DRIFT_TOLERANCE_MS;
+  const actionCooldown = opts?.cooldownMs ?? ACTION_COOLDOWN_MS;
   // Talk mode: host is speaking — duck the listener's music to 0 (keeping the
   // stream alive) rather than pausing, which can leave the device stuck muted.
   if (state.talkMode) {
@@ -144,10 +148,10 @@ export async function sanityCheckSync(
 
   // Same song — compare playback timers.
   const driftMs = Math.abs(myPos - target)
-  if (driftMs > DRIFT_TOLERANCE_MS) {
+  if (driftMs > driftTolerance) {
     // Drifted too far → re-seek, unless we just issued a correction (Spotify is
     // still settling and reporting a stale position).
-    if (Date.now() - _lastActionAt > ACTION_COOLDOWN_MS) {
+    if (Date.now() - _lastActionAt > actionCooldown) {
       await seekPlayback(accessToken, target)
       _lastActionAt = Date.now()
       return { inSync: false, corrected: true, reason: 'drift', driftMs }
@@ -165,8 +169,9 @@ export async function sanityCheckSync(
 export async function syncListenerToHost(
   accessToken: string,
   state: MeetTrackState,
+  opts?: { driftMs?: number; cooldownMs?: number },
 ): Promise<boolean> {
-  const { corrected } = await sanityCheckSync(accessToken, state)
+  const { corrected } = await sanityCheckSync(accessToken, state, opts)
   return corrected
 }
 

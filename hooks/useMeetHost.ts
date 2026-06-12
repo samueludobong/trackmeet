@@ -1,12 +1,20 @@
 import { useRef, useState, useEffect } from "react";
-import { Keyboard } from "react-native";
+import { Keyboard, AppState } from "react-native";
 import { supabase } from "../lib/supabase";
-import { setPlayback } from "../lib/spotify";
+import { setPlayback, openSpotifyLink, playTrackAt } from "../lib/spotify";
+import { cacheJamTrack, getCachedJamTrack, clearJamTrack } from "../lib/jamCache";
 import { endMeet, getActiveListenerCount, getMeetMessages, sendMeetMessage, updateMeetTrack, setTalkMode, recordMeetTrack, getMeetTracks, getMeet, meetRowToTrackState, leaveMeet, setMeetDriver, endDmJamIfEmpty, type MeetMessage, type MeetTrack, type MeetTrackState } from "../services/meets";
 import { syncListenerToHost } from "../lib/meetSync";
 import { useNowPlayingCtx } from "../lib/feed/contexts";
 import { type FloatingReactionItem } from "../types/meets";
 import { feedCache } from "../lib/feed/caches";
+
+// Jam continuous-drift correction is kept gentle (close to the meet listener's
+// 2s/4s) so steady playback doesn't thrash with micro-seeks — that's what makes
+// it feel graceful. Track changes / play-pause / seeks are applied immediately
+// via the realtime broadcast below (not gated by these), so they still feel
+// snappy. A slightly tighter drift than the meet keeps positions honest.
+const JAM_SYNC_OPTS = { driftMs: 1800, cooldownMs: 4000 };
 
 /**
  * All host-side state and side effects for a live meet: chat + reactions
@@ -42,19 +50,47 @@ export function useMeetHost({
   const isJam = jamUserId != null;
   const [driverId, setDriverId] = useState<string | null>(null);
   const [followState, setFollowState] = useState<MeetTrackState | null>(null);
+  // Set once we've opened Spotify to make THIS phone the active device — without
+  // it the Web-API sync below can't play anything here (it 404s, no device).
+  const [jamLaunched, setJamLaunched] = useState(false);
+  // Last-good track frame, cached so the jam survives Spotify dropping to a
+  // "no device" state (after pause). cachedTrackRef tracks it live; cachedTrack
+  // (state) only holds it for display once the live device is gone.
+  const [cachedTrack, setCachedTrack] = useState<MeetTrackState | null>(null);
+  const cachedTrackRef = useRef<MeetTrackState | null>(null);
+  const pendingResumeRef = useRef<{ id: string; positionMs: number } | null>(null);
   const isDriver = !isJam || driverId === jamUserId;
   const isDriverRef = useRef(isDriver);
   isDriverRef.current = isDriver;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Live refs so the foreground re-sync reads current values without re-subscribing.
+  const driverIdRef = useRef(driverId);    driverIdRef.current = driverId;
+  const followStateRef = useRef(followState); followStateRef.current = followState;
+  // Once we've ever driven, our Spotify is the active device, so we can follow
+  // without re-opening Spotify (avoids yanking the starter to Spotify on handoff).
+  const hasDrivenRef = useRef(false);
+  useEffect(() => { if (isJam && isDriver) hasDrivenRef.current = true; }, [isJam, isDriver]);
 
-  // Claim the driver role — called before any local playback action so the
-  // partner's client starts following us.
-  const becomeDriver = () => {
-    if (!isJam || !meetId) return;
-    setDriverId(jamUserId);
-    setMeetDriver(meetId, jamUserId!);
+  // ── Stage control ────────────────────────────────────────────────────────────
+  // Exactly one person holds the "stage" (= the driver) and can control playback.
+  // It's a plain boolean handoff: take it only when it's free; the other can't
+  // take it until the holder drops it.
+  const setStage = (holder: string | null) => {
+    setDriverId(holder);
+    if (meetId) setMeetDriver(meetId, holder);
   };
+  const takeStage = () => {
+    if (!isJam || !meetId) return;
+    if (driverId && driverId !== jamUserId) return; // held by the other person
+    setStage(jamUserId);
+  };
+  const dropStage = () => {
+    if (!isJam || !meetId || driverId !== jamUserId) return;
+    setStage(null);
+  };
+  // Force-claim the stage (used by resume-from-cache, only reachable when I hold it).
+  const becomeDriver = () => { if (isJam && meetId) setStage(jamUserId); };
 
   const spawnReaction = (emoji: string) =>
     setReactions((prev) => [...prev.slice(-24), { id: ++feedCache.reactionSeq, emoji }]);
@@ -68,17 +104,40 @@ export function useMeetHost({
   trackRef.current = track;
   progressRef.current = liveProgressMs;
 
+  // Push a track state to the partner over the realtime channel — instant,
+  // unlike the DB write → postgres_changes path (~seconds).
+  const broadcastState = (state: MeetTrackState) => {
+    reactChannelRef.current?.send({ type: "broadcast", event: "jam-sync", payload: state });
+  };
+  const liveState = (): MeetTrackState | null => {
+    const t = trackRef.current;
+    if (!t) return null;
+    return {
+      id: t.id, name: t.name, artist: t.artist, albumArt: t.albumArt,
+      durationMs: t.durationMs, positionMs: progressRef.current,
+      isPlaying: t.isPlaying, positionUpdatedAt: new Date().toISOString(), talkMode: false,
+    };
+  };
+
   useEffect(() => {
     if (!visible || !meetId) return;
     let active = true;
     getMeetMessages(meetId).then((m) => { if (active) setMessages(m); });
     getActiveListenerCount(meetId).then((c) => { if (active) setListenerCount(Math.max(c, 1)); });
-    // Seed the current driver + partner track for jams.
-    if (isJam) getMeet(meetId).then((m) => {
-      if (!active || !m) return;
-      setDriverId(m.driver_id);
-      setFollowState(meetRowToTrackState(m));
-    });
+    // Seed the current driver + partner track for jams, and recover any cached
+    // last-good frame (e.g. the app was reopened while the device was idle).
+    if (isJam) {
+      getMeet(meetId).then((m) => {
+        if (!active || !m) return;
+        setDriverId(m.driver_id);
+        setFollowState(meetRowToTrackState(m));
+      });
+      getCachedJamTrack().then((c) => {
+        if (!active || !c) return;
+        cachedTrackRef.current = c;
+        if (!trackRef.current) setCachedTrack(c);
+      });
+    }
 
     let channel = supabase
       .channel(`meet-host-${meetId}`)
@@ -97,15 +156,22 @@ export function useMeetHost({
         if (active && payload?.emoji) spawnReaction(payload.emoji);
       });
 
-    // Jam: follow the meet row so we learn who's driving + what they're playing.
+    // Jam: follow the meet row so we learn who's driving + meet lifecycle. The
+    // driver_id change (control handoff) is authoritative here.
     if (isJam) channel = channel.on("postgres_changes",
       { event: "UPDATE", schema: "public", table: "meets", filter: `id=eq.${meetId}` },
       ({ new: row }: any) => {
         if (!active) return;
         setDriverId(row.driver_id);
-        setFollowState(meetRowToTrackState(row));
+        setFollowState(meetRowToTrackState(row)); // reliable fallback if a broadcast is dropped
         if (row.is_live === false) onCloseRef.current();
       });
+
+    // Jam: the driver's live track/position arrives instantly via broadcast (no
+    // DB round-trip), which is what makes the follower's playback feel in-sync.
+    if (isJam) channel = channel.on("broadcast", { event: "jam-sync" }, ({ payload }: any) => {
+      if (active && payload) setFollowState(payload as MeetTrackState);
+    });
 
     channel.subscribe();
     reactChannelRef.current = channel;
@@ -117,13 +183,20 @@ export function useMeetHost({
     const write = () => {
       // In a jam, only the current driver broadcasts their now-playing.
       if (isJam && !isDriverRef.current) return;
-      const t = trackRef.current;
-      if (!t) return;
-      updateMeetTrack(meetId, {
-        id: t.id, name: t.name, artist: t.artist, albumArt: t.albumArt,
-        durationMs: t.durationMs, positionMs: progressRef.current, isPlaying: t.isPlaying,
-      });
+      const live = liveState();
+      if (live) {
+        updateMeetTrack(meetId, live);
+        if (isJam) { cachedTrackRef.current = live; broadcastState(live); }
+      } else if (isJam && cachedTrackRef.current) {
+        // Device gone (e.g. paused → idle) → hold the jam on the last cached
+        // frame, marked paused, so neither side drifts or goes blank.
+        const paused: MeetTrackState = { ...cachedTrackRef.current, isPlaying: false };
+        updateMeetTrack(meetId, paused);
+        broadcastState(paused);
+      }
     };
+    // Match the meet's 2s cadence — the broadcast handles instant events; the
+    // heartbeat is just steady drift upkeep, so a faster tick only adds churn.
     const id = setInterval(write, 2_000);
     return () => clearInterval(id);
   }, [visible, meetId, summary]);
@@ -137,6 +210,10 @@ export function useMeetHost({
       id: track.id, name: track.name, artist: track.artist, albumArt: track.albumArt,
       durationMs: track.durationMs, positionMs: liveProgressMs, isPlaying: track.isPlaying,
     });
+    if (isJam) {
+      const live = liveState();
+      if (live) { cachedTrackRef.current = live; broadcastState(live); } // lands on partner immediately
+    }
     // Tracklist/summary is host-meet only — jams are personal, not recorded.
     if (!isJam && track.isPlaying && lastWrittenRef.current !== track.id) {
       lastWrittenRef.current = track.id;
@@ -144,16 +221,82 @@ export function useMeetHost({
     }
   }, [visible, meetId, summary, track?.id, track?.isPlaying, driverId]);
 
-  // Jam follow: when I'm NOT the driver, match my Spotify to the partner's
+  // Jam activate: the FOLLOWER opens Spotify once to the current track so this
+  // phone becomes the active device. Until this happens nothing plays here and
+  // the Web-API sync below is a no-op (this is the "nothing happens on the
+  // connecting device" fix). The driver never needs this — their own playback
+  // is the source.
+  useEffect(() => {
+    if (!isJam || !visible || jamLaunched || hasDrivenRef.current) return;
+    if (driverId === jamUserId) return;     // I'm the driver
+    if (!followState?.id) return;            // nothing to play yet
+    setJamLaunched(true);
+    openSpotifyLink(
+      `spotify:track:${followState.id}`,
+      `https://open.spotify.com/track/${followState.id}`,
+    );
+  }, [isJam, visible, jamLaunched, driverId, followState?.id]);
+
+  // Jam follow: once our device is active, match our Spotify to the driver's
   // playback (same mechanism the meet listener uses). Re-runs on every meet-row
   // update because followState changes.
   useEffect(() => {
     if (!isJam || !visible || summary) return;
+    if (!jamLaunched && !hasDrivenRef.current) return; // no active device yet
     if (driverId === jamUserId) return; // I'm driving — don't follow
     const tok = getApiToken();
     if (!tok || !followState) return;
-    syncListenerToHost(tok, followState);
-  }, [isJam, visible, summary, driverId, followState?.id, followState?.isPlaying, followState?.positionUpdatedAt]);
+    syncListenerToHost(tok, followState, JAM_SYNC_OPTS);
+  }, [isJam, visible, summary, jamLaunched, driverId, followState?.id, followState?.isPlaying, followState?.positionUpdatedAt]);
+
+  // On returning from the Spotify app: a driver resuming from cache seeks to the
+  // cached point (now that the device is active again); a follower re-snaps to
+  // the driver's position.
+  useEffect(() => {
+    if (!isJam || !visible) return;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      const tok = getApiToken();
+      const pend = pendingResumeRef.current;
+      if (pend) {
+        pendingResumeRef.current = null;
+        // Give Spotify a beat to register the device, then seek to the cached spot.
+        if (tok) setTimeout(() => playTrackAt(tok, `spotify:track:${pend.id}`, pend.positionMs), 800);
+        return;
+      }
+      if (driverIdRef.current === jamUserId) return;
+      if (tok && followStateRef.current) syncListenerToHost(tok, followStateRef.current, JAM_SYNC_OPTS);
+    });
+    return () => sub.remove();
+  }, [isJam, visible]);
+
+  // Snapshot the last-good frame to storage the moment the device drops, and
+  // reset it once a live track resumes — so storage only ever holds the frame
+  // from just before the device left (never stale).
+  useEffect(() => {
+    if (!isJam) return;
+    if (track) {
+      setCachedTrack(null);
+      clearJamTrack();
+    } else if (cachedTrackRef.current) {
+      setCachedTrack(cachedTrackRef.current);
+      cacheJamTrack(cachedTrackRef.current);
+    }
+  }, [isJam, !!track]);
+
+  // Resume a paused jam whose device went idle: reactivate Spotify on the cached
+  // track and seek to the cached position (the AppState handler above finishes
+  // the seek once Spotify is foregrounded). Becomes the driver so the partner
+  // follows back into playback.
+  const resumeFromCache = () => {
+    // Driver uses their own cached frame; a follower (no local cache) falls back
+    // to the partner's last state.
+    const c = cachedTrackRef.current ?? cachedTrack ?? followStateRef.current;
+    if (!c?.id) return;
+    becomeDriver();
+    pendingResumeRef.current = { id: c.id, positionMs: c.positionMs ?? 0 };
+    openSpotifyLink(`spotify:track:${c.id}`, `https://open.spotify.com/track/${c.id}`);
+  };
 
   const handleSendChat = async () => {
     const body = chatInput.trim();
@@ -197,14 +340,29 @@ export function useMeetHost({
     setSummary(null);
     setTalkOn(false);
     setMessages([]);
+    setJamLaunched(false);
+    setDriverId(null);
+    setFollowState(null);
+    setCachedTrack(null);
+    cachedTrackRef.current = null;
+    pendingResumeRef.current = null;
+    clearJamTrack();
+    hasDrivenRef.current = false;
     onClose();
   };
+
+  // What to show on screen: the live now-playing, else (in a jam) the cached
+  // last-good frame — or the partner's state for a follower — so the room never
+  // goes blank when a device idles.
+  const displayTrack = track ?? (isJam ? (cachedTrack ?? followState) : null);
 
   return {
     track, liveProgressMs,
     listenerCount, messages, chatInput, setChatInput, talkOn, ending, summary, reactions,
     sendReaction, removeReaction, handleSendChat, handleToggleTalk, handleEndMeet, closeAll,
-    // Jam co-control
-    isJam, isDriver, becomeDriver,
+    // Jam co-control (stage)
+    isJam, isDriver, driverId, takeStage, dropStage, becomeDriver,
+    // Jam cache / resume
+    cachedTrack, displayTrack, resumeFromCache,
   };
 }

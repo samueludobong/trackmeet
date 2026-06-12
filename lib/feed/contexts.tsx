@@ -20,7 +20,7 @@ export const useOpenHostMeet = () => useContext(HostMeetCtx);
 // the host/listener rooms it's mounted at FeedScreen level so it (and its
 // mini-bar) survives tab switches.
 export type JamOther = { id: string; username: string; display_name: string | null; avatar_url: string | null };
-export const JamCtx = createContext<((conversationId: string, other: JamOther) => void) | null>(null);
+export const JamCtx = createContext<((conversationId: string, other: JamOther) => void | Promise<void>) | null>(null);
 export const useOpenJam = () => useContext(JamCtx);
 
 // ─── Now Playing context ──────────────────────────────────────────────────────

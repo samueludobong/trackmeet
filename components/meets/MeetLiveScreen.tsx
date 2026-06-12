@@ -3,7 +3,8 @@ import { MeetMusicPanel } from "../../components/meets/MeetMusicPanel";
 import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
 import { useMeetMusicControl } from "../../hooks/useMeetMusicControl";
 import { useMeetHost } from "../../hooks/useMeetHost";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, Image, KeyboardAvoidingView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, Image, KeyboardAvoidingView, PanResponder } from "react-native";
+import { SW } from "../../lib/feed/dimensions";
 import { VideoView } from "expo-video";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -14,7 +15,6 @@ import { MeetSummaryScreen } from "../../components/meets/MeetSummaryScreen";
 
 // The center band for the lyrics view — sits between the top bar and the chat
 // bar so the bottom chat input stays usable and the album-art background shows.
-const lyricsBand = { position: "absolute" as const, top: 96, left: 0, right: 0, bottom: 104 };
 
 export function MeetLiveScreen({
   visible, onClose, meetId, meetName, accessToken, userId, minimized = false, onMinimize, jam,
@@ -36,16 +36,54 @@ export function MeetLiveScreen({
   const {
     track, liveProgressMs, listenerCount, messages, chatInput, setChatInput,
     talkOn, ending, summary, reactions, sendReaction, removeReaction, handleSendChat,
-    handleToggleTalk, handleEndMeet, closeAll, becomeDriver,
+    handleToggleTalk, handleEndMeet, closeAll, displayTrack, resumeFromCache,
+    isDriver, driverId, takeStage, dropStage,
   } = useMeetHost({ visible, meetId, accessToken, getApiToken: () => apiTokenRef.current, onClose, jam: jamConfig });
 
+  // In a jam, only the stage holder may control playback.
+  const canControl = jamConfig ? isDriver : true;
+  const otherHasStage = !!jamConfig && !!driverId && driverId !== userId;
+
+  const music = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl });
   const {
-    slideAnim, musicSlideX, canvasUrl, setCanvasUrl, ctrlLoading, setCtrlLoading, pickerOpen, setPickerOpen, apiToken, setApiToken, playlists, setPlaylists, playlistsLoading, setPlaylistsLoading, selectedPlaylist, setSelectedPlaylist, playlistTracks, setPlaylistTracks, tracksLoading, setTracksLoading, tracksError, setTracksError, searchQuery, setSearchQuery, searchResults, setSearchResults, searchLoading, setSearchLoading, playingId, setPlayingId, player, openMusicPicker, closeMusicPicker, pickerOpenRef, musicPan, selectPlaylist, tok, handlePrev, handleNext, handlePlayPause, handlePlayTrack, fmtMs, progressPct, isSearching, showTracks, p2Loading, p2Title
-  } = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, onControl: jamConfig ? becomeDriver : undefined });
+    slideAnim, musicSlideX, canvasUrl, ctrlLoading, pickerOpen, apiToken, player, openMusicPicker, closeMusicPicker, pickerOpenRef,
+    handlePrev, handleNext, handlePlayPause, fmtMs, progressPct,
+  } = music;
   apiTokenRef.current = apiToken;
 
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const title = jam ? (jam.otherName || "Jam") : (meetName ?? "My Meet");
+
+  // ── Page swipe pager: Lyrics ← Playback → Music ──────────────────────────────
+  // Lyrics slides in from the LEFT (right-swipe), music from the RIGHT
+  // (left-swipe); the inverse swipe on either returns to playback.
+  const lyricsSlideX = useRef(new Animated.Value(-SW)).current;
+  const lyricsOpenRef = useRef(false);
+  lyricsOpenRef.current = lyricsOpen;
+  const openLyrics = () => {
+    setLyricsOpen(true);
+    Animated.spring(lyricsSlideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start();
+  };
+  const closeLyrics = () => {
+    Animated.timing(lyricsSlideX, { toValue: -SW, useNativeDriver: true, duration: 240 }).start(() => setLyricsOpen(false));
+  };
+  const pagePan = useRef(
+    PanResponder.create({
+      // Claim clearly-horizontal swipes (either direction) EARLY — a low
+      // threshold + modest ratio so it wins over the lyrics/music inner
+      // scrollers before they commit to a vertical scroll. Vertical still passes.
+      onMoveShouldSetPanResponderCapture: (_, { dx, dy }) =>
+        Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.1,
+      onPanResponderRelease: (_, { dx, vx }) => {
+        const left  = dx < -50 || vx < -0.3;
+        const right = dx >  50 || vx >  0.3;
+        if (pickerOpenRef.current) { if (right) closeMusicPicker(); return; }   // music → playback
+        if (lyricsOpenRef.current) { if (left)  closeLyrics();      return; }   // lyrics → playback
+        if (left)  openMusicPicker();   // playback → music
+        else if (right) openLyrics();   // playback → lyrics
+      },
+    }),
+  ).current;
 
   // When minimized the hooks above keep running (realtime, audio, sync) but we
   // don't render the Modal at all. A Modal with visible={false} still creates a
@@ -54,12 +92,12 @@ export function MeetLiveScreen({
 
   return (
     <Modal visible animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? onClose}>
-      <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]} {...musicPan.panHandlers}>
+      <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]} {...pagePan.panHandlers}>
 
         {canvasUrl ? (
           <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} allowsFullscreen={false} />
-        ) : track?.albumArt ? (
-          <Image source={{ uri: track.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : displayTrack?.albumArt ? (
+          <Image source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
         )}
@@ -78,16 +116,16 @@ export function MeetLiveScreen({
                 <Text style={mlStyles.avatarInitial}>{(title ?? "M").slice(0, 1).toUpperCase()}</Text>
               </View>
             </LinearGradient>
-            <View>
-              <Text style={mlStyles.hostName}>{title}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={mlStyles.hostName} numberOfLines={1}>{title}</Text>
               <View style={mlStyles.listenerRow}>
                 <View style={mlStyles.liveDotSm} />
-                <Text style={mlStyles.listenerText}>{jam ? "You both control" : `${listenerCount} listening`}</Text>
+                <Text style={mlStyles.listenerText} numberOfLines={1}>{jam ? "You both control" : `${listenerCount} listening`}</Text>
               </View>
             </View>
           </View>
           <View style={mlStyles.topRight}>
-            <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={() => setLyricsOpen((v) => !v)}>
+            <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={() => (lyricsOpen ? closeLyrics() : openLyrics())}>
               <Ionicons name={lyricsOpen ? "musical-note" : "document-text-outline"} size={17} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity style={mlStyles.topCircle} activeOpacity={0.75} onPress={openMusicPicker}>
@@ -102,19 +140,10 @@ export function MeetLiveScreen({
           </View>
         </View>
 
-        {lyricsOpen ? (
-          <View style={lyricsBand}>
-            <MeetLyricsView
-              track={track ? { id: track.id, name: track.name, artist: track.artist, durationMs: track.durationMs } : null}
-              positionMs={liveProgressMs}
-              onClose={() => setLyricsOpen(false)}
-            />
-          </View>
-        ) : (
-          <>
+        <>
             <View style={mlStyles.trackSection}>
-              <Text style={mlStyles.trackName} numberOfLines={1}>{track?.name ?? "—"}</Text>
-              <Text style={mlStyles.trackArtist} numberOfLines={1}>{track?.artist ?? ""}</Text>
+              <Text style={mlStyles.trackName} numberOfLines={1}>{displayTrack?.name ?? "—"}</Text>
+              <Text style={mlStyles.trackArtist} numberOfLines={1}>{displayTrack?.artist ?? ""}</Text>
               <View style={mlStyles.progressTrack}>
                 <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
               </View>
@@ -123,23 +152,54 @@ export function MeetLiveScreen({
                 <Text style={mlStyles.progressTime}>{fmtMs(track?.durationMs ?? 0)}</Text>
               </View>
               <View style={mlStyles.controls}>
-                <TouchableOpacity activeOpacity={0.7} onPress={handlePrev} disabled={ctrlLoading}>
-                  <Ionicons name="play-skip-back" size={34} color="#fff" />
+                <TouchableOpacity activeOpacity={0.7} onPress={handlePrev} disabled={ctrlLoading || !canControl}>
+                  <Ionicons name="play-skip-back" size={34} color={canControl ? "#fff" : "rgba(255,255,255,0.3)"} />
                 </TouchableOpacity>
-                <TouchableOpacity style={mlStyles.playBtn} activeOpacity={0.8} onPress={handlePlayPause} disabled={ctrlLoading}>
-                  <Ionicons name={track?.isPlaying ? "pause" : "play"} size={30} color="#fff" style={track?.isPlaying ? undefined : { marginLeft: 3 }} />
+                <TouchableOpacity
+                  style={mlStyles.playBtn}
+                  activeOpacity={0.8}
+                  disabled={ctrlLoading || !canControl}
+                  onPress={() => {
+                    // Device idle (no live track) but we have a cached frame →
+                    // reactivate Spotify + resume from the cached point.
+                    if (jam && !track && displayTrack) resumeFromCache();
+                    else handlePlayPause();
+                  }}
+                >
+                  <Ionicons name={displayTrack?.isPlaying ? "pause" : "play"} size={30} color={canControl ? "#fff" : "rgba(255,255,255,0.4)"} style={displayTrack?.isPlaying ? undefined : { marginLeft: 3 }} />
                 </TouchableOpacity>
-                <TouchableOpacity activeOpacity={0.7} onPress={handleNext} disabled={ctrlLoading}>
-                  <Ionicons name="play-skip-forward" size={34} color="#fff" />
+                <TouchableOpacity activeOpacity={0.7} onPress={handleNext} disabled={ctrlLoading || !canControl}>
+                  <Ionicons name="play-skip-forward" size={34} color={canControl ? "#fff" : "rgba(255,255,255,0.3)"} />
                 </TouchableOpacity>
               </View>
+
+              {/* Stage toggle — who's in control. */}
+              {jam && (
+                <View style={mlStyles.stageWrap}>
+                  <TouchableOpacity
+                    style={[mlStyles.stageBtn, isDriver && mlStyles.stageBtnHeld, otherHasStage && mlStyles.stageBtnLocked]}
+                    activeOpacity={0.85}
+                    disabled={otherHasStage}
+                    onPress={isDriver ? dropStage : takeStage}
+                  >
+                    <Ionicons name={isDriver ? "mic" : "mic-outline"} size={14} color={otherHasStage ? "rgba(255,255,255,0.45)" : isDriver ? "#fff" : "#0D0D0D"} />
+                    <Text style={[mlStyles.stageBtnText, isDriver && mlStyles.stageBtnTextHeld, otherHasStage && mlStyles.stageBtnTextLocked]}>
+                      {isDriver ? "Drop Stage" : "Take Stage"}
+                    </Text>
+                  </TouchableOpacity>
+                  {otherHasStage && (
+                    <Text style={mlStyles.stageError}>
+                      {jam.otherName || "They"} has to release stage to control
+                    </Text>
+                  )}
+                </View>
+              )}
             </View>
 
             <View style={mlStyles.commentSection}>
               <MeetChatList messages={messages} />
             </View>
-          </>
-        )}
+        </>
 
         {!pickerOpen && !lyricsOpen && (
           <View style={mlStyles.swipeHint} pointerEvents="none">
@@ -193,29 +253,31 @@ export function MeetLiveScreen({
           />
         )}
 
-        {pickerOpen && (
-          <MeetMusicPanel
-            musicSlideX={musicSlideX}
-            p2Title={p2Title}
-            p2Loading={p2Loading}
-            isSearching={isSearching}
-            showTracks={showTracks}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            setSearchResults={setSearchResults}
-            searchResults={searchResults}
-            playlistTracks={playlistTracks}
-            tracksError={tracksError}
-            playlists={playlists}
-            playingId={playingId}
-            handlePlayTrack={handlePlayTrack}
-            selectPlaylist={selectPlaylist}
-            setSelectedPlaylist={setSelectedPlaylist}
-            setPlaylistTracks={setPlaylistTracks}
-            setTracksLoading={setTracksLoading}
-            closeMusicPicker={closeMusicPicker}
-          />
+        {/* Lyrics page — slides in from the LEFT (right-swipe / lyrics button). */}
+        {lyricsOpen && (
+          <Animated.View style={[mlStyles.lyricsPage, { transform: [{ translateX: lyricsSlideX }] }]}>
+            {displayTrack?.albumArt && (
+              <Image source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={22} />
+            )}
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(8,0,6,0.82)" }]} />
+            <View style={mlStyles.musicHeader}>
+              <TouchableOpacity style={mlStyles.musicBackBtn} activeOpacity={0.7} onPress={closeLyrics}>
+                <Ionicons name="chevron-back" size={22} color="#fff" />
+              </TouchableOpacity>
+              <Text style={mlStyles.musicTitle}>Lyrics</Text>
+              <View style={{ width: 36 }} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <MeetLyricsView
+                track={track ? { id: track.id, name: track.name, artist: track.artist, durationMs: track.durationMs } : null}
+                positionMs={liveProgressMs}
+                onClose={closeLyrics}
+              />
+            </View>
+          </Animated.View>
         )}
+
+        {pickerOpen && <MeetMusicPanel m={music} />}
 
       </Animated.View>
     </Modal>

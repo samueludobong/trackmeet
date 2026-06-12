@@ -602,6 +602,20 @@ export const chatStyles = StyleSheet.create({
     paddingHorizontal: 11, paddingVertical: 6,
   },
   jamBtnText: { fontSize: 12, color: "#0D0D0D", fontWeight: "800" },
+  // Active state when a jam is live in this conversation.
+  jamBtnActive: { backgroundColor: "#AB00FF" },
+  // Full-width strip under the header announcing a live jam.
+  jamBanner: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: 10, marginTop: 2, marginBottom: 6,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "#AB00FF",
+  },
+  jamBannerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#CAFF00" },
+  jamBannerText: { flex: 1, fontSize: 13.5, fontWeight: "700", color: "#fff" },
+  jamBannerJoin: { backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 5 },
+  jamBannerJoinText: { fontSize: 12.5, fontWeight: "800", color: "#fff" },
 
   // Call / video icon buttons
   headerIconBtn: {
@@ -1706,8 +1720,8 @@ export const mlStyles = StyleSheet.create({
     paddingTop: 52,
     paddingBottom: 10,
   },
-  topLeft:  { flexDirection: "row", alignItems: "center", gap: 10 },
-  topRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  topLeft:  { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
+  topRight: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
 
   // Gradient-ring avatar (like in image)
   avatarRing: {
@@ -1840,6 +1854,14 @@ export const mlStyles = StyleSheet.create({
     backgroundColor: "#0e0e11",
     flexDirection: "column",   // explicit — children stack vertically
   },
+  // Lyrics page — absolute (overlays playback) so it can slide in from the left.
+  lyricsPage: {
+    position: "absolute",
+    top: 0, left: 0,
+    width: SW,
+    height: SH,
+    flexDirection: "column",
+  },
   musicHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1918,6 +1940,37 @@ export const mlStyles = StyleSheet.create({
     color: "rgba(255,255,255,0.3)",
   },
 
+  // ── Search tabs (Songs / Artists / Albums) ───────────────────────────────
+  musicTabs: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+    marginBottom: 4,
+  },
+  musicTab: { flex: 1, alignItems: "center", paddingVertical: 11 },
+  musicTabText: { fontSize: 13.5, fontWeight: "700", color: "rgba(255,255,255,0.45)" },
+  musicTabTextActive: { color: "#fff" },
+  musicTabUnderline: { position: "absolute", bottom: -1, left: "22%", right: "22%", height: 2, borderRadius: 2, backgroundColor: "#AB00FF" },
+
+  // ── Artist / album rows + album dropdown ─────────────────────────────────
+  albumRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9 },
+  albumArt: { width: 48, height: 48, borderRadius: 6, flexShrink: 0 },
+  albumArtFallback: { backgroundColor: "rgba(255,255,255,0.07)", alignItems: "center", justifyContent: "center" },
+  albumName: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  albumMeta: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2, textTransform: "capitalize" },
+  albumDropdown: { paddingLeft: 8, paddingBottom: 8, gap: 2 },
+  playAllBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "#CAFF00", borderRadius: 16,
+    paddingHorizontal: 14, paddingVertical: 7, marginVertical: 6,
+  },
+  playAllText: { fontSize: 13, fontWeight: "800", color: "#0D0D0D" },
+  albumTrackRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, paddingRight: 4 },
+  albumTrackNum: { width: 18, textAlign: "center", fontSize: 12, color: "rgba(255,255,255,0.4)" },
+  albumTrackName: { flex: 1, fontSize: 13.5, color: "rgba(255,255,255,0.85)" },
+
   // ── Track info + playback controls ───────────────────────────────────────
   trackSection: {
     position: "absolute",
@@ -1990,6 +2043,20 @@ export const mlStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
+  // ── Jam "stage" toggle (who controls playback) ───────────────────────────
+  stageWrap: { alignItems: "center", marginTop: 16, gap: 6 },
+  stageBtn: {
+    flexDirection: "row", alignItems: "center", gap: 7,
+    backgroundColor: "#CAFF00", borderRadius: 20,
+    paddingHorizontal: 18, paddingVertical: 9,
+  },
+  stageBtnHeld: { backgroundColor: "#AB00FF" },
+  stageBtnLocked: { backgroundColor: "rgba(255,255,255,0.1)" },
+  stageBtnText: { fontSize: 14, fontWeight: "800", color: "#0D0D0D" },
+  stageBtnTextHeld: { color: "#fff" },
+  stageBtnTextLocked: { color: "rgba(255,255,255,0.45)" },
+  stageError: { fontSize: 12, color: "rgba(255,255,255,0.55)", fontWeight: "600", textAlign: "center" },
 });
 
 export const csStyles = StyleSheet.create({
