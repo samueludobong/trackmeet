@@ -8,6 +8,8 @@ import { getFollowingNowListening, type NowListeningUser } from "../../services/
 import { getFollowingNotes, type Note } from "../../services/notes";
 import { CreateNoteOverlay } from "../../components/messages/CreateNoteOverlay";
 import { NoteViewOverlay } from "../../components/messages/NoteViewOverlay";
+import { CreateGroupChatOverlay } from "../../components/messages/CreateGroupChatOverlay";
+import { NewDirectMessageOverlay } from "../../components/messages/NewDirectMessageOverlay";
 import { useNowPlayingCtx } from "../../lib/feed/contexts";
 import { ds, msgStyles } from "../../assets/styles/feed/localStyles";
 import { MESSAGES_TABS } from "../../constants/messages";
@@ -33,7 +35,17 @@ export function MessagesView({ onOpenChat, onOpenGroup }: { onOpenChat: (conv: C
 
   // Real group-chat count for the switcher badge (no dummy numbers).
   const [groupCount, setGroupCount] = useState(0);
-  useEffect(() => { getMyGroupChats().then((g) => setGroupCount(g.length)).catch(() => {}); }, []);
+  // Bumped after a successful create so GroupChatsList re-fetches.
+  const [groupsRefreshKey, setGroupsRefreshKey] = useState(0);
+  useEffect(() => { getMyGroupChats().then((g) => setGroupCount(g.length)).catch(() => {}); }, [groupsRefreshKey]);
+
+  // Header "+ new" overlays — which one opens depends on the active tab.
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [createDmOpen, setCreateDmOpen] = useState(false);
+  const onHeaderCreatePress = () => {
+    if (activeTab === "Group Chats") setCreateGroupOpen(true);
+    else setCreateDmOpen(true);
+  };
 
   // Now-listening strip: viewer + followed users' live broadcasts AND notes.
   const [listening, setListening] = useState<NowListeningUser[]>([]);
@@ -155,7 +167,7 @@ export function MessagesView({ onOpenChat, onOpenGroup }: { onOpenChat: (conv: C
           </Animated.View>
           <View style={msgStyles.headerRedDot} />
         </TouchableOpacity>
-        <TouchableOpacity style={ds.iconBtn} activeOpacity={0.7}>
+        <TouchableOpacity style={ds.iconBtn} activeOpacity={0.7} onPress={onHeaderCreatePress}>
           <Ionicons name="create-outline" size={18} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -266,7 +278,7 @@ export function MessagesView({ onOpenChat, onOpenGroup }: { onOpenChat: (conv: C
         )}
 
         {activeTab === "Messages"    && <DirectMessagesList conversations={conversations} loading={convsLoading} onSelect={onOpenChat} />}
-        {activeTab === "Group Chats" && <GroupChatsList onOpenGroup={onOpenGroup} />}
+        {activeTab === "Group Chats" && <GroupChatsList onOpenGroup={onOpenGroup} refreshKey={groupsRefreshKey} />}
       </ScrollView>
 
       <SongPreviewSheet
@@ -288,6 +300,33 @@ export function MessagesView({ onOpenChat, onOpenGroup }: { onOpenChat: (conv: C
 
       {viewNote && (
         <NoteViewOverlay note={viewNote} onClose={() => setViewNote(null)} />
+      )}
+
+      {createGroupOpen && (
+        <CreateGroupChatOverlay
+          onClose={() => setCreateGroupOpen(false)}
+          onCreated={(g) => {
+            setCreateGroupOpen(false);
+            setGroupsRefreshKey((k) => k + 1);
+            onOpenGroup?.(g);
+          }}
+        />
+      )}
+
+      {createDmOpen && (
+        <NewDirectMessageOverlay
+          onClose={() => setCreateDmOpen(false)}
+          onPicked={(otherUser, conversationId) => {
+            setCreateDmOpen(false);
+            const conv: ConversationInfo = {
+              conversationId,
+              otherUser,
+              last_message_at: null,
+              last_message_preview: null,
+            };
+            onOpenChat(conv);
+          }}
+        />
       )}
     </View>
   );

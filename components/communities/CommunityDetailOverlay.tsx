@@ -248,7 +248,7 @@ export function CommunityDetailOverlay({
           onDismiss={() => setWelcomeToast(false)}
         />
 
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <ScrollView showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
             keyboardShouldPersistTaps="handled"

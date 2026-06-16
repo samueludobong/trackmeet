@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Animated, Pressable, KeyboardAvoidingView, Platform } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { DragGrabber } from "../common/DragGrabber";
 import { listMembers, type CommunityMember, type CommunityRole } from "../../services/communities";
 import { SH } from "../../lib/feed/dimensions";
@@ -27,6 +28,7 @@ export function CommunityMembersSheet({
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SH)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
+  const kb = useKeyboardHeight();
 
   const [members, setMembers] = useState<CommunityMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,16 +81,17 @@ export function CommunityMembersSheet({
       >
         <Animated.View
           style={[s.sheet, { paddingBottom: insets.bottom + 8 },
+            kb > 0 && { bottom: kb + 12 },
             { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}
         >
           <DragGrabber panHandlers={panHandlers} />
-          <Text style={s.title} numberOfLines={1}>{communityName} · Members</Text>
+          <Text style={s.title} numberOfLines={1}>{communityName} Â· Members</Text>
 
           <View style={s.searchWrap}>
             <Ionicons name="search" size={16} color="rgba(255,255,255,0.35)" />
             <TextInput
               style={s.searchInput}
-              placeholder="Search members…"
+              placeholder="Search membersâ€¦"
               placeholderTextColor="rgba(255,255,255,0.3)"
               value={query}
               onChangeText={setQuery}

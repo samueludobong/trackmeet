@@ -7,6 +7,7 @@ import { type CuratedPlaylist } from "../../lib/feed/types";
 import { updateCuratedPlaylist } from "../../services/playlists";
 import { uploadImageToStorage } from "../../services/storage";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { DragGrabber } from "../common/DragGrabber";
 import { styles } from "../../assets/styles/playlists/EditPlaylistOverlay";
 
@@ -26,6 +27,7 @@ export function EditPlaylistOverlay({
 }) {
   const slideAnim = useRef(new Animated.Value(800)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
+  const kb = useKeyboardHeight();
 
   const [name, setName] = useState(playlist.name);
   const [description, setDescription] = useState(playlist.description ?? "");
@@ -116,12 +118,13 @@ export function EditPlaylistOverlay({
 
       <KeyboardAvoidingView
         style={StyleSheet.absoluteFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         pointerEvents="box-none"
       >
         <Animated.View
           style={[
             styles.sheet,
+            kb > 0 && { bottom: kb + 12 },
             { transform: [{ translateY: slideAnim }, { scaleY: stretch }] },
           ]}
         >

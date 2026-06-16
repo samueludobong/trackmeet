@@ -5,7 +5,7 @@ const ACCENT = "#AB00FF";
 export const s = StyleSheet.create({
   sheet: {
     position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "88%",
-    backgroundColor: "#161618", borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    backgroundColor: "#161618", borderTopLeftRadius: 28, borderTopRightRadius: 28, borderBottomLeftRadius: 28, borderBottomRightRadius: 28,
     borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 20, paddingBottom: 24,
   },

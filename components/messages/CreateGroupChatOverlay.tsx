@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Alert, ScrollView } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
@@ -95,7 +95,7 @@ export function CreateGroupChatOverlay({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         pointerEvents="box-none"
       >
-        <Animated.View style={[s.sheet, kb > 0 && { maxHeight: SH - kb - TOP_GAP }, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
+        <Animated.View style={[s.sheet, kb > 0 && { bottom: kb + 12, maxHeight: SH - kb - TOP_GAP }, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
           <DragGrabber panHandlers={panHandlers} />
 
           <View style={s.headerRow}>
@@ -136,7 +136,7 @@ export function CreateGroupChatOverlay({
             <Ionicons name="search" size={16} color="rgba(255,255,255,0.35)" />
             <TextInput
               style={s.searchInput}
-              placeholder="Search people…"
+              placeholder="Search peopleâ€¦"
               placeholderTextColor="rgba(255,255,255,0.3)"
               value={query}
               onChangeText={setQuery}

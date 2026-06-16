@@ -80,7 +80,7 @@ export function CreateGroupPollOverlay({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         pointerEvents="box-none"
       >
-        <Animated.View style={[s.sheet, kb > 0 && { maxHeight: SH - kb - TOP_GAP }, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
+        <Animated.View style={[s.sheet, kb > 0 && { bottom: kb + 12, maxHeight: SH - kb - TOP_GAP }, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
           <DragGrabber panHandlers={panHandlers} />
           <View style={s.headerRow}>
             <TouchableOpacity onPress={close} hitSlop={12}><Text style={s.cancel}>Cancel</Text></TouchableOpacity>

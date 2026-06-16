@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable,
   TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Alert, ScrollView, Switch,
@@ -83,7 +83,7 @@ export function CreateGroupEventOverlay({
       const event = await createGroupEvent(groupId, {
         title, description: desc, startsAt: startsAt.toISOString(), isMeet,
       });
-      if (!event) { Alert.alert("Couldn't create event", "Admins only — please try again."); return; }
+      if (!event) { Alert.alert("Couldn't create event", "Admins only â€” please try again."); return; }
       onCreated(event);
     } catch (e: any) {
       Alert.alert("Couldn't create event", e?.message ?? "Try again.");
@@ -104,7 +104,7 @@ export function CreateGroupEventOverlay({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         pointerEvents="box-none"
       >
-        <Animated.View style={[s.sheet, kb > 0 && { maxHeight: SH - kb - TOP_GAP }, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
+        <Animated.View style={[s.sheet, kb > 0 && { bottom: kb + 12, maxHeight: SH - kb - TOP_GAP }, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
           <DragGrabber panHandlers={panHandlers} />
           <View style={s.headerRow}>
             <TouchableOpacity onPress={close} hitSlop={12}><Text style={s.cancel}>Cancel</Text></TouchableOpacity>
@@ -117,7 +117,7 @@ export function CreateGroupEventOverlay({
 
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
             <Text style={s.label}>TITLE</Text>
-            <TextInput style={s.input} placeholder="Listening party, book chat…" placeholderTextColor="rgba(255,255,255,0.28)" value={title} onChangeText={setTitle} maxLength={80} />
+            <TextInput style={s.input} placeholder="Listening party, book chatâ€¦" placeholderTextColor="rgba(255,255,255,0.28)" value={title} onChangeText={setTitle} maxLength={80} />
 
             <Text style={s.label}>DESCRIPTION</Text>
             <TextInput style={[s.input, { height: 70, textAlignVertical: "top" }]} placeholder="What's happening?" placeholderTextColor="rgba(255,255,255,0.28)" value={desc} onChangeText={setDesc} multiline maxLength={300} />
@@ -150,7 +150,7 @@ export function CreateGroupEventOverlay({
             </View>
 
             <Text style={s.preview}>
-              {isMeet ? "🎧 " : "📅 "}{startsAt.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} · {fmtHour(hour)}
+              {isMeet ? "ðŸŽ§ " : "ðŸ“… "}{startsAt.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} Â· {fmtHour(hour)}
             </Text>
           </ScrollView>
         </Animated.View>

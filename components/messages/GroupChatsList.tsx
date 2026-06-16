@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { getMyGroupChats, type GroupChat } from "../../services/groupChats";
-import { CreateGroupChatOverlay } from "./CreateGroupChatOverlay";
 import { s } from "../../assets/styles/messages/GroupChatsList";
 
 const ACCENT = "#AB00FF";
@@ -19,23 +18,23 @@ const relTime = (iso: string | null) => {
   return d < 7 ? `${d}d` : new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
 };
 
-export function GroupChatsList({ onOpenGroup }: { onOpenGroup?: (g: GroupChat) => void }) {
+export function GroupChatsList({
+  onOpenGroup, refreshKey = 0,
+}: {
+  onOpenGroup?: (g: GroupChat) => void;
+  /** Parent bumps this after a successful create so the list re-fetches. */
+  refreshKey?: number;
+}) {
   const [groups, setGroups] = useState<GroupChat[]>([]);
   const [loading, setLoading] = useState(true);
-  const [createOpen, setCreateOpen] = useState(false);
 
-  const load = () => getMyGroupChats().then(setGroups).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    setLoading(true);
+    getMyGroupChats().then(setGroups).finally(() => setLoading(false));
+  }, [refreshKey]);
 
   return (
     <View>
-      <TouchableOpacity style={s.newRow} activeOpacity={0.8} onPress={() => setCreateOpen(true)}>
-        <View style={[s.newIcon, { backgroundColor: ACCENT }]}>
-          <Ionicons name="add" size={22} color="#fff" />
-        </View>
-        <Text style={s.newText}>New group chat</Text>
-      </TouchableOpacity>
-
       {loading ? (
         <ActivityIndicator color={ACCENT} style={{ marginTop: 24 }} />
       ) : groups.length === 0 ? (
@@ -63,16 +62,6 @@ export function GroupChatsList({ onOpenGroup }: { onOpenGroup?: (g: GroupChat) =
         ))
       )}
 
-      {createOpen && (
-        <CreateGroupChatOverlay
-          onClose={() => setCreateOpen(false)}
-          onCreated={(g) => {
-            setGroups((prev) => [g, ...prev]);
-            setCreateOpen(false);
-            onOpenGroup?.(g);
-          }}
-        />
-      )}
     </View>
   );
 }

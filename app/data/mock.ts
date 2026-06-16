@@ -135,21 +135,7 @@ export type CarouselItem = {
   deco2: string;
 };
 
-export type NavItem = {
-  label: string;
-  icon: string;
-  iconActive: string;
-};
 
-// ─── Nav ──────────────────────────────────────────────────────────────────────
-
-export const NAV_ITEMS: NavItem[] = [
-  { label: "Feed",     icon: "grid-outline",         iconActive: "grid"          },
-  { label: "Discover", icon: "compass-outline",       iconActive: "compass"       },
-  { label: "Meets",    icon: "musical-notes-outline", iconActive: "musical-notes" },
-  { label: "Messages", icon: "chatbubble-outline",    iconActive: "chatbubble"    },
-  { label: "Profile",  icon: "person-outline",        iconActive: "person"        },
-];
 
 // ─── Now Playing stories ─────────────────────────────────────────────────────
 

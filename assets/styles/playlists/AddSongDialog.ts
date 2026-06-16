@@ -1,4 +1,4 @@
-import { StyleSheet } from "react-native";
+﻿import { StyleSheet } from "react-native";
 
 const ACCENT = "#1DB954";
 
@@ -9,6 +9,7 @@ export const styles = StyleSheet.create({
     backgroundColor: "#10161D",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
+    borderBottomLeftRadius: 28, borderBottomRightRadius: 28,
     height: "88%",
     borderTopWidth: 1, borderColor: "rgba(255,255,255,0.06)",
   },
@@ -20,7 +21,7 @@ export const styles = StyleSheet.create({
   },
   title: { color: "#fff", fontSize: 19, fontWeight: "800" },
 
-  // ── Now Playing banner ────────────────────────────────────────────────────
+  // â”€â”€ Now Playing banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   nowBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -43,7 +44,7 @@ export const styles = StyleSheet.create({
   nowName: { color: "#fff", fontSize: 13, fontWeight: "700" },
   nowArtist: { color: "rgba(255,255,255,0.55)", fontSize: 11, marginTop: 1 },
 
-  // ── Tabs ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   tabRow: {
     flexDirection: "row",
     paddingHorizontal: 8,
@@ -60,7 +61,7 @@ export const styles = StyleSheet.create({
     backgroundColor: ACCENT,
   },
 
-  // ── Search ────────────────────────────────────────────────────────────────
+  // â”€â”€ Search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   searchRow: {
     flexDirection: "row", alignItems: "center",
     marginHorizontal: 16, marginBottom: 10,
@@ -71,7 +72,7 @@ export const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: "#fff", fontSize: 14, padding: 0 },
 
-  // ── Sub-header (Spotify drill-in) ─────────────────────────────────────────
+  // â”€â”€ Sub-header (Spotify drill-in) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   subHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -80,7 +81,7 @@ export const styles = StyleSheet.create({
   },
   subHeaderTitle: { flex: 1, color: "#fff", fontSize: 14, fontWeight: "700", marginHorizontal: 12, textAlign: "center" },
 
-  // ── Track row ─────────────────────────────────────────────────────────────
+  // â”€â”€ Track row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   trackRow: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingVertical: 8,
@@ -93,7 +94,7 @@ export const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
 
-  // ── Playlist row (Spotify tab) ────────────────────────────────────────────
+  // â”€â”€ Playlist row (Spotify tab) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   playlistRow: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: 16, paddingVertical: 10,
@@ -106,7 +107,7 @@ export const styles = StyleSheet.create({
   playlistName: { color: "#fff", fontSize: 14, fontWeight: "700" },
   playlistMeta: { color: "rgba(255,255,255,0.4)", fontSize: 12, marginTop: 2 },
 
-  // ── Add button ────────────────────────────────────────────────────────────
+  // â”€â”€ Add button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   addBtn: {
     minWidth: 56, height: 32, borderRadius: 16,
     paddingHorizontal: 14,
@@ -121,7 +122,7 @@ export const styles = StyleSheet.create({
   addBtnText: { color: "#fff", fontSize: 13, fontWeight: "800" },
   addBtnTextDone: { color: ACCENT },
 
-  // ── Misc ─────────────────────────────────────────────────────────────────
+  // â”€â”€ Misc â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   emptyText: {
     color: "rgba(255,255,255,0.35)",
     textAlign: "center",

@@ -91,6 +91,30 @@ export const getFollowingNowListening = async (): Promise<NowListeningUser[]> =>
   return mapped;
 };
 
+export type FollowedUser = {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  is_verified?: boolean | null;
+};
+
+/** People the viewer follows, ordered by most recently followed. */
+export const getFollowedUsers = async (): Promise<FollowedUser[]> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data: rows } = await supabase
+    .from('follows')
+    .select('created_at, following:users!following_id(id, username, display_name, avatar_url, is_verified)')
+    .eq('follower_id', user.id)
+    .order('created_at', { ascending: false });
+
+  return ((rows ?? []) as any[])
+    .map((r) => r.following as FollowedUser)
+    .filter((u) => !!u);
+};
+
 export const checkIsFollowing = async (targetUserId: string): Promise<boolean> => {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false

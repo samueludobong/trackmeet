@@ -39,7 +39,7 @@ export function EditProfileOverlay({ visible, onClose, initialData, onSaved, acc
         </Animated.View>
         <Animated.View style={[epOverlayStyles.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
           <DragGrabber panHandlers={dragHandlers} />
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
             <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
               <View style={{ flex: 1 }}>
 

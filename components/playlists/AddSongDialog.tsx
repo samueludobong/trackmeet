@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Keyboard, Alert, ScrollView, FlatList } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
@@ -12,6 +12,7 @@ import {
 } from "../../services/playlists";
 import { useNowPlayingCtx } from "../../lib/feed/contexts";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { DragGrabber } from "../common/DragGrabber";
 import { SH } from "../../lib/feed/dimensions";
 import { styles } from "../../assets/styles/playlists/AddSongDialog";
@@ -33,9 +34,10 @@ export function AddSongDialog({
 }) {
   const { track: nowPlaying } = useNowPlayingCtx();
 
-  // ── Slide + drag-to-close ───────────────────────────────────────────────
+  // â”€â”€ Slide + drag-to-close â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const slideAnim = useRef(new Animated.Value(SH)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
+  const kb = useKeyboardHeight();
 
   useEffect(() => {
     Animated.parallel([
@@ -55,7 +57,7 @@ export function AddSongDialog({
   const { panHandlers, stretch } = useSheetDragClose({ slideAnim, onClose: close, closedValue: SH });
   const dragBackdrop = slideAnim.interpolate({ inputRange: [0, SH], outputRange: [1, 0], extrapolate: "clamp" });
 
-  // ── Mode + per-tab state ────────────────────────────────────────────────
+  // â”€â”€ Mode + per-tab state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [mode, setMode] = useState<Mode>("search");
   const [adding, setAdding] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
@@ -77,7 +79,7 @@ export function AddSongDialog({
   const [recsLoading, setRecsLoading] = useState(false);
   const [recsLoaded, setRecsLoaded] = useState(false);
 
-  // ── Lazy-load each tab on first activation ──────────────────────────────
+  // â”€â”€ Lazy-load each tab on first activation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (mode !== "spotify" || spotifyPlaylists.length > 0 || spotifyPlaylistsLoading) return;
     (async () => {
@@ -111,7 +113,7 @@ export function AddSongDialog({
     })();
   }, [mode]);
 
-  // ── Search handler ───────────────────────────────────────────────────────
+  // â”€â”€ Search handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleSearch = async () => {
     if (!query.trim()) return;
     setSearching(true);
@@ -122,7 +124,7 @@ export function AddSongDialog({
     setSearching(false);
   };
 
-  // ── Spotify drill-in ───────────────────────────────────────────────────
+  // â”€â”€ Spotify drill-in â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const openSpotifyPlaylist = async (pl: SpotifyPlaylist) => {
     setSpotifySub({ kind: "tracks", playlist: pl });
     setSpotifyTracks([]);
@@ -134,7 +136,7 @@ export function AddSongDialog({
     setSpotifyTracksLoading(false);
   };
 
-  // ── Add a single track ──────────────────────────────────────────────────
+  // â”€â”€ Add a single track â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const addTrack = async (track: SpotifyTrackResult) => {
     if (adding) return;
     if (added.has(track.id)) return;
@@ -156,7 +158,7 @@ export function AddSongDialog({
     onAdded();
   };
 
-  // ── Now-playing banner data (Spotify track currently playing) ───────────
+  // â”€â”€ Now-playing banner data (Spotify track currently playing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const nowPlayingTrack: SpotifyTrackResult | null = useMemo(() => {
     if (!nowPlaying) return null;
     return {
@@ -189,6 +191,7 @@ export function AddSongDialog({
         <Animated.View
           style={[
             styles.sheet,
+            kb > 0 && { bottom: kb + 12 },
             { transform: [{ translateY: slideAnim }, { scaleY: stretch }] },
           ]}
         >
@@ -241,7 +244,7 @@ export function AddSongDialog({
                   <Ionicons name="search" size={15} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
                   <TextInput
                     style={styles.searchInput}
-                    placeholder="Search Spotify…"
+                    placeholder="Search Spotifyâ€¦"
                     placeholderTextColor="rgba(255,255,255,0.3)"
                     value={query}
                     onChangeText={setQuery}
@@ -391,7 +394,7 @@ export function AddSongDialog({
   );
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function Tab({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
@@ -440,11 +443,11 @@ function AddBtn({ added, loading, onPress }: { added: boolean; loading: boolean;
         <ActivityIndicator size="small" color={ACCENT} />
       ) : (
         <Text style={[styles.addBtnText, added && styles.addBtnTextDone]}>
-          {added ? "✓" : "Add"}
+          {added ? "âœ“" : "Add"}
         </Text>
       )}
     </TouchableOpacity>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

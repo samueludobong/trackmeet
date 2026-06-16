@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Alert } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
+import { useKeyboardHeight } from "../../hooks/useKeyboardHeight";
 import { DragGrabber } from "../common/DragGrabber";
 import {
   getCommunityPostComments, addCommunityPostComment, deleteCommunityPostComment,
@@ -27,7 +28,7 @@ export function CommunityCommentsSheet({
   userId: string | null;
   /** Member of a community with comments enabled. */
   canComment: boolean;
-  /** Owner/moderator — may delete any comment. */
+  /** Owner/moderator â€” may delete any comment. */
   canModerate: boolean;
   onClose: () => void;
   /** Notifies the parent so the card's count chip stays in sync. */
@@ -36,6 +37,7 @@ export function CommunityCommentsSheet({
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SH)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
+  const kb = useKeyboardHeight();
   const scrollRef = useRef<ScrollView>(null);
 
   const [comments, setComments] = useState<CommunityPostComment[]>([]);
@@ -114,6 +116,7 @@ export function CommunityCommentsSheet({
       >
         <Animated.View
           style={[s.sheet, { paddingBottom: insets.bottom + 10 },
+            kb > 0 && { bottom: kb + 12 },
             { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}
         >
           <DragGrabber panHandlers={panHandlers} />
@@ -128,7 +131,7 @@ export function CommunityCommentsSheet({
             {loading ? (
               <ActivityIndicator color={ACCENT} style={{ marginVertical: 24 }} />
             ) : comments.length === 0 ? (
-              <Text style={s.empty}>No comments yet{canComment ? " — start the conversation." : "."}</Text>
+              <Text style={s.empty}>No comments yet{canComment ? " â€” start the conversation." : "."}</Text>
             ) : (
               comments.map((c) => (
                 <TouchableOpacity
@@ -163,7 +166,7 @@ export function CommunityCommentsSheet({
             <View style={s.inputRow}>
               <TextInput
                 style={s.input}
-                placeholder="Add a comment…"
+                placeholder="Add a commentâ€¦"
                 placeholderTextColor="rgba(255,255,255,0.3)"
                 value={text}
                 onChangeText={setText}

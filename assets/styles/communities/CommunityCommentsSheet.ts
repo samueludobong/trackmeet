@@ -10,7 +10,7 @@ export const s = StyleSheet.create({
     position: "absolute", left: 0, right: 0, bottom: 0,
     maxHeight: "85%",
     backgroundColor: "#1a1a1f",
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    borderTopLeftRadius: 28, borderTopRightRadius: 28, borderBottomLeftRadius: 28, borderBottomRightRadius: 28,
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
   },
   title: { fontSize: 16, fontWeight: "800", color: "#fff", paddingHorizontal: 18, marginBottom: 12 },

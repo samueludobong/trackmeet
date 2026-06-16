@@ -47,7 +47,7 @@ export function PostComposerSheet({
 
       <Animated.View style={[csStyles.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>
         <DragGrabber panHandlers={dragHandlers} />
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
           <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
             <View style={{ flex: 1 }}>
           <View style={csStyles.header}>
