@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import { View, Text, Animated } from "react-native";
-import { chatStyles } from "../../lib/feed/localStyles";
+import { chatStyles } from "../../assets/styles/feed/localStyles";
 
 export function TypingBubble({ name }: { name: string }) {
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];

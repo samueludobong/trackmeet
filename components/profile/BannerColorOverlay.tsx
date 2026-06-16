@@ -5,7 +5,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, 
 import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { bcOverlayStyles, bsOverlayStyles } from "../../lib/feed/localStyles";
+import { bcOverlayStyles, bsOverlayStyles } from "../../assets/styles/feed/localStyles";
 import { PALETTE_ROWS, SHAPE_ROWS } from "../../constants/profile";
 import { SWATCH_SIZE } from "../../constants/feedLayout";
 import { isLightColor } from "../../lib/feed/helpers";

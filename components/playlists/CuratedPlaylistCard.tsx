@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
-import { cpStyles, profileStyles } from "../../lib/feed/localStyles";
+import { cpStyles, profileStyles } from "../../assets/styles/feed/localStyles";
 import { type CuratedPlaylist } from "../../lib/feed/types";
 
 export function CuratedPlaylistCard({ pl, onPress }: { pl: CuratedPlaylist; onPress: () => void }) {

@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { View, Text, TouchableOpacity, Animated, Pressable } from "react-native";
-import { reactStyles } from "../../lib/feed/localStyles";
+import { reactStyles } from "../../assets/styles/feed/localStyles";
 import { REACTION_PRIMARY, REACTION_SECONDARY } from "../../constants/meets";
 import { type FloatingReactionItem } from "../../types/meets";
 

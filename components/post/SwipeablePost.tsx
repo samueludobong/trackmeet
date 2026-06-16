@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import { View, Text, Animated, Pressable, PanResponder } from "react-native";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { OpenDetailCtx } from "../../lib/feed/contexts";
 import { PostHeader } from "../../components/post/PostHeader";
 import { PostCard } from "../../components/post/PostCard";

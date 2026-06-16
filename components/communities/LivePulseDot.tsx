@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, StyleSheet, View } from "react-native";
+import { styles } from "../../assets/styles/communities/LivePulseDot";
 
 /** Pulsing AB00FF dot — used on discovery cards with active meets. */
 export function LivePulseDot({ size = 8 }: { size?: number }) {
@@ -31,9 +32,3 @@ export function LivePulseDot({ size = 8 }: { size?: number }) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: { alignItems: "center", justifyContent: "center" },
-  ring: { position: "absolute", backgroundColor: "#AB00FF" },
-  dot: { backgroundColor: "#AB00FF" },
-});

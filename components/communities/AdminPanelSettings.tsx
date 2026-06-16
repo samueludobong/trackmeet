@@ -1,6 +1,6 @@
-import React from "react";
+﻿import React from "react";
 import { Switch, Text, View } from "react-native";
-import { adminStyles as a } from "./adminPanel.styles";
+import { adminStyles as a } from "../../assets/styles/communities/adminPanel";
 
 type Props = {
   isPrivate: boolean; setIsPrivate: (v: boolean) => void;

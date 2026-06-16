@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, Animated, TouchableOpacity, TextInput, FlatList, ActivityIndicator } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
-import { mlStyles } from "../../lib/feed/localStyles";
+import { mlStyles } from "../../assets/styles/feed/localStyles";
 import { type SpotifyAlbum, type SpotifyArtistInfo } from "../../lib/spotify";
 import { type MeetMusicControl } from "../../hooks/useMeetMusicControl";
 import { MusicTrackRow } from "../../components/playlists/MusicTrackRow";

@@ -7,7 +7,7 @@ import * as SecureStore from 'expo-secure-store'
 
 // ─── Extracted shared foundation (see lib/feed/*) ─────────────────────────────
 import { OpenMeetCtx, HostMeetCtx, JamCtx, NowPlayingCtx, FeedUserCtx, PostActionsCtx } from '../lib/feed/contexts';
-import { styles } from '../lib/feed/styles';
+import { styles } from '../assets/styles/feed/styles';
 
 // FeedUserCtx is consumed by external screens via `import { FeedUserCtx } from "./feed"`.
 import { QuickReplyOverlay } from "../components/post/QuickReplyOverlay";

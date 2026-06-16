@@ -3,8 +3,8 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, 
 import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
-import { csStyles } from "../../lib/feed/localStyles";
-import { styles as feedStyles } from "../../lib/feed/styles";
+import { csStyles } from "../../assets/styles/feed/localStyles";
+import { styles as feedStyles } from "../../assets/styles/feed/styles";
 import { NowPlayingBanner } from "./NowPlayingBanner";
 import { type ComposerUser } from "../../types/composer";
 import { type Post } from "../../app/data/mock";

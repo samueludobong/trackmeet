@@ -1,9 +1,9 @@
-import React from "react";
+﻿import React from "react";
 import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { openSpotifyLink } from "../../lib/spotify";
-import { psStyles } from "../../lib/feed/localStyles";
+import { psStyles } from "../../assets/styles/feed/localStyles";
 import { type PinnedSong } from "../../types/music";
 
 /** The preview step of the pinned-song picker: album art, 30s scrubber, save + pin CTAs. */

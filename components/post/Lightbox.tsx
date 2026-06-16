@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, Modal } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { Ionicons } from "@expo/vector-icons";
-import { lbStyles } from "../../lib/feed/localStyles";
+import { lbStyles } from "../../assets/styles/feed/localStyles";
 import { SW } from "../../lib/feed/dimensions";
 import { type Post } from "../../app/data/mock";
 

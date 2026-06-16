@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { View, Text, StyleSheet, ScrollView } from "react-native";
-import { styles } from "../../app/signup.styles";
+import { styles } from "../../assets/styles/app/signup";
 import { DRUM_H, MONTHS, DAYS, YEARS } from "../../constants/signup";
 
 export function DrumPicker({

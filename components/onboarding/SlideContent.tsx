@@ -1,6 +1,6 @@
-import React from "react";
+﻿import React from "react";
 import { View, Text } from "react-native";
-import { styles } from "../../app/onboarding.styles";
+import { styles } from "../../assets/styles/app/onboarding";
 import { BLOB_SHAPES, type Slide } from "../../constants/onboarding";
 
 export function SlideContent({ slide }: { slide: Slide }) {

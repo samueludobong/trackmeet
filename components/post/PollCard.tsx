@@ -1,7 +1,7 @@
 import React, { useContext } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { ActionRow } from "../../components/post/ActionRow";
 import { PostHeader } from "../../components/post/PostHeader";
 import { PostText } from "../../components/post/TextCard";

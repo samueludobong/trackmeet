@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { View, Text, FlatList, TouchableOpacity } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { ds } from "../../lib/feed/localStyles";
+import { ds } from "../../assets/styles/feed/localStyles";
 import { CAROUSEL_CARD_W, CAROUSEL_GAP, CAROUSEL_ITEMS, type CarouselItem } from "../../app/data/mock";
 
 export function TrendingCarousel({

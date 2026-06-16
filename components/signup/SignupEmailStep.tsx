@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, TouchableOpacity, Alert } from "react-native";
-import { styles } from "../../app/signup.styles";
+import { styles } from "../../assets/styles/app/signup";
 import { Field } from "./SignupFields";
 import { useSignup } from "@/hooks/useSignup";
 

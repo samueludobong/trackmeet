@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
-import { pdStyles } from "../../lib/feed/localStyles";
+import { pdStyles } from "../../assets/styles/feed/localStyles";
 import { type CuratedSong } from "../../lib/feed/types";
 
 export function RealSongRow({ track, accent, onDelete }: { track: CuratedSong; accent: string; onDelete?: () => void }) {

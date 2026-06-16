@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated } from "react-native
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { mbStyles } from "../../lib/feed/localStyles";
+import { mbStyles } from "../../assets/styles/feed/localStyles";
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 

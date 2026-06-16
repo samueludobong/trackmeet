@@ -1,4 +1,4 @@
-﻿import * as AuthSession from 'expo-auth-session'
+import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import * as Crypto from 'expo-crypto'
 import * as Linking from 'expo-linking'
@@ -15,7 +15,7 @@ export type SpotifyWriteResult =
 export async function _readSpotifyErr(res: Response): Promise<string | undefined> {
   try {
     const t = await res.text()
-    // Log the raw body so we can see exactly what Spotify says â€” "Insufficient
+    // Log the raw body so we can see exactly what Spotify says — "Insufficient
     // client scope" means missing playlist-modify scope, "Forbidden" with no
     // body usually means the request never reached the Spotify API (bad/empty
     // token), and "You cannot modify this playlist" means we hit a playlist we
@@ -31,10 +31,10 @@ export async function _readSpotifyErr(res: Response): Promise<string | undefined
   } catch { return undefined }
 }
 
-// Short token prefix for logging â€” never log the full token.
+// Short token prefix for logging — never log the full token.
 
 export const _tokPfx = (t: string | null | undefined) =>
-  !t ? '<null>' : t.length < 12 ? t : t.slice(0, 8) + 'â€¦'
+  !t ? '<null>' : t.length < 12 ? t : t.slice(0, 8) + '…'
 
 export function _writeResultFrom(res: Response, message?: string): SpotifyWriteResult {
   if (res.ok) return { ok: true }

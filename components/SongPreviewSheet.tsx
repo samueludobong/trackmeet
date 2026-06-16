@@ -4,7 +4,7 @@ import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { AddToPlaylistSheet } from "./AddToPlaylistSheet";
 
 
-import { ps } from "./songPreviewSheet.styles";
+import { ps } from "../assets/styles/components/songPreviewSheet";
 
 import { useSongPreview } from "../hooks/useSongPreview";
 import { useSheetDragClose } from "../hooks/useSheetDragClose";

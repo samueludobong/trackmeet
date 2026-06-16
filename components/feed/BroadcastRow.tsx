@@ -1,6 +1,6 @@
-import React from "react";
+﻿import React from "react";
 import { Pressable, Text, View } from "react-native";
-import { profileStyles } from "../../lib/feed/localStyles";
+import { profileStyles } from "../../assets/styles/feed/localStyles";
 import { useNowPlayingCtx } from "../../lib/feed/contexts";
 import { GradientToggle } from "../../components/feed/GradientToggle";
 

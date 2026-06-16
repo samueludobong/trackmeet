@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity, TextInput } from "react-native";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { epOverlayStyles } from "../../lib/feed/localStyles";
+import { epOverlayStyles } from "../../assets/styles/feed/localStyles";
 import { SOCIAL_PLATFORMS } from "../../lib/feed/social";
 import { type EditFormData } from "../../types/profile";
 

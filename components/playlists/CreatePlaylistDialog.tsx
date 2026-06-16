@@ -6,7 +6,7 @@ import { CachedImage } from "../ui/CachedImage";
 
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
-import { cpStyles } from "../../lib/feed/localStyles";
+import { cpStyles } from "../../assets/styles/feed/localStyles";
 import { type CuratedPlaylist } from "../../lib/feed/types";
 
 export function CreatePlaylistDialog({

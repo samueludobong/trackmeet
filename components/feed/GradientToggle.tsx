@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import { View, StyleSheet, TouchableOpacity, Animated } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { profileStyles } from "../../lib/feed/localStyles";
+import { profileStyles } from "../../assets/styles/feed/localStyles";
 import { THUMB_TRAVEL } from "../../constants/feedLayout";
 
 export function GradientToggle({ value, onValueChange, colors }: { value: boolean; onValueChange: (v: boolean) => void; colors?: [string, string, string] }) {

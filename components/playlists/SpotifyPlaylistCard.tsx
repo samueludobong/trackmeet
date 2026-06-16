@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { type SpotifyPlaylist } from "../../lib/spotify";
-import { profileStyles } from "../../lib/feed/localStyles";
+import { profileStyles } from "../../assets/styles/feed/localStyles";
 
 export function SpotifyPlaylistCard({ pl, onPress }: { pl: SpotifyPlaylist; onPress: () => void }) {
   return (

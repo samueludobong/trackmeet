@@ -7,7 +7,8 @@ import {
   banMember, unbanMember, listBans,
   type CommunityMember, type CommunityRole, type CommunityBan,
 } from "../../services/communities";
-import { adminStyles as a } from "./adminPanel.styles";
+import { adminStyles as a } from "../../assets/styles/communities/adminPanel";
+import { mb } from "../../assets/styles/communities/AdminPanelMembers";
 
 export function AdminPanelMembers({
   communityId, viewerId, myRole,
@@ -187,18 +188,3 @@ function MemberActions({ member, canTransfer, onChangeRole, onKick, onBan }: {
     </TouchableOpacity>
   );
 }
-
-const mb = StyleSheet.create({
-  searchWrap: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 12, paddingHorizontal: 12,
-  },
-  searchInput: { flex: 1, height: 40, color: "#fff", fontSize: 14 },
-  unbanBtn: {
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12,
-    backgroundColor: "rgba(29,185,84,0.14)",
-    borderWidth: 1, borderColor: "rgba(29,185,84,0.4)",
-  },
-  unbanText: { fontSize: 12, fontWeight: "800", color: "#1DB954" },
-});

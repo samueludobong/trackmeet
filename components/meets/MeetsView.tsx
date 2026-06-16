@@ -2,8 +2,8 @@ import React, { useState, useEffect } from "react";
 import { View, Text, ScrollView, TouchableOpacity, TextInput, Platform, KeyboardAvoidingView, RefreshControl, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { getLiveMeetsFromFollowing, type LiveMeet } from "../../services/meets";
-import { styles } from "../../lib/feed/styles";
-import { ds, ms } from "../../lib/feed/localStyles";
+import { styles } from "../../assets/styles/feed/styles";
+import { ds, ms } from "../../assets/styles/feed/localStyles";
 import { useOpenMeet } from "../../lib/feed/contexts";
 import { LiveMeetCard } from "../../components/meets/LiveMeetCard";
 

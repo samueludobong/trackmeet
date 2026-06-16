@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { styles } from "../../app/signup.styles";
+import { styles } from "../../assets/styles/app/signup";
 import { Field } from "./SignupFields";
 
 /** The login form (username/email + password + social) inside the auth card. */

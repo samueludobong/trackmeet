@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
-import { msgStyles } from "../../lib/feed/localStyles";
+import { msgStyles } from "../../assets/styles/feed/localStyles";
 import { AvatarCircle } from "../../components/messages/AvatarCircle";
 import { COMMUNITY_ITEMS, type CommunityItem } from "../../app/data/mock";
 

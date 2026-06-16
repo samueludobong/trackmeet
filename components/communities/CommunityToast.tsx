@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { styles } from "../../assets/styles/communities/CommunityToast";
 
 /** Auto-dismissing push-notification toast (3s) — slides down, fades out, dismissable.
  *  Pass `message` to override the default notifications copy (e.g. a welcome message). */
@@ -48,16 +49,3 @@ export function CommunityToast({
     </Animated.View>
   );
 }
-
-const styles = StyleSheet.create({
-  toast: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    marginHorizontal: 16, marginBottom: 12,
-    backgroundColor: "rgba(171,0,255,0.1)",
-    borderWidth: 1, borderColor: "rgba(171,0,255,0.28)",
-    borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9,
-  },
-  text: { flex: 1, fontSize: 12, fontWeight: "600", color: "rgba(255,255,255,0.78)" },
-  slug: { color: "#AB00FF", fontWeight: "800" },
-  close: { padding: 2 },
-});

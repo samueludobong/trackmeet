@@ -1,6 +1,6 @@
-import React from "react";
+﻿import React from "react";
 import { Text } from "react-native";
-import { styles } from "../../app/signup.styles";
+import { styles } from "../../assets/styles/app/signup";
 
 /** The mode-specific title/subtitle shown at the top of the auth screen. */
 export function SignupHeroTitle({ mode, step }: any) {

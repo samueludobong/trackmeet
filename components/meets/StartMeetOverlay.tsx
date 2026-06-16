@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Switch, Keyboard, TouchableWithoutFeedback } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { startMeet } from "../../services/meets";
-import { mmStyles } from "../../lib/feed/localStyles";
+import { mmStyles } from "../../assets/styles/feed/localStyles";
 import { SH } from "../../lib/feed/dimensions";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
 import { DragGrabber } from "../common/DragGrabber";

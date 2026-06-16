@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { gdStyles } from "../../lib/feed/localStyles";
+import { gdStyles } from "../../assets/styles/feed/localStyles";
 
 /** One-time explainer shown before a listener's app jumps to Spotify to start playback. */
 export function MeetGuideOverlay({

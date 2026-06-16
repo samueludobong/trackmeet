@@ -1,7 +1,7 @@
-import React from "react";
+﻿import React from "react";
 import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
-import { ds } from "../../lib/feed/localStyles";
+import { ds } from "../../assets/styles/feed/localStyles";
 import { AVATAR_MAP } from "../../app/data/mock";
 
 /** Horizontal "Trending Artists" row with follow toggles. */

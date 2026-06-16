@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { CachedImage } from "../ui/CachedImage";
 import { COLLAGE_W, COLLAGE_GAP } from "../../lib/feed/dimensions";
 import { MediaViewer } from "../../components/post/MediaViewer";

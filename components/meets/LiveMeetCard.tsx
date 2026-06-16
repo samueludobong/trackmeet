@@ -4,7 +4,7 @@ import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { type LiveMeet } from "../../services/meets";
-import { lmStyles } from "../../lib/feed/localStyles";
+import { lmStyles } from "../../assets/styles/feed/localStyles";
 import { fmtCount } from "../../app/data/mock";
 
 export function LiveMeetCard({ meet, onJoin }: { meet: LiveMeet; onJoin: (id: string) => void }) {

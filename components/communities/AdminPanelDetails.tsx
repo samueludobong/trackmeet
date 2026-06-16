@@ -5,7 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { uploadImageToStorage } from "../../services/storage";
 import { searchArtistsByName, type CommunityArtist, type Community } from "../../services/communities";
-import { adminStyles as a } from "./adminPanel.styles";
+import { adminStyles as a } from "../../assets/styles/communities/adminPanel";
 
 type Props = {
   community: Community;

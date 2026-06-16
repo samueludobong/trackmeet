@@ -1,7 +1,7 @@
-import React from "react";
+﻿import React from "react";
 import { View, Text, TouchableOpacity, Linking } from "react-native";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { s } from "../../app/userProfile.styles";
+import { s } from "../../assets/styles/app/userProfile";
 
 /** Social-link icon row shown over another user's banner. */
 export function OtherProfileSocialRow({

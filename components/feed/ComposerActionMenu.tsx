@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, Switch } from "react-native";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { BOTTOM_INSET } from "../../lib/feed/dimensions";
 import { FAKE_PHOTO_COLORS, type Post } from "../../app/data/mock";
 

@@ -1,8 +1,9 @@
-import { View, StyleSheet, Animated, Easing } from 'react-native';
+﻿import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import * as SecureStore from 'expo-secure-store';
+import { styles } from "../../assets/styles/app/(tabs)/index";
 
 // Prevents re-triggering the animation when navigating back from a screen
 let hasLaunched = false;
@@ -72,18 +73,3 @@ export default function SplashScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#AB00FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 55,
-    color: '#ffffff',
-    fontFamily: 'Pacifico_400Regular',
-    lineHeight: 100,
-  },
-});

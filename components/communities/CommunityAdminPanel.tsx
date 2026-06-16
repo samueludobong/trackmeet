@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import {
   Modal, View, Text, ScrollView, TouchableOpacity,
   ActivityIndicator, Alert, Platform, KeyboardAvoidingView,
@@ -10,7 +10,7 @@ import {
   getCommunityRules, getCommunityTags, listJoinRequests,
   type Community, type CommunityArtist, type CommunityRole,
 } from "../../services/communities";
-import { adminStyles as a } from "./adminPanel.styles";
+import { adminStyles as a } from "../../assets/styles/communities/adminPanel";
 import { TabPill } from "./TabPill";
 import { AdminPanelDetails } from "./AdminPanelDetails";
 import { AdminPanelSettings } from "./AdminPanelSettings";

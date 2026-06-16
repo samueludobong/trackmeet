@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
-import { profileStyles } from "../../lib/feed/localStyles";
+import { profileStyles } from "../../assets/styles/feed/localStyles";
 import { type DummyCommunity } from "../../app/data/mock";
 
 export function CommunityCard({ co }: { co: DummyCommunity }) {

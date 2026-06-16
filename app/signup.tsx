@@ -8,7 +8,7 @@ import { StepDots } from "../components/signup/SignupGrids";
 import StartUpVideo  from "../assets/videos/loop.mp4";
 import { Field } from "../components/signup/SignupFields";
 import { TOTAL_STEPS, STEP_TITLES, STEP_SUBS } from "../constants/signup";
-import { styles } from "./signup.styles";
+import { styles } from "../assets/styles/app/signup";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing, Dimensions, Platform, Modal } from "react-native";
 import { KeyboardDismissView } from "../components/shared/KeyboardDismissView";
 import * as SecureStore from "expo-secure-store";

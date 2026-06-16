@@ -7,7 +7,7 @@ import { CachedImage } from "../ui/CachedImage";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { ms, llStyles, mlStyles } from "../../lib/feed/localStyles";
+import { ms, llStyles, mlStyles } from "../../assets/styles/feed/localStyles";
 import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 import { FloatingReactionLayer, ReactionButton } from "../../components/meets/FloatingReaction";
 import { MeetChatList } from "../../components/meets/MeetChatList";

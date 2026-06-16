@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, FlatList, TouchableOpacity, RefreshControl, ViewToken } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { type Post } from "../../app/data/mock";
 import { FeedStoriesStrip } from "./FeedStoriesStrip";
 import { SwipeablePost } from "../post/SwipeablePost";

@@ -12,7 +12,7 @@ import { useVideoControls } from "./useVideoControls";
 import { openSpotifyLink } from "../../lib/spotify";
 import { useCachedVideoUri } from "../../hooks/useCachedVideoUri";
 import { CachedImage } from "../ui/CachedImage";
-import { mvStyles as s, SW, SH } from "./mediaViewer.styles";
+import { mvStyles as s, SW, SH } from "../../assets/styles/post/mediaViewer";
 
 type Media = { type: "image" | "video"; uri: string };
 

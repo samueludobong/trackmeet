@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { View, Text, StyleSheet, Switch, TouchableOpacity, Animated, Modal, Pressable, ActivityIndicator } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
-import { settingsOverlayStyles } from "../../lib/feed/localStyles";
+import { settingsOverlayStyles } from "../../assets/styles/feed/localStyles";
 import { type UserProfile } from "../../app/data/mock";
 
 import { useSettingsOverlay } from "../../hooks/useSettingsOverlay";

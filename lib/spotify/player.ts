@@ -1,4 +1,4 @@
-﻿import * as AuthSession from 'expo-auth-session'
+import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import * as Crypto from 'expo-crypto'
 import * as Linking from 'expo-linking'
@@ -30,7 +30,7 @@ export const getCurrentlyPlaying = async (accessToken: string) => {
       durationMs: data.item.duration_ms,
       isPlaying: data.is_playing,
       // Active device name (e.g. "oraimo SpaceBuds Hybrid") for the now-playing
-      // strip's "playing on â€¦" line. Spotify returns the device block when the
+      // strip's "playing on …" line. Spotify returns the device block when the
       // user-read-playback-state scope is granted; null when scope is missing
       // or no device info is in the response.
       deviceName: (data.device?.name as string | undefined) ?? null,
@@ -70,7 +70,7 @@ export const skipNext = async (accessToken: string): Promise<void> => {
   }
 }
 
-// play=true â†’ resume/play, play=false â†’ pause
+// play=true → resume/play, play=false → pause
 
 export const setPlayback = async (accessToken: string, play: boolean): Promise<void> => {
   try {
@@ -97,7 +97,7 @@ export const seekPlayback = async (accessToken: string, positionMs: number): Pro
   }
 }
 
-// Read the current playback volume (0â€“100) of the active device, or null when
+// Read the current playback volume (0–100) of the active device, or null when
 // there's no active device / volume isn't reported.
 
 export const getPlaybackVolume = async (accessToken: string): Promise<number | null> => {
@@ -115,8 +115,8 @@ export const getPlaybackVolume = async (accessToken: string): Promise<number | n
   }
 }
 
-// Set the active device's playback volume (0â€“100). Used by talk mode to "duck"
-// the listener's music instead of pausing it â€” pausing can let the Spotify
+// Set the active device's playback volume (0–100). Used by talk mode to "duck"
+// the listener's music instead of pausing it — pausing can let the Spotify
 // device go idle, leaving playback in an unrecoverable state. Keeping the stream
 // alive at volume 0 means it resumes instantly when talk mode ends.
 
@@ -173,7 +173,7 @@ export const playTrackAt = async (accessToken: string, trackUri: string, positio
     if (res.status === 404) {
       const deviceId = await pickTargetDevice(accessToken)
       if (!deviceId) {
-        console.log('[Spotify] playTrackAt: no available device â€” listener must open Spotify')
+        console.log('[Spotify] playTrackAt: no available device — listener must open Spotify')
         return
       }
       await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, { method: 'PUT', headers, body })
@@ -189,9 +189,9 @@ export const playTrackAt = async (accessToken: string, trackUri: string, positio
  * Spotify app starts playing immediately.
  *
  * Returns:
- *   - { ok: true }                      â€” playback started
- *   - { ok: false, reason: 'no-device' } â€” user must open Spotify on a device
- *   - { ok: false, reason: 'error', message } â€” anything else (premium req, etc.)
+ *   - { ok: true }                      — playback started
+ *   - { ok: false, reason: 'no-device' } — user must open Spotify on a device
+ *   - { ok: false, reason: 'error', message } — anything else (premium req, etc.)
  *
  * Spotify caps a single play request at 100 URIs; we slice to that.
  */
@@ -215,7 +215,7 @@ export const playTracks = async (
   try {
     let res = await attempt();
     if (res.status === 404) {
-      // No active device â€” pick one and retry.
+      // No active device — pick one and retry.
       const deviceId = await pickTargetDevice(accessToken);
       if (!deviceId) return { ok: false, reason: 'no-device' };
       res = await attempt(deviceId);
@@ -231,7 +231,7 @@ export const playTracks = async (
 
 // Play a specific track immediately by its Spotify URI (e.g. "spotify:track:<id>").
 // Requires an active Spotify device. Returns true on success, false otherwise
-// (no active device â†’ 404, no premium â†’ 403, network error, etc.). Callers
+// (no active device → 404, no premium → 403, network error, etc.). Callers
 // like openSpotifyLink use the false to decide whether to fall back to opening
 // the Spotify app instead.
 
@@ -252,6 +252,6 @@ export const playTrack = async (accessToken: string, trackUri: string): Promise<
   }
 }
 
-// â”€â”€â”€ Spotify Canvas (unofficial spclient API) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Spotify Canvas (unofficial spclient API) ─────────────────────────────────
 // Returns a looping MP4/WebM URL for the given track, or null when unavailable.
-// Uses a hand-rolled minimal protobuf encoder/decoder â€” no extra dependencies.
+// Uses a hand-rolled minimal protobuf encoder/decoder — no extra dependencies.

@@ -7,7 +7,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { OpenDetailCtx, FeedUserCtx, usePostActions } from "../../lib/feed/contexts";
 import { type Post } from "../../app/data/mock";
 import { getPostComments, deletePost } from "../../services/posts";

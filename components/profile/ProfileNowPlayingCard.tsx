@@ -4,7 +4,7 @@ import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { openSpotifyLink, seekPlayback } from "../../lib/spotify";
-import { profileStyles } from "../../lib/feed/localStyles";
+import { profileStyles } from "../../assets/styles/feed/localStyles";
 import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
 import { type Gradient } from "../../hooks/albumColors";
 import { type ActiveMeetForUser } from "../../services/meets";

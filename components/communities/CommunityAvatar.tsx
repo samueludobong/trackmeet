@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";
+import { styles } from "../../assets/styles/communities/CommunityAvatar";
 
 /** Square avatar — uploaded image, else first letter of name on gradient bg. */
 export function CommunityAvatar({
@@ -41,8 +42,3 @@ function shade(hex: string, amount: number): string {
   const b = clamp((num & 0xff) + Math.round(255 * amount));
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 }
-
-const styles = StyleSheet.create({
-  base: { backgroundColor: "#1A1A1A" },
-  letter: { fontWeight: "900", color: "#fff", letterSpacing: -0.5 },
-});

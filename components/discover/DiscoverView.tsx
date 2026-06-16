@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, TextInput, Platform, Keyboard
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { followUser, unfollowUser } from "../../services/follows";
-import { ds } from "../../lib/feed/localStyles";
+import { ds } from "../../assets/styles/feed/localStyles";
 import { DISCOVER_FILTERS, TRENDING_ARTISTS, FOR_YOU_RECS, UPCOMING_MEETS } from "../../app/data/mock";
 import { useDiscoverSearch } from "../../hooks/useDiscoverSearch";
 import { TrendingCarousel } from "../feed/TrendingCarousel";

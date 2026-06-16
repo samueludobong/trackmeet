@@ -3,7 +3,7 @@ import { CachedImage } from "./ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { type PlaylistTrackInput } from "../services/playlists";
 
-import { s } from "./addToPlaylistSheet.styles";
+import { s } from "../assets/styles/components/addToPlaylistSheet";
 
 import { useAddToPlaylist } from "../hooks/useAddToPlaylist";
 

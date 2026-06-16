@@ -1,9 +1,9 @@
-import React from "react";
+﻿import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { AVATAR_MAP, type NowPlayingStory } from "../../app/data/mock";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 
 /** A story-style avatar bubble showing what a user is currently playing. */
 export function NowPlayingBubble({ item }: { item: NowPlayingStory }) {

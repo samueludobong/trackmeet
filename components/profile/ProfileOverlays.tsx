@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity, Modal, Pressable } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
-import { profileStyles } from "../../lib/feed/localStyles";
+import { profileStyles } from "../../assets/styles/feed/localStyles";
 import { feedCache } from "../../lib/feed/caches";
 import { type UserProfile } from "../../app/data/mock";
 import { type ComposerUser } from "../../types/composer";

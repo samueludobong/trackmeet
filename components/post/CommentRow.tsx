@@ -3,7 +3,7 @@ import { toggleCommentLike } from "../../services/posts";
 import { View, Text, TouchableOpacity, Animated, PanResponder } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { openSpotifyLink } from "../../lib/spotify";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { CachedImage } from "../ui/CachedImage";
 import { type Comment } from "../../lib/feed/helpers";
 

@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
-import { comm, ev } from "../../app/artistProfile.styles";
+import { comm, ev } from "../../assets/styles/app/artistProfile";
 import { MOCK_EVENTS } from "../../constants/artist";
 export { DiscographyTab } from "./DiscographyTab";
 

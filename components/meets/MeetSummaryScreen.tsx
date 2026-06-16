@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { setMeetOnProfile, type MeetTrack } from "../../services/meets";
 import { isTrackInAnyPlaylist } from "../../services/playlists";
-import { sumStyles } from "../../lib/feed/localStyles";
+import { sumStyles } from "../../assets/styles/feed/localStyles";
 import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 
 export function MeetSummaryScreen({

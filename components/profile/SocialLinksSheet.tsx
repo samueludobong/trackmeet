@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, Linking } from "react-native";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { linksSheetStyles } from "../../lib/feed/localStyles";
+import { linksSheetStyles } from "../../assets/styles/feed/localStyles";
 import { SOCIAL_PLATFORMS, BANNER_PLATFORM_PRIORITY } from "../../lib/feed/social";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
 import { DragGrabber } from "../common/DragGrabber";

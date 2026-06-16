@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native"
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { s } from "../../app/userProfile.styles";
+import { s } from "../../assets/styles/app/userProfile";
 import { BannerShape } from "./BannerShape";
 import { OtherNowListening } from "./OtherNowListening";
 import { OtherProfileSocialRow } from "./OtherProfileSocialRow";

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import { View, Text, TouchableOpacity, TextInput, StyleSheet } from "react-native";
-import { styles, otpStyles } from "../../app/signup.styles";
+import { styles, otpStyles } from "../../assets/styles/app/signup";
 
 export function SignupEmailVerification({
   email,

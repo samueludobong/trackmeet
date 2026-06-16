@@ -14,7 +14,7 @@ import { videoPositionStore } from "../../lib/feed/videoPositions";
 import { useCachedVideoUri } from "../../hooks/useCachedVideoUri";
 import { CachedImage } from "../ui/CachedImage";
 import { RailButton } from "./MediaViewer";
-import { mvStyles as s, SW, SH } from "./mediaViewer.styles";
+import { mvStyles as s, SW, SH } from "../../assets/styles/post/mediaViewer";
 
 // A page has to be the dominant one on screen before it becomes the playing card.
 const VIEWABILITY = { itemVisiblePercentThreshold: 80 };

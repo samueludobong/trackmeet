@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, 
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { type SpotifyTrackResult } from "../../lib/spotify";
-import { psStyles, epOverlayStyles } from "../../lib/feed/localStyles";
+import { psStyles, epOverlayStyles } from "../../assets/styles/feed/localStyles";
 import { type PinnedSong } from "../../types/music";
 import { type BaseStep } from "../../types/profile";
 import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";

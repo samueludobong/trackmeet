@@ -1,7 +1,7 @@
 import { OtherProfileBody } from "../components/profile/OtherProfileBody";
 import { BannerShape } from "../components/profile/BannerShape";
 import { SOCIAL_PLATFORMS, BANNER_PLATFORM_PRIORITY } from "../lib/feed/social";
-import { s } from "./userProfile.styles";
+import { s } from "../assets/styles/app/userProfile";
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SongPreviewSheet } from "../components/SongPreviewSheet";

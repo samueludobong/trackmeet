@@ -1,6 +1,6 @@
 import React from "react";
 import { View } from "react-native";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { ActionRow } from "./ActionRow";
 import { PostHeader } from "./PostHeader";
 import { PostText } from "./TextCard";

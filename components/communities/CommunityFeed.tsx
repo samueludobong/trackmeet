@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from "react";
+﻿import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { ds, profileStyles } from "../../lib/feed/localStyles";
+import { ds, profileStyles } from "../../assets/styles/feed/localStyles";
 import {
   getCommunityFeed, getJoinedCommunitiesWithUnread, getDiscoverCommunities,
   joinCommunity, getMyLikedCommunityPostIds, toggleCommunityPostLike,

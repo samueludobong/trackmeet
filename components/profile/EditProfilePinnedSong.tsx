@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { epOverlayStyles } from "../../lib/feed/localStyles";
+import { epOverlayStyles } from "../../assets/styles/feed/localStyles";
 import { type EditFormData } from "../../types/profile";
 
 /** The PINNED SONG section of the Edit Profile form. */

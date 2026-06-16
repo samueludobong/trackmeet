@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { sendSpotifyTrackMessage, type ConversationInfo, type DbMessage } from "../../services/messages";
 import { getActiveDmJam } from "../../services/meets";
 import { supabase } from "../../lib/supabase";
-import { chatStyles } from "../../lib/feed/localStyles";
+import { chatStyles } from "../../assets/styles/feed/localStyles";
 import { useOpenJam } from "../../lib/feed/contexts";
 import { NowPlayingBanner } from "../../components/feed/NowPlayingBanner";
 import { SpotifyTrackCard } from "../../components/messages/SpotifyTrackCard";

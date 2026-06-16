@@ -2,7 +2,7 @@ import React, { useRef, useState } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, ActivityIndicator, Alert } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { type PinnedSong } from "../../types/music";
 import { type Comment } from "../../lib/feed/helpers";
 import { usePostComments } from "../../hooks/usePostComments";

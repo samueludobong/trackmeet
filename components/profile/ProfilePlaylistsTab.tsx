@@ -1,7 +1,7 @@
-import React from "react";
+﻿import React from "react";
 import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { cpStyles } from "../../lib/feed/localStyles";
+import { cpStyles } from "../../assets/styles/feed/localStyles";
 import { type CuratedPlaylist } from "../../lib/feed/types";
 import { type SpotifyPlaylist } from "../../lib/spotify";
 import { CuratedPlaylistCard } from "../../components/playlists/CuratedPlaylistCard";

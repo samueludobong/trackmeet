@@ -5,7 +5,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Animated, ActivityIndicator }
 import { CachedImage } from "../ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { profileStyles } from "../../lib/feed/localStyles";
+import { profileStyles } from "../../assets/styles/feed/localStyles";
 import { PostCard } from "../../components/post/PostCard";
 import { CreatePlaylistDialog } from "../../components/playlists/CreatePlaylistDialog";
 import { CuratedPlaylistDetailOverlay } from "../../components/playlists/CuratedPlaylistDetailOverlay";
@@ -16,6 +16,7 @@ import { getMyCommunities, type Community } from "../../services/communities";
 import { PROFILE_TABS } from "../../app/data/mock";
 import { type Post } from "../../app/data/mock";
 import { getUserReposts } from "../../services/posts";
+import { cStyles } from "../../assets/styles/profile/ProfileTabs";
 
 export function ProfileTabs({ userId, readOnly = false }: { userId: string | null; readOnly?: boolean }) {
   const {
@@ -226,18 +227,6 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
     </View>
   );
 }
-
-const cStyles = StyleSheet.create({
-  createBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    paddingVertical: 13, borderRadius: 14,
-    backgroundColor: "rgba(171,0,255,0.08)", borderWidth: 1, borderColor: "rgba(171,0,255,0.25)",
-  },
-  createBtnText: { fontSize: 15, fontWeight: "800", color: "#AB00FF" },
-  avatar: { width: 46, height: 46, borderRadius: 14, backgroundColor: "#1A1A1C" },
-  avatarFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
-  nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-});
 
 // ─── Profile view ─────────────────────────────────────────────────────────────
 

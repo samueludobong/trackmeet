@@ -1,7 +1,7 @@
-import React from "react";
+﻿import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { ds } from "../../lib/feed/localStyles";
+import { ds } from "../../assets/styles/feed/localStyles";
 
 /** "Upcoming Meets" vertical list with RSVP toggles. */
 export function UpcomingMeetsList({

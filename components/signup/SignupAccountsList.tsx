@@ -1,8 +1,8 @@
-import React from "react";
+﻿import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
-import { styles } from "../../app/signup.styles";
+import { styles } from "../../assets/styles/app/signup";
 
 /** The saved-accounts quick-login list shown in "accounts" mode. */
 export function SignupAccountsList({ savedAccounts, handleSelectSavedAccount, handleUseAnotherAccount }: any) {

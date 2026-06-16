@@ -1,6 +1,6 @@
 import { SlideContent } from "../components/onboarding/SlideContent";
 import { SLIDES } from "../constants/onboarding";
-import { styles } from "./onboarding.styles";
+import { styles } from "../assets/styles/app/onboarding";
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, PanResponder, Modal, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';

@@ -1,7 +1,7 @@
 import { type Tab } from "../types/artist";
 import { DiscographyTab, CommunitiesTab, EventsTab } from "../components/artist/ArtistTabs";
 import { fmtListeners } from "../lib/artistFormat";
-import { s } from "./artistProfile.styles";
+import { s } from "../assets/styles/app/artistProfile";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Dimensions } from "react-native";
 import { CachedImage } from "../components/ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";

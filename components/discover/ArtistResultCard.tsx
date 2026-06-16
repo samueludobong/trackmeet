@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { pplStyles } from "../../lib/feed/localStyles";
+import { pplStyles } from "../../assets/styles/feed/localStyles";
 import { type ArtistResult } from "../../types/discover";
 import { useArtistProfile } from "../../hooks/useArtistProfile";
 

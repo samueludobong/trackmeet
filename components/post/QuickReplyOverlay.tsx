@@ -4,7 +4,7 @@ import { addPostComment } from "../../services/posts";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, ActivityIndicator } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { BOTTOM_INSET } from "../../lib/feed/dimensions";
 import { OpenDetailCtx } from "../../lib/feed/contexts";
 import { PostCard } from "../../components/post/PostCard";

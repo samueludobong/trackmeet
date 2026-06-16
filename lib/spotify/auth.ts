@@ -1,4 +1,4 @@
-﻿import * as AuthSession from 'expo-auth-session'
+import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import * as Crypto from 'expo-crypto'
 import * as Linking from 'expo-linking'
@@ -33,13 +33,13 @@ export const redirectUri = AuthSession.makeRedirectUri({
 })
 
 // Generate code verifier for PKCE
-// Avoid btoa(String.fromCharCode(...typedArray)) â€” spreading Uint8Array into
+// Avoid btoa(String.fromCharCode(...typedArray)) — spreading Uint8Array into
 // String.fromCharCode is unreliable in Hermes for byte values > 127.
 // Use Crypto.getRandomBytesAsync then encode via base64url with Expo's built-in encoder.
 
 const generateCodeVerifier = async (): Promise<string> => {
   const randomBytes = await Crypto.getRandomBytesAsync(32)
-  // Encode each byte individually â€” safe in all JS engines
+  // Encode each byte individually — safe in all JS engines
   let binary = ''
   for (let i = 0; i < randomBytes.length; i++) binary += String.fromCharCode(randomBytes[i])
   return btoa(binary)
@@ -50,7 +50,7 @@ const generateCodeVerifier = async (): Promise<string> => {
 
 // Generate code challenge from verifier (PKCE: BASE64URL(SHA256(ASCII(verifier))))
 // expo-crypto digestStringAsync is correct here because the code verifier only
-// contains base64url characters (A-Z, a-z, 0-9, -, _) â€” all ASCII â€” so its
+// contains base64url characters (A-Z, a-z, 0-9, -, _) — all ASCII — so its
 // UTF-8 encoding is identical to its ASCII encoding, producing the right hash.
 
 const generateCodeChallenge = async (verifier: string): Promise<string> => {
@@ -66,7 +66,7 @@ const generateCodeChallenge = async (verifier: string): Promise<string> => {
 }
 
 // Main Spotify auth function.
-// userId is optional â€” pass it when the user row already exists (e.g. Settings page)
+// userId is optional — pass it when the user row already exists (e.g. Settings page)
 // and the function will UPDATE the row. During onboarding the row doesn't exist yet,
 // so omit userId and use the returned token fields to include in the INSERT instead.
 
@@ -87,7 +87,7 @@ export const connectSpotify = async (userId?: string) => {
 
     // When reconnecting from Settings (userId already exists), force the Spotify
     // permissions dialog to appear every time so the user explicitly grants ALL
-    // current scopes â€” Spotify otherwise caches the previous grant and skips the
+    // current scopes — Spotify otherwise caches the previous grant and skips the
     // dialog, issuing a token with the old (smaller) scope set.
     if (userId) params.set('show_dialog', 'true')
 
@@ -98,7 +98,7 @@ export const connectSpotify = async (userId?: string) => {
     // installed.  On iOS this uses ASWebAuthenticationSession (in-app browser
     // overlay); on Android it uses Chrome Custom Tabs.  Both handle the
     // trackmeet://spotify-callback redirect internally so Expo Router never
-    // sees it as a navigation event â€” avoiding the "unknown route" crash on
+    // sees it as a navigation event — avoiding the "unknown route" crash on
     // Android that the old Linking.openURL + addEventListener path caused.
     const result = await WebBrowser.openAuthSessionAsync(
       `https://accounts.spotify.com/authorize?${params.toString()}`,
@@ -107,7 +107,7 @@ export const connectSpotify = async (userId?: string) => {
     console.log('[Spotify] openAuthSession result:', result.type)
     if (result.type !== 'success') return { error: 'Auth cancelled' }
 
-    // Parse the callback URL safely â€” new URL() can behave unexpectedly with
+    // Parse the callback URL safely — new URL() can behave unexpectedly with
     // non-standard schemes (exp://) in some Hermes builds, so fall back to regex.
     let code: string | null = null
     try {
@@ -136,7 +136,7 @@ export const connectSpotify = async (userId?: string) => {
       }).toString(),
     })
 
-    // Read raw text first â€” Spotify occasionally returns plain-text errors (e.g. when
+    // Read raw text first — Spotify occasionally returns plain-text errors (e.g. when
     // the code_verifier doesn't match the challenge) instead of JSON.
     const tokenRaw = await tokenResponse.text()
     console.log('[Spotify] token response status:', tokenResponse.status)
@@ -182,7 +182,7 @@ export const connectSpotify = async (userId?: string) => {
       topArtists = JSON.parse(topArtistsRaw)
     } catch {
       console.log('[Spotify] top-artists body (non-JSON):', topArtistsRaw.slice(0, 200))
-      // Non-fatal â€” continue with empty artist list
+      // Non-fatal — continue with empty artist list
       topArtists = { items: [] }
     }
 
@@ -196,7 +196,7 @@ export const connectSpotify = async (userId?: string) => {
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString()
 
     // Only UPDATE the DB row when the user already exists (e.g. Settings flow).
-    // During onboarding userId is undefined â€” the caller stores the returned
+    // During onboarding userId is undefined — the caller stores the returned
     // token fields and includes them in the initial INSERT instead.
     if (userId) {
       const { error: updateError } = await supabase
@@ -233,7 +233,7 @@ export const connectSpotify = async (userId?: string) => {
   }
 }
 
-// Disconnect Spotify â€” clears all token fields from the user's DB row
+// Disconnect Spotify — clears all token fields from the user's DB row
 
 export const disconnectSpotify = async (userId: string): Promise<void> => {
   await supabase.from('users').update({
@@ -254,11 +254,11 @@ export const disconnectSpotify = async (userId: string): Promise<void> => {
 
 /**
  * Result of a refresh attempt.
- * - `dead: true`  â†’ the refresh token is truly invalid (revoked, expired, app
+ * - `dead: true`  → the refresh token is truly invalid (revoked, expired, app
  *   uninstalled in Spotify settings, etc.). Caller should prompt reconnect.
- * - `dead: false` â†’ transient failure (Spotify 5xx, "Failed to remove token",
+ * - `dead: false` → transient failure (Spotify 5xx, "Failed to remove token",
  *   network error, rate-limit). Caller should keep using the existing access
- *   token if it's still valid and retry on the next poll â€” DO NOT prompt
+ *   token if it's still valid and retry on the next poll — DO NOT prompt
  *   reconnect, that's terrible UX for a Spotify backend blip.
  */
 
@@ -282,12 +282,12 @@ export const refreshSpotifyToken = async (userId: string, refreshToken: string):
       }).toString(),
     })
 
-    // 5xx â†’ Spotify is having issues. Don't kill the session.
+    // 5xx → Spotify is having issues. Don't kill the session.
     if (response.status >= 500) {
       console.log('[Spotify] refresh transient HTTP', response.status)
       return { ok: false, dead: false }
     }
-    // 429 â†’ rate-limited. Transient by definition; retry next poll.
+    // 429 → rate-limited. Transient by definition; retry next poll.
     if (response.status === 429) {
       console.log('[Spotify] refresh rate-limited (429)')
       return { ok: false, dead: false }
@@ -297,10 +297,10 @@ export const refreshSpotifyToken = async (userId: string, refreshToken: string):
     if (!tokens) return { ok: false, dead: false }
 
     // Spotify returns { error, error_description } when the refresh token is
-    // invalid or revoked â€” guard before touching expires_in to avoid RangeError.
+    // invalid or revoked — guard before touching expires_in to avoid RangeError.
     // `invalid_grant` / `invalid_client` = the token is dead, force reconnect.
     // Anything else (notably `server_error` "Failed to remove token") is a
-    // backend hiccup on Spotify's side â€” keep the session, retry next poll.
+    // backend hiccup on Spotify's side — keep the session, retry next poll.
     if (tokens.error) {
       const dead = tokens.error === 'invalid_grant' || tokens.error === 'invalid_client'
       console.log('[Spotify] refresh failed', tokens.error, tokens.error_description, dead ? '(dead)' : '(transient)')
@@ -308,13 +308,13 @@ export const refreshSpotifyToken = async (userId: string, refreshToken: string):
     }
 
     if (typeof tokens.expires_in !== 'number' || !tokens.access_token) {
-      // Malformed success response â€” treat as transient.
+      // Malformed success response — treat as transient.
       return { ok: false, dead: false }
     }
 
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString()
 
-    // Spotify sometimes rotates the refresh token â€” save it if we get a new one
+    // Spotify sometimes rotates the refresh token — save it if we get a new one
     const update: Record<string, string> = {
       spotify_access_token: tokens.access_token,
       spotify_token_expires_at: expiresAt,
@@ -326,13 +326,13 @@ export const refreshSpotifyToken = async (userId: string, refreshToken: string):
     return { ok: true, accessToken: tokens.access_token }
 
   } catch (error) {
-    // Network/JSON exception â€” assume transient (offline, DNS hiccup, etc.).
+    // Network/JSON exception — assume transient (offline, DNS hiccup, etc.).
     console.log('[Spotify] refresh network error:', error)
     return { ok: false, dead: false }
   }
 }
 
-// Lightweight reconnect â€” only does the PKCE auth flow + token exchange + DB save.
+// Lightweight reconnect — only does the PKCE auth flow + token exchange + DB save.
 // Does NOT fetch top artists, so it can't fail due to unrelated API errors.
 // Use this when re-authenticating an existing user whose tokens have expired/been revoked.
 
@@ -357,7 +357,7 @@ export const reconnectSpotify = async (userId: string): Promise<
       show_dialog: 'true',
     })
 
-    // Same unified approach as connectSpotify â€” always use openAuthSessionAsync
+    // Same unified approach as connectSpotify — always use openAuthSessionAsync
     // so Android doesn't get an "unknown route" error on the callback deep link.
     const result = await WebBrowser.openAuthSessionAsync(
       `https://accounts.spotify.com/authorize?${params.toString()}`,
@@ -403,7 +403,7 @@ export const reconnectSpotify = async (userId: string): Promise<
 
     // Verify the granted scope set actually includes what we asked for. If the
     // user hits Cancel on a permission they should have re-granted, Spotify
-    // can return success with a *narrower* scope set â€” and our writes will keep
+    // can return success with a *narrower* scope set — and our writes will keep
     // failing silently. Logging it makes that diagnosable.
     if (tokens.scope) {
       console.log('[reconnectSpotify] granted scopes:', tokens.scope)
@@ -426,8 +426,8 @@ export const reconnectSpotify = async (userId: string): Promise<
       return { error: dbError.message }
     }
     if (!saved || saved.length === 0) {
-      console.log('[reconnectSpotify] DB update matched 0 rows â€” RLS may be blocking the write')
-      return { error: 'Token save failed â€” no rows updated' }
+      console.log('[reconnectSpotify] DB update matched 0 rows — RLS may be blocking the write')
+      return { error: 'Token save failed — no rows updated' }
     }
 
     console.log('[reconnectSpotify] tokens saved OK')
@@ -454,7 +454,7 @@ export const getActiveSpotifyToken = (): string | null => _activeViewerToken
 // other URI (playlist/album/artist), or when no device is playing, open the
 // Spotify app (falling back to the web player when the app isn't installed).
 //
-// Uses try/catch rather than canOpenURL â€” canOpenURL('spotify://') requires
+// Uses try/catch rather than canOpenURL — canOpenURL('spotify://') requires
 // LSApplicationQueriesSchemes on iOS and returns false even when the app is installed
 // if the scheme isn't declared there, causing it to always fall into the WebView branch.
 
@@ -493,7 +493,7 @@ export const getPublicSpotifyToken = async (): Promise<string | null> => {
   }
 };
 
-// â”€â”€â”€ Token helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Token helper ─────────────────────────────────────────────────────────────
 // Returns a valid (non-expired) Spotify access token for the given user,
 // refreshing automatically if it has less than 60 seconds left.
 // Returns null when no token exists or the refresh fails.
@@ -514,7 +514,7 @@ export const getValidSpotifyToken = async (userId: string): Promise<string | nul
 
     if (msLeft >= 60_000) return profile.spotify_access_token
 
-    // Token expired (or about to) â€” try to refresh
+    // Token expired (or about to) — try to refresh
     if (!profile.spotify_refresh_token) return null
     const refreshed = await refreshSpotifyToken(userId, profile.spotify_refresh_token)
     if (refreshed.ok) return refreshed.accessToken
@@ -527,4 +527,4 @@ export const getValidSpotifyToken = async (userId: string): Promise<string | nul
   }
 }
 
-// â”€â”€â”€ Artist discovery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Artist discovery ─────────────────────────────────────────────────────────

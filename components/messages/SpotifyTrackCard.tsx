@@ -5,7 +5,7 @@ import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { openSpotifyLink } from "../../lib/spotify";
 import { isTrackInAnyPlaylist } from "../../services/playlists";
-import { spCard } from "../../lib/feed/localStyles";
+import { spCard } from "../../assets/styles/feed/localStyles";
 import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 
 export function SpotifyTrackCard({

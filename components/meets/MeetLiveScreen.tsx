@@ -8,7 +8,7 @@ import { CachedImage } from "../ui/CachedImage";
 import { SW } from "../../lib/feed/dimensions";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { mlStyles } from "../../lib/feed/localStyles";
+import { mlStyles } from "../../assets/styles/feed/localStyles";
 import { FloatingReactionLayer, ReactionButton } from "../../components/meets/FloatingReaction";
 import { MeetChatList } from "../../components/meets/MeetChatList";
 import { MeetSummaryScreen } from "../../components/meets/MeetSummaryScreen";

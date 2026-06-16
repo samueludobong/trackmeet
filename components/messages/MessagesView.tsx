@@ -9,7 +9,7 @@ import { getFollowingNotes, type Note } from "../../services/notes";
 import { CreateNoteOverlay } from "../../components/messages/CreateNoteOverlay";
 import { NoteViewOverlay } from "../../components/messages/NoteViewOverlay";
 import { useNowPlayingCtx } from "../../lib/feed/contexts";
-import { ds, msgStyles } from "../../lib/feed/localStyles";
+import { ds, msgStyles } from "../../assets/styles/feed/localStyles";
 import { MESSAGES_TABS } from "../../constants/messages";
 import { MSG_HEADER_H } from "../../constants/feedLayout";
 import { NAVBAR_H, BOTTOM_INSET } from "../../lib/feed/dimensions";

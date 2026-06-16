@@ -3,13 +3,14 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable,
 import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
-import { cpStyles } from "../../lib/feed/localStyles";
+import { cpStyles } from "../../assets/styles/feed/localStyles";
 import { uploadImageToStorage } from "../../services/storage";
 import {
   createCommunity, isSlugAvailable, slugify,
   type Community,
 } from "../../services/communities";
 import { SlugField, GenreSelector, BannerPicker, COLOR_CHOICES } from "./CreateCommunityFields";
+import { tr } from "../../assets/styles/communities/CreateCommunityDialog";
 
 type SlugStatus = "idle" | "checking" | "available" | "taken" | "invalid";
 
@@ -220,14 +221,3 @@ function ToggleRow({ label, sub, value, onChange }: { label: string; sub: string
     </View>
   );
 }
-
-const tr = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.07)" },
-  label: { fontSize: 15, fontWeight: "700", color: "#fff" },
-  sub: { fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 },
-  moreToggle: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
-    paddingVertical: 12, marginTop: 4,
-  },
-  moreToggleText: { fontSize: 13, fontWeight: "700", color: "rgba(255,255,255,0.5)" },
-});

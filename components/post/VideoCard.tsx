@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { PanResponder, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView, type VideoPlayer } from "expo-video";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { ActionRow } from "./ActionRow";
 import { PostHeader } from "./PostHeader";
 import { PostText } from "./TextCard";
@@ -13,6 +13,7 @@ import { videoPositionStore } from "../../lib/feed/videoPositions";
 import { useCachedVideoUri } from "../../hooks/useCachedVideoUri";
 import { CachedImage } from "../ui/CachedImage";
 import { type Post } from "../../app/data/mock";
+import { inline, scrub } from "../../assets/styles/post/VideoCard";
 
 const fmt = (s: number) => {
   const sec = Math.max(0, Math.round(s));
@@ -364,23 +365,3 @@ function ScrubBar({
     </View>
   );
 }
-
-const inline = StyleSheet.create({
-  muteBtn: {
-    position: "absolute", top: 10, right: 10,
-    width: 30, height: 30, borderRadius: 15,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.55)",
-  },
-});
-
-const scrub = StyleSheet.create({
-  // Tall hit area for easy thumbing. Negative marginBottom pulls the action row
-  // back up so the *visible* gap between the video and the action row stays the
-  // same — the extra hit area overlaps the action row invisibly. The icons up
-  // there still catch their own taps (TouchableOpacity is on top in z-order;
-  // our PanResponder only claims horizontal drags, not taps), so dragging
-  // anywhere in this band scrubs and tapping an icon still triggers the icon.
-  row: { height: 28, marginBottom: -14 },
-  fill: { position: "absolute", top: 0, left: 0, height: 2, backgroundColor: "#fff" },
-});

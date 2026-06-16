@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity, Modal } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
-import { jpStyles } from "../../lib/feed/localStyles";
+import { jpStyles } from "../../assets/styles/feed/localStyles";
 
 export function JoinMeetPrompt({
   visible, onCancel, onChoose,

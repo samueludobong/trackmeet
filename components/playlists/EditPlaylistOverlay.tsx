@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Alert, Keyboard, TouchableWithoutFeedback, ScrollView } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
@@ -8,6 +8,7 @@ import { updateCuratedPlaylist } from "../../services/playlists";
 import { uploadImageToStorage } from "../../services/storage";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
 import { DragGrabber } from "../common/DragGrabber";
+import { styles } from "../../assets/styles/playlists/EditPlaylistOverlay";
 
 /**
  * Owner-only edit overlay for a curated playlist. Lets the user change the
@@ -205,74 +206,3 @@ export function EditPlaylistOverlay({
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  sheet: {
-    position: "absolute",
-    bottom: 0, left: 0, right: 0,
-    backgroundColor: "#11171D",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 22,
-    paddingBottom: 30,
-    maxHeight: "92%",
-    borderTopWidth: 1, borderColor: "rgba(255,255,255,0.08)",
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
-    marginBottom: 6,
-  },
-  headerBtnMuted: { color: "rgba(255,255,255,0.55)", fontSize: 15, fontWeight: "600" },
-  headerTitle:    { color: "#fff", fontSize: 16, fontWeight: "800" },
-  headerBtnSave:  { color: "#1DB954", fontSize: 15, fontWeight: "800" },
-  imagePicker: {
-    width: 168, height: 168,
-    borderRadius: 20,
-    overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  imagePickerEmpty: {
-    alignItems: "center", justifyContent: "center", gap: 8,
-    borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.12)",
-    borderStyle: "dashed",
-    borderRadius: 20,
-  },
-  imagePickerHint: { color: "rgba(255,255,255,0.4)", fontSize: 12, fontWeight: "600" },
-  imageOverlay: {
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.55)",
-  },
-  editBadge: {
-    position: "absolute",
-    right: 8, bottom: 8,
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: "rgba(0,0,0,0.65)",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
-  },
-  label: {
-    fontSize: 11, fontWeight: "800",
-    letterSpacing: 1,
-    color: "rgba(255,255,255,0.4)",
-    marginTop: 12, marginBottom: 8,
-  },
-  input: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 15, color: "#fff",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
-  },
-  inputMulti: { minHeight: 100, textAlignVertical: "top" },
-  charCount: {
-    alignSelf: "flex-end",
-    color: "rgba(255,255,255,0.3)",
-    fontSize: 11, marginTop: 4,
-  },
-});

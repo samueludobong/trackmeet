@@ -1,6 +1,6 @@
 import React, { useContext } from "react";
 import { View, Text, TouchableOpacity, Image } from "react-native";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { OpenDetailCtx } from "../../lib/feed/contexts";
 import { ActionRow } from "../../components/post/ActionRow";
 import { PostHeader } from "../../components/post/PostHeader";

@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { useNowPlayingCtx } from "../../lib/feed/contexts";
 import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
 import { AnimatedWaveform } from "./AnimatedWaveform";

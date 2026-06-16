@@ -2,9 +2,10 @@ import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { CachedImage } from "../ui/CachedImage";
 import { AVATAR_MAP, type Post } from "../../app/data/mock";
+import { ph } from "../../assets/styles/post/PostHeader";
 
 export function PostHeader({ post }: { post: Post }) {
   const photo = AVATAR_MAP[post.user];
@@ -59,13 +60,5 @@ export function PostHeader({ post }: { post: Post }) {
     </View>
   );
 }
-
-const ph = StyleSheet.create({
-  communityTag: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    marginBottom: 6,
-  },
-  communityTagText: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.55)" },
-});
 
 // ─── Tappable post text — opens detail view ────────────────────────────────────

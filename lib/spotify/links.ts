@@ -1,4 +1,4 @@
-﻿import * as AuthSession from 'expo-auth-session'
+import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import * as Crypto from 'expo-crypto'
 import * as Linking from 'expo-linking'
@@ -15,17 +15,17 @@ export const openSpotifyLink = async (uri: string, webUrl: string) => {
       if (cp && !('unauthorized' in cp) && cp.isPlaying) {
         const ok = await playTrack(_tok, uri)
         if (ok) return
-        // playTrack failed (no premium / no active device race / API error) â€”
+        // playTrack failed (no premium / no active device race / API error) —
         // fall through to opening the app so the user still gets the track.
       }
     } catch {
-      // network/API error â€” fall through to open behavior
+      // network/API error — fall through to open behavior
     }
   }
   try {
     await Linking.openURL(uri)
   } catch {
-    // Spotify not installed â€” open in the in-app browser instead.
+    // Spotify not installed — open in the in-app browser instead.
     await WebBrowser.openBrowserAsync(webUrl)
   }
 }

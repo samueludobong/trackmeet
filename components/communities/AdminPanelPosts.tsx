@@ -5,7 +5,8 @@ import {
   getCommunityPosts, deleteCommunityPost, setCommunityPostPinned, setCommunityPostAnnouncement,
   type CommunityPost,
 } from "../../services/communities";
-import { adminStyles as a } from "./adminPanel.styles";
+import { adminStyles as a } from "../../assets/styles/communities/adminPanel";
+import { pp } from "../../assets/styles/communities/AdminPanelPosts";
 
 export function AdminPanelPosts({ communityId }: { communityId: string }) {
   const [posts, setPosts] = useState<CommunityPost[]>([]);
@@ -85,9 +86,3 @@ export function AdminPanelPosts({ communityId }: { communityId: string }) {
     </View>
   );
 }
-
-const pp = StyleSheet.create({
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  actions: { gap: 10, alignItems: "center" },
-  actionBtn: { padding: 2 },
-});

@@ -1,4 +1,4 @@
-﻿import * as AuthSession from 'expo-auth-session'
+import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import * as Crypto from 'expo-crypto'
 import * as Linking from 'expo-linking'
@@ -10,7 +10,7 @@ export const saveTrackToLiked = async (accessToken: string, trackId: string): Pr
   return res.ok
 }
 
-// Detailed variant of saveTrackToLiked â€” same shape as the playlist write helpers
+// Detailed variant of saveTrackToLiked — same shape as the playlist write helpers
 // so the AddToPlaylistSheet can show specific errors (403 = missing scope).
 
 export const saveTrackToLikedDetailed = async (
@@ -80,7 +80,7 @@ export const getRecommendedTracks = async (
   }
 };
 
-// Top tracks for the signed-in user (short_term â‰ˆ last 4 weeks).
+// Top tracks for the signed-in user (short_term ≈ last 4 weeks).
 // Used as a "popular" feed when the app has nothing more global to show.
 // Requires user-top-read scope (already in SPOTIFY_SCOPES).
 
@@ -170,7 +170,7 @@ export const isTrackSaved = async (accessToken: string, trackId: string): Promis
   }
 }
 
-// â”€â”€â”€ Playback controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Playback controls ────────────────────────────────────────────────────────
 // All three require the user-modify-playback-state scope (already in SPOTIFY_SCOPES).
 
 export async function fetchSpotifyTrackById(token: string, trackId: string): Promise<any | null> {
@@ -184,5 +184,5 @@ export async function fetchSpotifyTrackById(token: string, trackId: string): Pro
  * Fallback 30s preview URL scraped from Spotify's public embed page.
  * Spotify removed `preview_url` from /v1/tracks in late 2024, but the embed
  * page still ships `audioPreview.url` inside its Next.js data blob.
- * Unofficial â€” Spotify can break this any time.
+ * Unofficial — Spotify can break this any time.
  */

@@ -1,4 +1,4 @@
-﻿import * as AuthSession from 'expo-auth-session'
+import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import * as Crypto from 'expo-crypto'
 import * as Linking from 'expo-linking'
@@ -19,7 +19,7 @@ export const getUserPlaylists = async (accessToken: string): Promise<SpotifyPlay
   try {
     const results: SpotifyPlaylist[] = []
 
-    // Liked Songs first â€” fetch just 1 item to get the total count
+    // Liked Songs first — fetch just 1 item to get the total count
     const savedRes = await fetch('https://api.spotify.com/v1/me/tracks?limit=1', {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
@@ -36,7 +36,7 @@ export const getUserPlaylists = async (accessToken: string): Promise<SpotifyPlay
       const data = await res.json()
       for (const item of data.items ?? []) {
         // Skip Spotify-owned algorithmic playlists (Daily Mix, Discover Weekly,
-        // Release Radar, etc.) â€” Spotify restricted Web API track access to these
+        // Release Radar, etc.) — Spotify restricted Web API track access to these
         // in 2024 and they always return 403 "Forbidden" on /playlists/{id}/tracks.
         if (!item?.id || item.owner?.id === 'spotify') continue
         results.push({
@@ -68,7 +68,7 @@ export const getPlaylistTracks = async (
     const results: SpotifyTrackResult[] = []
 
     // Liked Songs must use the user token (user-library-read scope, /me/tracks).
-    // All other playlists use the public client-credentials token â€” Spotify's
+    // All other playlists use the public client-credentials token — Spotify's
     // 2024 API policy change blocks user-token requests to /playlists/{id}/tracks
     // in development-mode apps with "Forbidden", but the public token works fine
     // for any public playlist without touching user scopes at all.
@@ -86,7 +86,7 @@ export const getPlaylistTracks = async (
     while (url) {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       if (!res.ok) {
-        console.log(`[Spotify] getPlaylistTracks "${playlistId}" â†’ HTTP ${res.status}`)
+        console.log(`[Spotify] getPlaylistTracks "${playlistId}" → HTTP ${res.status}`)
         return { tracks: [], httpError: res.status }
       }
       const data = await res.json()
@@ -106,7 +106,7 @@ export const getPlaylistTracks = async (
       url = data.next ?? ''
       if (results.length >= 200) break
     }
-    console.log(`[Spotify] getPlaylistTracks "${playlistId}" â†’ ${results.length} tracks`)
+    console.log(`[Spotify] getPlaylistTracks "${playlistId}" → ${results.length} tracks`)
     return { tracks: results }
   } catch (e) {
     console.log('[Spotify] getPlaylistTracks error:', e)
@@ -114,7 +114,7 @@ export const getPlaylistTracks = async (
   }
 }
 
-// â”€â”€â”€ Public (app-level) token â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Public (app-level) token ─────────────────────────────────────────────────
 // Uses the spotify-public-token Edge Function which runs Client Credentials flow
 // server-side (client_secret never exposed in the app bundle).
 // The result is cached in module memory so we only call the function once per hour.
@@ -247,7 +247,7 @@ export const playlistsContainingTrack = async (
       const idx = i++
       const id = playlistIds[idx]
       try {
-        // Smallest possible response â€” just the items we care about.
+        // Smallest possible response — just the items we care about.
         const res = await fetch(
           `https://api.spotify.com/v1/playlists/${id}/tracks?fields=items(track(id)),next&limit=100`,
           { headers: { Authorization: `Bearer ${accessToken}` } },

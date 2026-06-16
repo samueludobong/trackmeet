@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, ActivityIndicator, Linking } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
-import { linksSheetStyles } from "../../lib/feed/localStyles";
+import { linksSheetStyles } from "../../assets/styles/feed/localStyles";
 import { parseSpotifyUrl, fetchSpotifyLinkInfo, type SpotifyLinkInfo } from "../../lib/feed/helpers";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
 import { DragGrabber } from "../common/DragGrabber";

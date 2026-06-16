@@ -1,7 +1,8 @@
-import React from "react";
+﻿import React from "react";
 import { Text, TouchableOpacity, View, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { adminStyles as a } from "./adminPanel.styles";
+import { adminStyles as a } from "../../assets/styles/communities/adminPanel";
+import { pillStyles } from "../../assets/styles/communities/TabPill";
 
 export function TabPill({
   label, icon, active, onPress, danger, badge,
@@ -31,13 +32,3 @@ export function TabPill({
     </TouchableOpacity>
   );
 }
-
-const pillStyles = StyleSheet.create({
-  badge: {
-    minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5,
-    backgroundColor: "#FF3B6F",
-    alignItems: "center", justifyContent: "center",
-    marginLeft: 2,
-  },
-  badgeText: { fontSize: 10, fontWeight: "800", color: "#fff" },
-});

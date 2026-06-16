@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { type ConversationInfo } from "../../services/messages";
-import { msgStyles } from "../../lib/feed/localStyles";
+import { msgStyles } from "../../assets/styles/feed/localStyles";
 
 export function DirectMessagesList({ conversations, loading, onSelect }: {
   conversations: ConversationInfo[];

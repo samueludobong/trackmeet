@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { type SpotifyTrackResult } from "../../lib/spotify";
-import { pdStyles } from "../../lib/feed/localStyles";
+import { pdStyles } from "../../assets/styles/feed/localStyles";
 
 export function SpotifyTrackRow({ track, accent }: { track: SpotifyTrackResult; accent: string }) {
   return (

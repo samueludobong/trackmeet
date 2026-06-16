@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
-import { styles } from "../../app/signup.styles";
+import { styles } from "../../assets/styles/app/signup";
 import { STREAMING_SERVICES, DUMMY_ARTISTS } from "../../constants/signup";
 
 export function StreamingGrid({

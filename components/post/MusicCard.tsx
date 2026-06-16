@@ -6,7 +6,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "../../lib/supabase";
 import { openSpotifyLink } from "../../lib/spotify";
 import { isTrackInAnyPlaylist } from "../../services/playlists";
-import { styles } from "../../lib/feed/styles";
+import { styles } from "../../assets/styles/feed/styles";
 import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 import { ActionRow } from "../../components/post/ActionRow";
 import { PostHeader } from "../../components/post/PostHeader";

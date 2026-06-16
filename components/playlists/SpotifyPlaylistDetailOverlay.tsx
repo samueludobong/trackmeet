@@ -5,7 +5,7 @@ import { CachedImage } from "../ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getPlaylistTracks, getValidSpotifyToken, type SpotifyTrackResult, type SpotifyPlaylist } from "../../lib/spotify";
-import { pdStyles } from "../../lib/feed/localStyles";
+import { pdStyles } from "../../assets/styles/feed/localStyles";
 import { SW } from "../../lib/feed/dimensions";
 import { SpotifyTrackRow } from "../../components/playlists/SpotifyTrackRow";
 

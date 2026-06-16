@@ -1,6 +1,6 @@
-import React from "react";
+﻿import React from "react";
 import { Text, TouchableOpacity } from "react-native";
-import { styles } from "../../app/signup.styles";
+import { styles } from "../../assets/styles/app/signup";
 
 /** Landing-screen primary actions: Get Started / I already have an account. */
 export function SignupIdleActions({ switchMode }: any) {

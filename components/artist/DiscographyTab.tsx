@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { openSpotifyLink, type SpotifyArtistInfo, type SpotifyAlbum, type SpotifyAlbumTrack } from "../../lib/spotify";
-import { disc } from "../../app/artistProfile.styles";
+import { disc } from "../../assets/styles/app/artistProfile";
 import { fmtDuration, fmtAlbumMeta, isNewRelease } from "../../lib/artistFormat";
 
 export function DiscographyTab({

@@ -6,7 +6,7 @@ import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { epOverlayStyles } from "../../lib/feed/localStyles";
+import { epOverlayStyles } from "../../assets/styles/feed/localStyles";
 import { type EditFormData } from "../../types/profile";
 import { BannerShape } from "../../components/profile/BannerShape";
 import { PinnedSongOverlay } from "../../components/profile/PinnedSongOverlay";

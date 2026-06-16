@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { type SpotifyTrackResult } from "../../lib/spotify";
-import { ms, mlStyles } from "../../lib/feed/localStyles";
+import { ms, mlStyles } from "../../assets/styles/feed/localStyles";
 
 export function MusicTrackRow({
   track, playing, onPlay,

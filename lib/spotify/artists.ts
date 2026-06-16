@@ -1,4 +1,4 @@
-﻿import * as AuthSession from 'expo-auth-session'
+import * as AuthSession from 'expo-auth-session'
 import * as WebBrowser from 'expo-web-browser'
 import * as Crypto from 'expo-crypto'
 import * as Linking from 'expo-linking'
@@ -155,7 +155,7 @@ export const searchSpotifyAlbums = async (
   } catch { return [] }
 }
 
-// â”€â”€â”€ Spotify playlist writes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Spotify playlist writes ──────────────────────────────────────────────────
 // Require playlist-modify-public + playlist-modify-private scopes (added above).
 // Older user tokens issued before the scopes were added will return 403 / 401
 // here; callers detect that via the `needsReconnect` discriminator and prompt.

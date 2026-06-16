@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { s } from "../../app/userProfile.styles";
+import { s } from "../../assets/styles/app/userProfile";
 import { View, Text, TouchableOpacity, Animated } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";

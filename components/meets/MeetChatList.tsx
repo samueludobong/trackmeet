@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { type MeetMessage } from "../../services/meets";
-import { mcStyles } from "../../lib/feed/localStyles";
+import { mcStyles } from "../../assets/styles/feed/localStyles";
 
 export function MeetChatList({ messages }: { messages: MeetMessage[] }) {
   const scrollRef = useRef<ScrollView>(null);

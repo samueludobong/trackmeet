@@ -4,7 +4,7 @@ import { Animated, Modal } from "react-native";
 import { Audio } from "expo-av";
 import { openSpotifyLink } from "../lib/spotify";
 import { isTrackInAnyPlaylist } from "../services/playlists";
-import { ms } from "../lib/feed/localStyles";
+import { ms } from "../assets/styles/feed/localStyles";
 
 export function useSongPreview({ visible, onClose, song, accessToken, userId }: { visible: boolean; onClose: () => void; song: { id: string; name: string; artist: string; albumArt: string | null } | null; accessToken?: string | null; userId?: string | null }) {
   const backdropAnim = useRef(new Animated.Value(0)).current;
