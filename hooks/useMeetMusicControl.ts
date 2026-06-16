@@ -1,11 +1,10 @@
 import { useRef, useState, useEffect } from "react";
 import { Animated, PanResponder } from "react-native";
-import { useVideoPlayer } from "expo-video";
-import { searchSpotifyTracks, searchSpotifyArtists, searchSpotifyAlbums, getArtistAlbums, getAlbumTracks, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, skipPrevious, skipNext, setPlayback, playTrack, playTracks, fetchSpotifyCanvas, type SpotifyTrackResult, type SpotifyPlaylist, type SpotifyArtistInfo, type SpotifyAlbum, type SpotifyAlbumTrack } from "../lib/spotify";
+import { searchSpotifyTracks, searchSpotifyArtists, searchSpotifyAlbums, getArtistAlbums, getAlbumTracks, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, skipPrevious, skipNext, setPlayback, playTrack, playTracks, type SpotifyTrackResult, type SpotifyPlaylist, type SpotifyArtistInfo, type SpotifyAlbum, type SpotifyAlbumTrack } from "../lib/spotify";
 import { SW, SH } from "../lib/feed/dimensions";
 import { type NowPlayingTrack } from "./useNowPlaying";
 
-/** Spotify browse + playback control + canvas video for the host's live-meet screen. */
+/** Spotify browse + playback control for the host's live-meet screen. */
 export function useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl = true }: {
   visible: boolean; accessToken: string | null; userId: string | null;
   track: NowPlayingTrack | null; liveProgressMs: number;
@@ -17,7 +16,6 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   const musicSlideX = useRef(new Animated.Value(SW)).current;  // slides in from right
 
   // ── Page 1 state ──────────────────────────────────────────────────────────
-  const [canvasUrl,   setCanvasUrl]   = useState<string | null>(null);
   const [ctrlLoading, setCtrlLoading] = useState(false);
   const [pickerOpen,  setPickerOpen]  = useState(false);
 
@@ -47,9 +45,6 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   const [expandedAlbumId,  setExpandedAlbumId]  = useState<string | null>(null);
   const [albumTracks,      setAlbumTracks]      = useState<Record<string, SpotifyAlbumTrack[]>>({});
   const [albumTracksLoad,  setAlbumTracksLoad]  = useState<string | null>(null);
-
-  // Canvas video player — always created at hook level; source swapped when found
-  const player = useVideoPlayer(null, (p) => { p.loop = true; });
 
   // Fetch a guaranteed-valid token whenever the screen opens
   useEffect(() => {
@@ -105,26 +100,11 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
       Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 180 }).start();
     } else {
       Animated.timing(slideAnim, { toValue: SH, useNativeDriver: true, duration: 280 }).start();
-      setCanvasUrl(null);
-      player.pause();
       closeMusicPicker(true);
       setPlaylists([]);
       setApiToken(null);
     }
   }, [visible]);
-
-  // ── Canvas fetch ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!visible || !track?.id || !accessToken) { setCanvasUrl(null); return; }
-    let cancelled = false;
-    fetchSpotifyCanvas(track.id, accessToken).then((url) => {
-      if (cancelled) return;
-      setCanvasUrl(url);
-      if (url) { player.replace(url); player.loop = true; player.play(); }
-      else      { player.pause(); }
-    });
-    return () => { cancelled = true; };
-  }, [track?.id, accessToken, visible]);
 
   // ── Load playlists once apiToken is ready ────────────────────────────────
   useEffect(() => {
@@ -265,7 +245,7 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   const p2Loading    = isSearching ? searchLoading : showTracks ? tracksLoading : playlistsLoading;
   const p2Title      = isSearching ? "Search" : showTracks ? (selectedPlaylist?.name ?? "Playlist") : "Your Music";
 
-  return { slideAnim, musicSlideX, canvasUrl, setCanvasUrl, ctrlLoading, setCtrlLoading, pickerOpen, setPickerOpen, apiToken, setApiToken, playlists, setPlaylists, playlistsLoading, setPlaylistsLoading, selectedPlaylist, setSelectedPlaylist, playlistTracks, setPlaylistTracks, tracksLoading, setTracksLoading, tracksError, setTracksError, searchQuery, setSearchQuery, searchResults, setSearchResults, searchLoading, setSearchLoading, playingId, setPlayingId, player, openMusicPicker, closeMusicPicker, pickerOpenRef, musicPan, selectPlaylist, tok, handlePrev, handleNext, handlePlayPause, handlePlayTrack, fmtMs, progressPct, isSearching, showTracks, p2Loading, p2Title,
+  return { slideAnim, musicSlideX, ctrlLoading, setCtrlLoading, pickerOpen, setPickerOpen, apiToken, setApiToken, playlists, setPlaylists, playlistsLoading, setPlaylistsLoading, selectedPlaylist, setSelectedPlaylist, playlistTracks, setPlaylistTracks, tracksLoading, setTracksLoading, tracksError, setTracksError, searchQuery, setSearchQuery, searchResults, setSearchResults, searchLoading, setSearchLoading, playingId, setPlayingId, openMusicPicker, closeMusicPicker, pickerOpenRef, musicPan, selectPlaylist, tok, handlePrev, handleNext, handlePlayPause, handlePlayTrack, fmtMs, progressPct, isSearching, showTracks, p2Loading, p2Title,
     // Tabs + album/artist browse
     searchType, selectTab, artistResults, albumResults, selectedArtist, selectArtist, clearArtist, artistAlbums, artistAlbumsLoading, expandedAlbumId, albumTracks, albumTracksLoad, toggleAlbum, playAlbum, playAlbumTrack };
 }

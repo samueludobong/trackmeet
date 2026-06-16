@@ -6,7 +6,6 @@ import { useMeetHost } from "../../hooks/useMeetHost";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, PanResponder } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { SW } from "../../lib/feed/dimensions";
-import { VideoView } from "expo-video";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { mlStyles } from "../../lib/feed/localStyles";
@@ -47,7 +46,7 @@ export function MeetLiveScreen({
 
   const music = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl });
   const {
-    slideAnim, musicSlideX, canvasUrl, ctrlLoading, pickerOpen, setPickerOpen, apiToken, player, openMusicPicker, closeMusicPicker, pickerOpenRef,
+    slideAnim, musicSlideX, ctrlLoading, pickerOpen, setPickerOpen, apiToken, openMusicPicker, closeMusicPicker, pickerOpenRef,
     handlePrev, handleNext, handlePlayPause, fmtMs, progressPct,
   } = music;
   apiTokenRef.current = apiToken;
@@ -156,9 +155,7 @@ export function MeetLiveScreen({
     <Modal visible animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? onClose}>
       <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]} {...pagePan.panHandlers}>
 
-        {canvasUrl ? (
-          <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} allowsFullscreen={false} />
-        ) : displayTrack?.albumArt ? (
+        {displayTrack?.albumArt ? (
           <CachedImage source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
