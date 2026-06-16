@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable,
-  TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator, Alert, ScrollView,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Alert, ScrollView } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
 import { DragGrabber } from "../common/DragGrabber";
@@ -123,7 +121,7 @@ export function CreateGroupChatOverlay({
               {selected.map((u) => (
                 <TouchableOpacity key={u.id} style={s.chip} activeOpacity={0.8} onPress={() => toggle(u)}>
                   {u.avatar_url
-                    ? <Image source={{ uri: u.avatar_url }} style={s.chipAvatar} />
+                    ? <CachedImage source={{ uri: u.avatar_url }} style={s.chipAvatar} />
                     : <View style={[s.chipAvatar, s.chipFallback]}><Ionicons name="person" size={11} color={ACCENT} /></View>}
                   <Text style={s.chipText} numberOfLines={1}>{u.display_name || u.username}</Text>
                   <Ionicons name="close" size={13} color="rgba(255,255,255,0.6)" />
@@ -156,7 +154,7 @@ export function CreateGroupChatOverlay({
             {results.map((u) => (
               <TouchableOpacity key={u.id} style={s.resultRow} activeOpacity={0.8} onPress={() => toggle(u)}>
                 {u.avatar_url
-                  ? <Image source={{ uri: u.avatar_url }} style={s.resultAvatar} />
+                  ? <CachedImage source={{ uri: u.avatar_url }} style={s.resultAvatar} />
                   : <View style={[s.resultAvatar, s.chipFallback]}><Ionicons name="person" size={16} color={ACCENT} /></View>}
                 <View style={{ flex: 1 }}>
                   <View style={s.nameRow}>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import type { LiveCommunityMeet } from "../../services/communities";
 
@@ -32,7 +33,7 @@ export function LiveMeetCard({
         <View style={styles.ringWrap}>
           <Animated.View style={[styles.ringPulse, { transform: [{ scale: ringScale }], opacity: ringOpacity }]} />
           {meet.host_avatar ? (
-            <Image source={{ uri: meet.host_avatar }} style={styles.avatar} />
+            <CachedImage source={{ uri: meet.host_avatar }} style={styles.avatar} />
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}>
               <Ionicons name="person" size={22} color="#fff" />

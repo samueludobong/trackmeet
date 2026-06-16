@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { openSpotifyLink, type SpotifyArtistInfo, type SpotifyAlbum, type SpotifyAlbumTrack } from "../../lib/spotify";
 import { disc } from "../../app/artistProfile.styles";
@@ -66,7 +67,7 @@ export function DiscographyTab({
           <View style={disc.featuredCard}>
             <View style={disc.featuredArtWrap}>
               {featured.imageUrl ? (
-                <Image source={{ uri: featured.imageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                <CachedImage source={{ uri: featured.imageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
               ) : (
                 <View style={[StyleSheet.absoluteFill, disc.featuredArtFallback]}>
                   <FontAwesome5 name="compact-disc" size={40} color="rgba(255,255,255,0.12)" />
@@ -113,7 +114,7 @@ export function DiscographyTab({
                     onPress={() => openAlbum(album.id)}
                   >
                     {album.imageUrl ? (
-                      <Image source={{ uri: album.imageUrl }} style={disc.recentArt} resizeMode="cover" />
+                      <CachedImage source={{ uri: album.imageUrl }} style={disc.recentArt} resizeMode="cover" />
                     ) : (
                       <View style={[disc.recentArt, disc.recentArtFallback]}>
                         <FontAwesome5 name="compact-disc" size={22} color="rgba(255,255,255,0.14)" />
@@ -138,7 +139,7 @@ export function DiscographyTab({
               onPress={() => openAlbum(album.id)}
             >
               {album.imageUrl ? (
-                <Image source={{ uri: album.imageUrl }} style={disc.allArt} resizeMode="cover" />
+                <CachedImage source={{ uri: album.imageUrl }} style={disc.allArt} resizeMode="cover" />
               ) : (
                 <View style={[disc.allArt, disc.allArtFallback]}>
                   <FontAwesome5 name="compact-disc" size={16} color="rgba(255,255,255,0.14)" />

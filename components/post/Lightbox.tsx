@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, Image } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Modal } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { Ionicons } from "@expo/vector-icons";
 import { lbStyles } from "../../lib/feed/localStyles";
@@ -53,7 +54,7 @@ export function MediaLightbox({
         >
           {urls.map((url, i) => (
             <View key={i} style={lbStyles.page}>
-              <Image
+              <CachedImage
                 source={{ uri: url }}
                 style={lbStyles.fullImage}
                 resizeMode="contain"

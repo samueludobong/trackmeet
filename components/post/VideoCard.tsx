@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Image, PanResponder, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { PanResponder, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView, type VideoPlayer } from "expo-video";
 import { styles } from "../../lib/feed/styles";
@@ -10,6 +10,8 @@ import { AttachedSongChip } from "./AttachedSongChip";
 import { MediaViewer } from "./MediaViewer";
 import { useFeedAudio, useOpenVideoFeed } from "../../lib/feed/contexts";
 import { videoPositionStore } from "../../lib/feed/videoPositions";
+import { useCachedVideoUri } from "../../hooks/useCachedVideoUri";
+import { CachedImage } from "../ui/CachedImage";
 import { type Post } from "../../app/data/mock";
 
 const fmt = (s: number) => {
@@ -94,7 +96,7 @@ export function VideoCard({ post }: { post: Post }) {
             onAspect={onAspect}
           />
         ) : (
-          <Image source={{ uri: post.albumArt ?? undefined }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+          <CachedImage source={{ uri: post.albumArt ?? undefined }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
         )}
 
         {/* Play overlay — only when not running. */}
@@ -178,9 +180,18 @@ function InlinePreview({
   onProgress: (pos: number, dur: number) => void;
   onAspect: (a: number) => void;
 }) {
-  const player = useVideoPlayer(uri, (p) => {
+  // Play from the on-device cache when available; otherwise stream the remote
+  // url and cache it in the background (once active) for the next view.
+  const playUri = useCachedVideoUri(uri, active);
+  const player = useVideoPlayer(playUri ?? uri, (p) => {
     p.muted = muted;
     p.loop = true;
+    // Mix with other apps so an inline (muted-by-default) feed video doesn't
+    // grab the audio session and pause the song-preview that's playing on a
+    // neighbouring music card as the user scrolls past. Default 'auto' still
+    // claims the session in some cases even when muted — 'mixWithOthers'
+    // never does.
+    p.audioMixingMode = "mixWithOthers";
     // Without this, the "timeUpdate" event never fires and the counter / scrub
     // bar are frozen. 0.25s is a good balance of smoothness vs. work.
     p.timeUpdateEventInterval = 0.25;

@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { isSpotifyPlaylistShown, setSpotifyPlaylistShown } from "../../services/playlists";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, Modal, PanResponder, Image, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, Modal, PanResponder, ActivityIndicator } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getPlaylistTracks, getValidSpotifyToken, type SpotifyTrackResult, type SpotifyPlaylist } from "../../lib/spotify";
@@ -85,12 +86,12 @@ export function SpotifyPlaylistDetailOverlay({
               <View style={[pdStyles.hero, { minHeight: 340 + insets.top }]}>
                 {/* Full-bleed background: cover image or mosaic of album arts */}
                 {playlist.imageUrl ? (
-                  <Image source={{ uri: playlist.imageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  <CachedImage source={{ uri: playlist.imageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                 ) : tracks.length > 0 ? (
                   <View style={[StyleSheet.absoluteFill, { flexDirection: 'row', flexWrap: 'wrap' }]}>
                     {tracks.slice(0, 4).map((t, i) =>
                       t.albumArt
-                        ? <Image key={t.id} source={{ uri: t.albumArt }} style={{ width: '50%', height: '50%' }} resizeMode="cover" />
+                        ? <CachedImage key={t.id} source={{ uri: t.albumArt }} style={{ width: '50%', height: '50%' }} resizeMode="cover" />
                         : <View key={t.id} style={{ width: '50%', height: '50%', backgroundColor: ACCENT + (i % 2 === 0 ? '55' : '33') }} />
                     )}
                   </View>

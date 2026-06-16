@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Image, TouchableOpacity } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { styles } from "../../lib/feed/styles";
 import { useNowPlayingCtx } from "../../lib/feed/contexts";
@@ -31,7 +32,7 @@ export function NowPlayingBanner({
     <View style={styles.nowPlayingBar}>
       {/* Album art or fallback swatch */}
       {track.albumArt ? (
-        <Image source={{ uri: track.albumArt }} style={[styles.nowPlayingBarSwatch, { borderWidth: 0 }]} />
+        <CachedImage source={{ uri: track.albumArt }} style={[styles.nowPlayingBarSwatch, { borderWidth: 0 }]} />
       ) : (
         <View style={[styles.nowPlayingBarSwatch, { backgroundColor: COLOR + "33", borderColor: COLOR + "55" }]}>
           <Ionicons name="musical-note" size={13} color={COLOR} />

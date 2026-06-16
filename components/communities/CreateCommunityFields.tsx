@@ -1,5 +1,6 @@
 import React from "react";
-import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { MUSIC_GENRES } from "../../services/communities";
 
@@ -84,7 +85,7 @@ export function BannerPicker({
     <View>
       <TouchableOpacity style={styles.bannerWrap} onPress={onPickImage} activeOpacity={0.85}>
         {bannerUri ? (
-          <Image source={{ uri: bannerUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <CachedImage source={{ uri: bannerUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: bannerColor ?? COLOR_CHOICES[0] }]} />
         )}

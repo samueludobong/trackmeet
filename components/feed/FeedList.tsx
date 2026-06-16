@@ -9,6 +9,14 @@ import { FeedAudioCtx, OpenVideoFeedCtx } from "../../lib/feed/contexts";
 import { useFeedPreviewPlayer } from "../../hooks/useFeedPreviewPlayer";
 import { useUserSettings } from "../../hooks/useUserSettings";
 import { VideoFeedViewer } from "../post/VideoFeedViewer";
+import { NowPlayingStrip } from "./NowPlayingStrip";
+import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
+
+// A virtual feed row that renders the now-playing strip; lets us mix it with
+// posts in the FlatList data so we can set its index in stickyHeaderIndices.
+type StripRow = { __strip: true };
+type FeedRow = Post | StripRow;
+const isStripRow = (r: FeedRow): r is StripRow => "__strip" in r;
 
 // Viewability — a card has to be majority-visible before we treat it as active.
 const VIEWABILITY = { itemVisiblePercentThreshold: 60, minimumViewTime: 150 };
@@ -21,6 +29,7 @@ export function FeedList({
   setQuickReplyPost, setFeedScrollEnabled, setDetailPost,
   focused = true,
   userId = null,
+  onShareSongAsPost,
 }: {
   feedPosts: Post[];
   feedScrollEnabled: boolean;
@@ -34,6 +43,9 @@ export function FeedList({
   focused?: boolean;
   /** Current user id — used to load the mute-on-start preference. */
   userId?: string | null;
+  /** Opens the feed's PostComposerSheet with the now-playing track pre-attached.
+   *  Wired by app/feed.tsx and forwarded to the sticky NowPlayingStrip. */
+  onShareSongAsPost?: (track: NowPlayingTrack) => void;
 }) {
   const { settings, loading: settingsLoading } = useUserSettings(userId);
 
@@ -95,24 +107,33 @@ export function FeedList({
   useEffect(() => { setActiveRef.current = setActive; }, [setActive]);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    // Skip the strip pseudo-row; only real posts drive preview audio activation.
     const top = viewableItems
-      .filter((v) => v.isViewable && v.item)
+      .filter((v) => v.isViewable && v.item && !(v.item as FeedRow as any).__strip)
       .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))[0];
     if (!top) { setActiveRef.current(null); setActiveIndex(null); return; }
     const post = top.item as Post;
-    setActiveIndex(top.index ?? null);
+    // FlatList indices include the strip row at 0, so subtract 1 to get the
+    // index into feedPosts (used by preloadIds).
+    setActiveIndex((top.index ?? 1) - 1);
     setActiveRef.current({ postId: post.id, previewUrl: post.previewUrl ?? null });
   }).current;
 
   const toggleMuted = useCallback(() => setMuted((m) => !m), []);
   const toggleVideosMuted = useCallback(() => setVideosMuted((m) => !m), []);
 
+  // The strip lives at FlatList index 1 (right after the ListHeaderComponent's
+  // navbar+stories block) and is marked as a sticky header — so navbar+stories
+  // scroll away normally and the strip pins to the top, at full height, once
+  // the user scrolls past it.
+  const feedRows: FeedRow[] = useMemo(() => [{ __strip: true }, ...feedPosts], [feedPosts]);
+
   return (
     <FeedAudioCtx.Provider value={{ muted, toggleMuted, videosMuted, toggleVideosMuted, activePostId: exposedActiveId }}>
      <OpenVideoFeedCtx.Provider value={setVideoViewerId}>
       <FlatList
-        data={feedPosts}
-        keyExtractor={(item) => item.id}
+        data={feedRows}
+        keyExtractor={(item) => (isStripRow(item) ? "__strip" : item.id)}
         contentContainerStyle={styles.feedContent}
         showsVerticalScrollIndicator={false}
         scrollEnabled={feedScrollEnabled}
@@ -120,6 +141,10 @@ export function FeedList({
         refreshControl={<RefreshControl refreshing={feedRefreshing} onRefresh={onFeedRefresh} tintColor="#AB00FF" />}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={VIEWABILITY}
+        // Sticky header index 1 = the strip row (index 0 is ListHeaderComponent,
+        // which scrolls away normally; data rows are 1+). Once the user scrolls
+        // past the strip's natural position, FlatList pins it to the top.
+        stickyHeaderIndices={[1]}
         ListHeaderComponent={
           <>
             <View style={styles.navbar}>
@@ -133,9 +158,12 @@ export function FeedList({
             <View style={styles.stripDivider} />
           </>
         }
-        renderItem={({ item }) => (
-          <SwipeablePost item={item} onQuickReply={setQuickReplyPost} onScrollLock={setFeedScrollEnabled} onPress={() => setDetailPost(item)} />
-        )}
+        renderItem={({ item }) => {
+          if (isStripRow(item)) return <NowPlayingStrip onShareAsPost={onShareSongAsPost} />;
+          return (
+            <SwipeablePost item={item} onQuickReply={setQuickReplyPost} onScrollLock={setFeedScrollEnabled} onPress={() => setDetailPost(item)} />
+          );
+        }}
         ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
       />
 

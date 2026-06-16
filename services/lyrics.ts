@@ -146,6 +146,12 @@ async function fetchFromLrclib(opts: {
 // round-trip) when the lyrics overlay opens. Negative results are intentionally
 // NOT cached — every miss re-checks lrclib in case lyrics were uploaded later.
 const _mem = new Map<string, LyricsResult>();
+// Session-lifetime negatives: a track we've already looked up and found no
+// lyrics for. The DB cache intentionally doesn't memoize negatives (so a song
+// without lyrics yesterday can be re-checked when lrclib gains them), but
+// re-fetching on every overlay open within the same session is wasteful — this
+// set lets the prefetch + overlay short-circuit to "no lyrics" instantly.
+const _negMem = new Set<string>();
 // In-flight lookups keyed by track id, so a prefetch and an overlay-open for the
 // same song share one request instead of racing.
 const _inflight = new Map<string, Promise<LyricsResult | null>>();
@@ -213,6 +219,16 @@ export function peekLyrics(trackId: string | null | undefined): LyricsResult | n
   return _mem.get(trackId) ?? null;
 }
 
+/**
+ * Has the in-memory cache been warmed for this track this session — either with
+ * lyrics (positive) or a known "no lyrics" answer (negative)? Lets the now-playing
+ * card defer rendering until opening the overlay won't show a loading flash.
+ */
+export function isLyricsResolved(trackId: string | null | undefined): boolean {
+  if (!trackId) return false;
+  return _mem.has(trackId) || _negMem.has(trackId);
+}
+
 // ── Supabase cache ──────────────────────────────────────────────────────────
 // Positive results only. Rows previously written with not_found=true are
 // treated as a cache miss so we re-check lrclib (a song with no lyrics yesterday
@@ -264,11 +280,13 @@ export async function getLyricsForTrack(opts: {
   const { trackId, trackName, artistName, durationMs } = opts;
   if (!trackName) return null;
 
-  // 1) In-memory cache — instant. Only positive results live here; misses are
-  //    intentionally not memoized so the next call re-checks lrclib.
+  // 1) In-memory caches — instant. Positives live in `_mem`; negatives we've
+  //    already resolved this session live in `_negMem` so we don't re-hit
+  //    Supabase + lrclib on every overlay open for a known-no-lyrics song.
   if (trackId) {
     const mem = _mem.get(trackId);
     if (mem !== undefined) return mem;
+    if (_negMem.has(trackId)) return null;
     // Share an in-flight lookup instead of starting a duplicate, slower request.
     const existing = _inflight.get(trackId);
     if (existing) return existing;
@@ -286,9 +304,13 @@ export async function getLyricsForTrack(opts: {
     //    (lyrics get added to lrclib over time).
     const raw = await fetchFromLrclib({ trackName, artistName, durationMs });
     const result = toResult(raw);
-    if (trackId && result && raw) {
-      _mem.set(trackId, result);
-      writeCache(trackId, trackName, artistName ?? null, raw).catch(() => {});
+    if (trackId) {
+      if (result && raw) {
+        _mem.set(trackId, result);
+        writeCache(trackId, trackName, artistName ?? null, raw).catch(() => {});
+      } else {
+        _negMem.add(trackId);
+      }
     }
     return result;
   })();

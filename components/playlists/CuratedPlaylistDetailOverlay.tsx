@@ -8,10 +8,8 @@ import {
   reorderCuratedPlaylistSongs,
 } from "../../services/playlists";
 import { openSpotifyLink, playTracks, getValidSpotifyToken, setPlayback } from "../../lib/spotify";
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal,
-  Image, ActivityIndicator, Alert, PanResponder, Easing,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, ActivityIndicator, Alert, PanResponder, Easing } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -162,12 +160,12 @@ export function CuratedPlaylistDetailOverlay({
           {/* ── Full-bleed hero ── */}
           <View style={[styles.hero, { paddingTop: insets.top }]}>
             {playlist.image_url ? (
-              <Image source={{ uri: playlist.image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              <CachedImage source={{ uri: playlist.image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
             ) : songs.length > 0 ? (
               <View style={[StyleSheet.absoluteFill, { flexDirection: "row", flexWrap: "wrap" }]}>
                 {songs.slice(0, 4).map((s, i) =>
                   s.album_art ? (
-                    <Image key={s.id} source={{ uri: s.album_art }} style={styles.mosaicCell} resizeMode="cover" />
+                    <CachedImage key={s.id} source={{ uri: s.album_art }} style={styles.mosaicCell} resizeMode="cover" />
                   ) : (
                     <View key={s.id} style={[styles.mosaicCell, { backgroundColor: i % 2 ? "#2a2a2a" : "#1a1a1a" }]} />
                   )
@@ -547,7 +545,7 @@ function SongRow({
       </View>
       <View style={styles.artWrap}>
         {song.album_art ? (
-          <Image source={{ uri: song.album_art }} style={styles.songArt} />
+          <CachedImage source={{ uri: song.album_art }} style={styles.songArt} />
         ) : (
           <View style={[styles.songArt, styles.songArtFallback]}>
             <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />

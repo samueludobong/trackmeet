@@ -1,9 +1,10 @@
 import React, { useRef, useState, useEffect } from "react";
 import { toggleCommentLike } from "../../services/posts";
-import { View, Text, TouchableOpacity, Animated, PanResponder, Image } from "react-native";
+import { View, Text, TouchableOpacity, Animated, PanResponder } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { openSpotifyLink } from "../../lib/spotify";
 import { styles } from "../../lib/feed/styles";
+import { CachedImage } from "../ui/CachedImage";
 import { type Comment } from "../../lib/feed/helpers";
 
 export function CommentRow({
@@ -79,7 +80,7 @@ export function CommentRow({
       <Animated.View style={[styles.commentRow, { transform: [{ translateX }] }]}>
         {/* Avatar */}
         {comment.avatarUrl ? (
-          <Image source={{ uri: comment.avatarUrl }} style={styles.commentAvatar} />
+          <CachedImage source={{ uri: comment.avatarUrl }} style={styles.commentAvatar} recyclingKey={comment.avatarUrl} />
         ) : (
           <View style={[styles.commentAvatar, { backgroundColor: "#AB00FF22", borderColor: "#AB00FF44" }]}>
             <Text style={[styles.commentAvatarText, { color: "#AB00FF" }]}>{initials}</Text>
@@ -104,7 +105,7 @@ export function CommentRow({
               }
             >
               {comment.songAlbumArt ? (
-                <Image source={{ uri: comment.songAlbumArt }} style={styles.commentSongArt} />
+                <CachedImage source={{ uri: comment.songAlbumArt }} style={styles.commentSongArt} />
               ) : (
                 <View style={[styles.commentSongArt, styles.commentSongArtFallback]}>
                   <FontAwesome5 name="music" size={9} color="rgba(255,255,255,0.3)" />

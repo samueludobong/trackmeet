@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { View, Text, StyleSheet, Switch, TouchableOpacity, Animated, Modal, Pressable, ActivityIndicator } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
@@ -6,6 +6,7 @@ import { settingsOverlayStyles } from "../../lib/feed/localStyles";
 import { type UserProfile } from "../../app/data/mock";
 
 import { useSettingsOverlay } from "../../hooks/useSettingsOverlay";
+import { clearMediaCache } from "../../services/mediaCache";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
 import { DragGrabber } from "../common/DragGrabber";
 
@@ -30,6 +31,18 @@ export function SettingsOverlay({
   const draggedBackdropOpacity = slideAnim.interpolate({
     inputRange: [0, 400], outputRange: [1, 0], extrapolate: "clamp",
   });
+
+  // Clear the on-device media cache (cached videos + expo-image disk/memory).
+  const [clearingCache, setClearingCache] = useState(false);
+  const [cacheCleared, setCacheCleared] = useState(false);
+  const handleClearCache = async () => {
+    if (clearingCache) return;
+    setClearingCache(true);
+    await clearMediaCache();
+    setClearingCache(false);
+    setCacheCleared(true);
+    setTimeout(() => setCacheCleared(false), 2000);
+  };
 
   return (
     <Modal transparent animationType="none" statusBarTranslucent onRequestClose={screen === 'main' ? close : goBack}>
@@ -224,6 +237,30 @@ export function SettingsOverlay({
                   thumbColor="#fff"
                 />
               </View>
+
+              <TouchableOpacity
+                style={settingsOverlayStyles.prefRow}
+                activeOpacity={0.8}
+                onPress={handleClearCache}
+                disabled={clearingCache}
+              >
+                <View style={settingsOverlayStyles.prefIconWrap}>
+                  <Ionicons name="trash-outline" size={20} color="#AB00FF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={settingsOverlayStyles.prefLabel}>Clear Media Cache</Text>
+                  <Text style={settingsOverlayStyles.prefSub}>
+                    Frees up space; images and videos re-download when next viewed
+                  </Text>
+                </View>
+                {clearingCache ? (
+                  <ActivityIndicator size="small" color="#AB00FF" />
+                ) : cacheCleared ? (
+                  <Ionicons name="checkmark-circle" size={20} color="#1DB954" />
+                ) : (
+                  <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
+                )}
+              </TouchableOpacity>
             </Animated.View>
           )}
 

@@ -1,4 +1,5 @@
-import { View, Text, Modal, Pressable, TouchableOpacity, TextInput, Image, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform, Keyboard } from "react-native";
+import { View, Text, Modal, Pressable, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform, Keyboard } from "react-native";
+import { CachedImage } from "./ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { type PlaylistTrackInput } from "../services/playlists";
 
@@ -47,7 +48,7 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
             {single && (
               <View style={s.trackRow}>
                 {single.albumArt
-                  ? <Image source={{ uri: single.albumArt }} style={s.trackArt} />
+                  ? <CachedImage source={{ uri: single.albumArt }} style={s.trackArt} />
                   : <View style={[s.trackArt, s.trackArtFallback]}>
                       <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
                     </View>}
@@ -171,7 +172,7 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
                           <Ionicons name="heart" size={18} color="#1DB954" />
                         </View>
                       ) : pl.image_url ? (
-                        <Image source={{ uri: pl.image_url }} style={s.cover} />
+                        <CachedImage source={{ uri: pl.image_url }} style={s.cover} />
                       ) : (
                         <View style={[s.cover, s.coverFallback]}>
                           <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />

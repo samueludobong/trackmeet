@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, ScrollView, TouchableOpacity, Image } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { ds } from "../../lib/feed/localStyles";
 import { AVATAR_MAP } from "../../app/data/mock";
 
@@ -24,7 +25,7 @@ export function TrendingArtistsRow({
             <View key={a.id} style={ds.artistCard}>
               <View style={[ds.artistAvatarRing, { borderColor: a.color }]}>
                 {photo ? (
-                  <Image source={photo} style={ds.artistAvatar} />
+                  <CachedImage source={photo} style={ds.artistAvatar} />
                 ) : (
                   <View style={[ds.artistAvatar, { backgroundColor: a.color + "25", alignItems: "center", justifyContent: "center" }]}>
                     <Text style={[ds.artistInitials, { color: a.color }]}>{a.initials}</Text>

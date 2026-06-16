@@ -1,7 +1,9 @@
-import React from "react";
-import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useContext } from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { openSpotifyLink } from "../../lib/spotify";
+import { NowPlayingCtx } from "../../lib/feed/contexts";
 
 /** Compact song chip appended to non-music posts that have a song attached. */
 export function AttachedSongChip({
@@ -13,6 +15,11 @@ export function AttachedSongChip({
   albumArt: string | null | undefined;
 }) {
   if (!songName) return null;
+  // If a Spotify device is already playing, tapping will swap the song in place
+  // (via openSpotifyLink) — switch the trailing icon to a play triangle to hint
+  // at that, otherwise show the Spotify mark (signals "opens Spotify").
+  const np = useContext(NowPlayingCtx);
+  const spotifyDevicePlaying = !!np?.track?.isPlaying;
   const open = () => {
     if (!songId) return;
     openSpotifyLink(`spotify:track:${songId}`, `https://open.spotify.com/track/${songId}`);
@@ -20,7 +27,7 @@ export function AttachedSongChip({
   return (
     <TouchableOpacity style={styles.chip} activeOpacity={0.85} onPress={open}>
       {albumArt ? (
-        <Image source={{ uri: albumArt }} style={styles.art} />
+        <CachedImage source={{ uri: albumArt }} style={styles.art} />
       ) : (
         <View style={[styles.art, styles.artFallback]}>
           <Ionicons name="musical-note" size={14} color="#1DB954" />
@@ -31,7 +38,11 @@ export function AttachedSongChip({
         {songArtist && <Text style={styles.artist} numberOfLines={1}>{songArtist}</Text>}
       </View>
       <View style={styles.openBtn}>
-        <FontAwesome5 name="spotify" size={14} color="#1DB954" />
+        {spotifyDevicePlaying ? (
+          <Ionicons name="play" size={14} color="#1DB954" />
+        ) : (
+          <FontAwesome5 name="spotify" size={14} color="#1DB954" />
+        )}
       </View>
     </TouchableOpacity>
   );

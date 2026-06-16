@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, Image, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, ActivityIndicator, Alert } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { styles } from "../../lib/feed/styles";
 import { type PinnedSong } from "../../types/music";
@@ -9,7 +10,7 @@ import { useSlideInPanel } from "../../hooks/useSlideInPanel";
 import { addPostComment } from "../../services/posts";
 import { PostCard } from "../../components/post/PostCard";
 import { ThreadedCommentRow } from "../../components/post/CommentRow";
-import { PinnedSongOverlay } from "../../components/profile/PinnedSongOverlay";
+import { CommentSongPicker } from "../../components/post/CommentSongPicker";
 import { type Post } from "../../app/data/mock";
 
 export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void }) {
@@ -93,7 +94,7 @@ export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () =
         {selectedSong && (
           <View style={styles.detailSongCard}>
             {selectedSong.albumArt ? (
-              <Image source={{ uri: selectedSong.albumArt }} style={styles.detailSongArt} />
+              <CachedImage source={{ uri: selectedSong.albumArt }} style={styles.detailSongArt} />
             ) : (
               <View style={[styles.detailSongArt, styles.detailSongArtFallback]}>
                 <FontAwesome5 name="music" size={9} color="rgba(255,255,255,0.3)" />
@@ -133,13 +134,11 @@ export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () =
         </View>
       </Animated.View>
 
-      <PinnedSongOverlay
+      <CommentSongPicker
         visible={songPickerVisible}
         onClose={() => setSongPickerVisible(false)}
         onSelect={(song) => { setSelectedSong(song); setSongPickerVisible(false); }}
         accessToken={spotifyToken}
-        ctaLabel="Attach to Reply"
-        ctaIcon="music"
       />
     </Animated.View>
   );

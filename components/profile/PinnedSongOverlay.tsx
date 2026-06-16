@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Image, ActivityIndicator, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { type SpotifyTrackResult } from "../../lib/spotify";
 import { psStyles, epOverlayStyles } from "../../lib/feed/localStyles";
@@ -36,7 +37,7 @@ export function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, cta
       onPress={() => setStep({ type: "preview", song: { id: item.id, name: item.name, artist: item.artist, albumArt: item.albumArt, previewUrl: item.previewUrl }, from: step as BaseStep })}
     >
       {item.albumArt ? (
-        <Image source={{ uri: item.albumArt }} style={epOverlayStyles.resultArt} />
+        <CachedImage source={{ uri: item.albumArt }} style={epOverlayStyles.resultArt} />
       ) : (
         <View style={[epOverlayStyles.resultArt, epOverlayStyles.resultArtFallback]}>
           <FontAwesome5 name="music" size={12} color="rgba(255,255,255,0.3)" />
@@ -90,7 +91,7 @@ export function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, cta
                 onPress={() => setStep({ type: "preview", song: nowPlaying, from: "home" })}
               >
                 {nowPlaying.albumArt ? (
-                  <Image source={{ uri: nowPlaying.albumArt }} style={psStyles.npArt} />
+                  <CachedImage source={{ uri: nowPlaying.albumArt }} style={psStyles.npArt} />
                 ) : (
                   <View style={[psStyles.npArt, psStyles.npArtFallback]}>
                     <FontAwesome5 name="music" size={18} color="rgba(255,255,255,0.25)" />
@@ -167,7 +168,7 @@ export function PinnedSongOverlay({ visible, onClose, onSelect, accessToken, cta
                     <FontAwesome5 name="heart" size={18} color="#1DB954" />
                   </View>
                 ) : pl.imageUrl ? (
-                  <Image source={{ uri: pl.imageUrl }} style={psStyles.plArt} />
+                  <CachedImage source={{ uri: pl.imageUrl }} style={psStyles.plArt} />
                 ) : (
                   <View style={[psStyles.plArt, psStyles.plArtFallback]}>
                     <FontAwesome5 name="music" size={16} color="rgba(255,255,255,0.2)" />

@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable, TextInput,
-  Platform, Image, KeyboardAvoidingView, ActivityIndicator, Alert, Switch, Keyboard,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Alert, Switch, Keyboard } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { cpStyles } from "../../lib/feed/localStyles";
@@ -123,7 +121,7 @@ export function CreateCommunityDialog({
 
               <TouchableOpacity style={cpStyles.imagePicker} onPress={pickAvatar} activeOpacity={0.85}>
                 {avatarUri ? (
-                  <Image source={{ uri: avatarUri }} style={{ width: 90, height: 90, borderRadius: 18 }} resizeMode="cover" />
+                  <CachedImage source={{ uri: avatarUri }} style={{ width: 90, height: 90, borderRadius: 18 }} resizeMode="cover" />
                 ) : (
                   <>
                     <Ionicons name="people-outline" size={26} color="rgba(255,255,255,0.35)" />

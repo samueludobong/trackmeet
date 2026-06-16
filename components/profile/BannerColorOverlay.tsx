@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useSheetAnimation } from "../../hooks/useSheetAnimation";
 import { uploadImageToStorage } from "../../services/storage";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, Image, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, ActivityIndicator, Alert } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { bcOverlayStyles, bsOverlayStyles } from "../../lib/feed/localStyles";
@@ -85,7 +86,7 @@ export function BannerColorOverlay({ visible, onClose, selectedColor, bannerImag
               <ActivityIndicator color="#FF6C1A" />
             ) : bannerImageUrl ? (
               <>
-                <Image source={{ uri: bannerImageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                <CachedImage source={{ uri: bannerImageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                 <View style={bcOverlayStyles.imageOverlay}>
                   <FontAwesome5 name="camera" size={18} color="#fff" />
                   <Text style={bcOverlayStyles.imageBoxText}>Change Image</Text>

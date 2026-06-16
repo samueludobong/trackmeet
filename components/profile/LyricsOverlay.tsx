@@ -1,13 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView,
-  ActivityIndicator, Dimensions, Pressable,
-} from "react-native";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Dimensions, Pressable, PanResponder, Animated } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { getLyricsForTrack, peekLyrics, claimFirstDiscovery, hasCelebrated, markCelebrated, type LyricsResult } from "../../services/lyrics";
+import { getLyricsForTrack, peekLyrics, isLyricsResolved, claimFirstDiscovery, hasCelebrated, markCelebrated, type LyricsResult } from "../../services/lyrics";
 import { useArtAccent } from "../../hooks/albumColors";
 import { Confetti } from "./Confetti";
 import { CelebrationBanner, DiscoveryLoader } from "./LyricsCelebration";
@@ -73,6 +71,8 @@ export function LyricsOverlay({
   const [pressedIdx, setPressedIdx] = useState<number | null>(null);
   const [introProgress, setIntroProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
+  // Live playback position (ms) driving the owner seek bar.
+  const [posMs, setPosMs] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   // First-discovery celebration: a banner ("first" → "saved") + a confetti burst.
   const [banner, setBanner] = useState<null | "first" | "saved">(null);
@@ -173,8 +173,10 @@ export function LyricsOverlay({
 
   // ── Resolve lyrics + run the discovery celebration ──────────────────────────
   // Re-runs on every track change (not just first open), so skipping to a new
-  // song while the overlay is live celebrates that song too.
-  useEffect(() => {
+  // song while the overlay is live celebrates that song too. useLayoutEffect (not
+  // useEffect) so the synchronous cache peek / loading state is applied BEFORE the
+  // first paint — otherwise the leftover empty state flashes for a frame on open.
+  useLayoutEffect(() => {
     if (!visible || !track.name) return;
     setActiveIdx(-1);
     lineY.current = [];
@@ -184,13 +186,20 @@ export function LyricsOverlay({
     const tid = track.id;
     let active = true;
 
-    // Show the lyrics state synchronously up front so we never flash the empty
-    // ("Huhh…") state during an in-flight DB read. We only cache positive
-    // results now — a miss falls through to the async fetch below.
+    // Resolve from the in-memory cache up front so the very first render after
+    // open already has the right state — no loader/empty flash. Three cases:
+    //   • positive memo  → show lyrics
+    //   • negative memo  → show empty state (synchronously, no async dip)
+    //   • unresolved     → loader while we go fetch
     const peeked = tid ? peekLyrics(tid) : null;
+    const resolved = tid ? isLyricsResolved(tid) : false;
     if (peeked) {
       setLyrics(peeked);
       setFailed(false);
+      setLoading(false);
+    } else if (resolved) {
+      setLyrics(null);
+      setFailed(true);
       setLoading(false);
     } else {
       setLyrics(null);
@@ -248,7 +257,11 @@ export function LyricsOverlay({
   // "…" instead of dead space at the top.
   // Lyrics actually shown = the translated copy when a target language is active,
   // otherwise the original. Timestamps are identical either way.
-  const shown = translated ?? lyrics;
+  // Fall back to the synchronous in-memory peek so the very first render after
+  // the overlay becomes visible already has lyrics — the state update from the
+  // layout effect lands a render later, which is what was producing the flash.
+  const peekedNow = track.id ? peekLyrics(track.id) : null;
+  const shown = translated ?? lyrics ?? peekedNow;
   const displayLines = useMemo(() => {
     const s = shown?.synced;
     if (!s?.length) return null;
@@ -323,6 +336,17 @@ export function LyricsOverlay({
     return () => clearInterval(id);
   }, [visible, displayLines, firstLyricMs, track.durationMs]);
 
+  // ── Owner: drive the seek-bar position from the live playback anchor ────────
+  // Independent of the lyric-highlight tick above (which only runs for synced
+  // lyrics) so the scrubber still tracks for plain / missing lyrics.
+  useEffect(() => {
+    if (!visible || !isOwner) return;
+    const tick = () => setPosMs(currentMs());
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [visible, isOwner]);
+
   // ── Auto-scroll the active synced line into the vertical center ─────────────
   useEffect(() => {
     if (activeIdx < 0 || !displayLines) return;
@@ -353,6 +377,7 @@ export function LyricsOverlay({
   const handleSeek = async (ms: number) => {
     if (!isOwner || !accessToken) return;
     posRef.current = { progressMs: ms, atMs: Date.now(), isPlaying };
+    setPosMs(ms); // reflect immediately so the bar doesn't snap back before the next poll
     await seekPlayback(accessToken, ms);
     setTimeout(() => pollRef.current(), 400);
   };
@@ -363,7 +388,18 @@ export function LyricsOverlay({
   };
 
   const renderLyrics = () => {
-    if (loading) {
+    // Read straight from the in-memory cache so the very first render after
+    // `visible` flips true is already correct — otherwise the layout effect's
+    // setState would only land on the *next* render and a loader frame flashes.
+    const tid = track.id;
+    const peeked = tid ? peekLyrics(tid) : null;
+    const resolvedNow = tid ? isLyricsResolved(tid) : false;
+    const effectiveLyrics = lyrics ?? peeked;
+    const effectiveFailed = failed || (resolvedNow && !effectiveLyrics);
+
+    // Loader only when we genuinely have no answer yet (unresolved + nothing in
+    // memory). Resolved-but-empty (`_negMem`) drops straight to the empty state.
+    if (!effectiveLyrics && !effectiveFailed) {
       // Fresh discovery → build anticipation with the sparkle loader.
       return banner === "first" ? (
         <DiscoveryLoader accent={accent} />
@@ -373,7 +409,7 @@ export function LyricsOverlay({
         </View>
       );
     }
-    if (failed || !lyrics) {
+    if (effectiveFailed || !effectiveLyrics) {
       return (
         <View style={styles.centerFill}>
           <Text style={styles.emptyText}>Huhh we dont know the lyrics to this one</Text>
@@ -430,10 +466,12 @@ export function LyricsOverlay({
       );
     }
 
-    // Plain — manual scroll, no highlight.
+    // Plain — manual scroll, no highlight. Use the effective lyrics here too so
+    // the first render after open never reads from a null `lyrics` state.
+    const plain = shown?.plain ?? effectiveLyrics?.plain ?? "";
     return (
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 36 }}>
-        {(shown?.plain ?? lyrics.plain!).split("\n").map((line, i) => (
+        {plain.split("\n").map((line, i) => (
           <Text key={i} style={[styles.lyricLine, styles.lyricPlain]}>{line || " "}</Text>
         ))}
       </ScrollView>
@@ -447,7 +485,7 @@ export function LyricsOverlay({
         <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
           <View style={styles.chip}>
             {track.albumArt ? (
-              <Image source={{ uri: track.albumArt }} style={styles.chipArt} />
+              <CachedImage source={{ uri: track.albumArt }} style={styles.chipArt} />
             ) : (
               <View style={[styles.chipArt, styles.chipArtFallback]}>
                 <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.7)" />
@@ -504,20 +542,27 @@ export function LyricsOverlay({
 
         {/* ── Controls (black area, bottom) ── */}
         {isOwner ? (
-          <View style={[styles.controls, { paddingBottom: insets.bottom + 18 }]}>
-            <Pressable style={styles.ctrlSquare} onPress={() => setPickerOpen(true)}>
-              <Ionicons name="bookmark-outline" size={20} color="#F5C518" />
-            </Pressable>
-            <View style={styles.ctrlGroup}>
-              <Pressable style={styles.ctrlSquare} onPress={handlePrev}>
-                <Ionicons name="play-skip-back" size={20} color="#fff" />
+          <View style={{ paddingBottom: insets.bottom + 18 }}>
+            <LyricsSeekBar
+              positionMs={posMs}
+              durationMs={track.durationMs ?? 0}
+              onSeek={handleSeek}
+            />
+            <View style={styles.controls}>
+              <Pressable style={styles.ctrlSquare} onPress={() => setPickerOpen(true)}>
+                <Ionicons name="bookmark-outline" size={20} color="#F5C518" />
               </Pressable>
-              <Pressable style={[styles.ctrlSquare, { backgroundColor: accent[0], borderColor: accent[0] }]} onPress={handlePlayPause}>
-                <Ionicons name={isPlaying ? "pause" : "play"} size={22} color="#fff" />
-              </Pressable>
-              <Pressable style={styles.ctrlSquare} onPress={handleNext}>
-                <Ionicons name="play-skip-forward" size={20} color="#fff" />
-              </Pressable>
+              <View style={styles.ctrlGroup}>
+                <Pressable style={styles.ctrlSquare} onPress={handlePrev}>
+                  <Ionicons name="play-skip-back" size={20} color="#fff" />
+                </Pressable>
+                <Pressable style={[styles.ctrlSquare, { backgroundColor: accent[0], borderColor: accent[0] }]} onPress={handlePlayPause}>
+                  <Ionicons name={isPlaying ? "pause" : "play"} size={22} color="#fff" />
+                </Pressable>
+                <Pressable style={styles.ctrlSquare} onPress={handleNext}>
+                  <Ionicons name="play-skip-forward" size={20} color="#fff" />
+                </Pressable>
+              </View>
             </View>
           </View>
         ) : (
@@ -586,6 +631,87 @@ export function LyricsOverlay({
     </Modal>
   );
 }
+
+/**
+ * Apple-Music-style owner scrubber: a thin translucent capsule (no thumb) that
+ * thickens while you press, with the played portion brighter. Drag anywhere to
+ * seek; the drag value takes precedence over the live `positionMs` while held so
+ * the bar follows the finger without the 500ms poll fighting it, then commits
+ * via `onSeek` on release. Refs hold the live duration / handler so the
+ * once-created PanResponder never goes stale.
+ */
+function LyricsSeekBar({
+  positionMs, durationMs, onSeek,
+}: {
+  positionMs: number;
+  durationMs: number;
+  onSeek: (ms: number) => void;
+}) {
+  const trackWRef = useRef(0);
+  const durRef = useRef(durationMs); durRef.current = durationMs;
+  const onSeekRef = useRef(onSeek); onSeekRef.current = onSeek;
+  const [dragMs, setDragMs] = useState<number | null>(null);
+  // 0 = idle (thin), 1 = pressed (thicker) — the Apple-Music grow-on-touch feel.
+  const grow = useRef(new Animated.Value(0)).current;
+  const animateGrow = (to: number) =>
+    Animated.spring(grow, { toValue: to, useNativeDriver: false, speed: 22, bounciness: 7 }).start();
+
+  const msFromX = (x: number) => {
+    const w = trackWRef.current;
+    const dur = durRef.current;
+    if (!w || dur <= 0) return 0;
+    return Math.min(1, Math.max(0, x / w)) * dur;
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => durRef.current > 0,
+      onMoveShouldSetPanResponder: () => durRef.current > 0,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (e) => { animateGrow(1); setDragMs(msFromX(e.nativeEvent.locationX)); },
+      onPanResponderMove: (e) => setDragMs(msFromX(e.nativeEvent.locationX)),
+      onPanResponderRelease: (e) => {
+        const ms = msFromX(e.nativeEvent.locationX);
+        animateGrow(0);
+        setDragMs(null);
+        if (durRef.current > 0) onSeekRef.current(Math.round(ms));
+      },
+      onPanResponderTerminate: () => { animateGrow(0); setDragMs(null); },
+    }),
+  ).current;
+
+  const dur = durationMs > 0 ? durationMs : 0;
+  const shown = dragMs != null ? dragMs : positionMs;
+  const clamped = dur > 0 ? Math.min(Math.max(shown, 0), dur) : 0;
+  const frac = dur > 0 ? clamped / dur : 0;
+  const dragging = dragMs != null;
+
+  const height = grow.interpolate({ inputRange: [0, 1], outputRange: [7, 11] });
+  const radius = grow.interpolate({ inputRange: [0, 1], outputRange: [3.5, 5.5] });
+
+  return (
+    <View style={seekStyles.wrap}>
+      <View
+        style={seekStyles.hit}
+        onLayout={(e) => { trackWRef.current = e.nativeEvent.layout.width; }}
+        {...pan.panHandlers}
+      >
+        <Animated.View style={[seekStyles.track, { height, borderRadius: radius }]}>
+          <View style={[seekStyles.fill, { width: `${frac * 100}%` }]} />
+        </Animated.View>
+      </View>
+      <View style={seekStyles.timeRow}>
+        <Text style={[seekStyles.time, dragging && seekStyles.timeActive]}>{fmtMs(clamped)}</Text>
+        <Text style={[seekStyles.time, dragging && seekStyles.timeActive]}>{fmtMs(dur)}</Text>
+      </View>
+    </View>
+  );
+}
+
+const fmtMs = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
 
 // Brand-blue accent used while the album-art color resolves (or when a track
 // has no artwork). Matches the vibrant 3-stop shape of useArtAccent.
@@ -699,6 +825,9 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 20, paddingTop: 18,
   },
+
+  // Owner seek bar (sits above the transport controls).
+  // (styles live in `seekStyles` below.)
   ctrlGroup: { flexDirection: "row", alignItems: "center", gap: 12 },
   ctrlSquare: {
     width: 54, height: 54, borderRadius: 17,
@@ -720,4 +849,16 @@ const styles = StyleSheet.create({
   },
   spotifyPill: { backgroundColor: "#1DB954", borderColor: "#1DB954" },
   pillText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+});
+
+const seekStyles = StyleSheet.create({
+  wrap: { paddingHorizontal: 20, paddingTop: 4 },
+  // Tall, invisible hit area so the thin bar is easy to grab and drag.
+  hit: { paddingVertical: 12, justifyContent: "center" },
+  // height + borderRadius are animated inline (grow-on-touch).
+  track: { width: "100%", backgroundColor: "rgba(255,255,255,0.22)", overflow: "hidden", justifyContent: "center" },
+  fill: { height: "100%", backgroundColor: "rgba(255,255,255,0.95)" },
+  timeRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
+  time: { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.45)", fontVariant: ["tabular-nums"] },
+  timeActive: { color: "rgba(255,255,255,0.95)" },
 });

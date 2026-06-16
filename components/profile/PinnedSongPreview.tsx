@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image, ActivityIndicator } from "react-native";
+import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { openSpotifyLink } from "../../lib/spotify";
 import { psStyles } from "../../lib/feed/localStyles";
@@ -28,7 +29,7 @@ export function PinnedSongPreview({
   return (
     <View style={psStyles.previewWrap}>
       {song.albumArt ? (
-        <Image source={{ uri: song.albumArt }} style={psStyles.previewArt} />
+        <CachedImage source={{ uri: song.albumArt }} style={psStyles.previewArt} />
       ) : (
         <View style={[psStyles.previewArt, psStyles.previewArtFallback]}>
           <FontAwesome5 name="music" size={40} color="rgba(255,255,255,0.15)" />

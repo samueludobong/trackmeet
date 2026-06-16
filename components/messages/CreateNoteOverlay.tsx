@@ -1,9 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable,
-  TextInput, Platform, Image, ActivityIndicator,
-  Keyboard, FlatList,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, ActivityIndicator, Keyboard, FlatList } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { searchSpotifyTracks, getValidSpotifyToken, type SpotifyTrackResult } from "../../lib/spotify";
 import { setMyNote, deleteMyNote, NOTE_COLORS, type Note } from "../../services/notes";
@@ -131,7 +128,7 @@ export function CreateNoteOverlay({
           <View style={s.previewWrap}>
             <View style={[s.previewBubble, color ? { backgroundColor: color } : null]}>
               {tab === "song" && song?.albumArt && (
-                <Image source={{ uri: song.albumArt }} style={s.previewArt} />
+                <CachedImage source={{ uri: song.albumArt }} style={s.previewArt} />
               )}
               {tab === "song" && !song?.albumArt && (
                 <FontAwesome5 name="music" size={10} color={color ? "#fff" : ACCENT} style={{ marginRight: 5 }} />
@@ -182,7 +179,7 @@ export function CreateNoteOverlay({
           ) : song ? (
             <View style={s.chosenRow}>
               {song.albumArt ? (
-                <Image source={{ uri: song.albumArt }} style={s.chosenArt} />
+                <CachedImage source={{ uri: song.albumArt }} style={s.chosenArt} />
               ) : (
                 <View style={[s.chosenArt, s.artFallback]}>
                   <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
@@ -231,7 +228,7 @@ export function CreateNoteOverlay({
                     onPress={() => { setSong({ id: item.id, name: item.name, artist: item.artist, albumArt: item.albumArt }); Keyboard.dismiss(); }}
                   >
                     {item.albumArt ? (
-                      <Image source={{ uri: item.albumArt }} style={s.resultArt} />
+                      <CachedImage source={{ uri: item.albumArt }} style={s.resultArt} />
                     ) : (
                       <View style={[s.resultArt, s.artFallback]}>
                         <FontAwesome5 name="music" size={12} color="rgba(255,255,255,0.3)" />

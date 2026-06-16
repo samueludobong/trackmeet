@@ -28,7 +28,8 @@
       "Bash(node scripts/rmunused.mjs components/profile/SettingsOverlay.tsx hooks/useSettingsOverlay.ts)",
       "Bash(xargs grep -lE \"\\\\.interpolate\")",
       "PowerShell(npx tsc --noEmit 2>&1 | Select-String -Pattern \"^\\\\S+\\\\.tsx?\\\\\\(\" | ForEach-Object { \\($_ -split '\\\\\\('\\)[0] } | Sort-Object -Unique)",
-      "Bash(grep -Ei \"groupChats|GroupChat|useGroupChat|CreateGroup|GroupSettings|app/feed.tsx|app\\\\\\\\\\\\\\\\feed.tsx\")"
+      "Bash(grep -Ei \"groupChats|GroupChat|useGroupChat|CreateGroup|GroupSettings|app/feed.tsx|app\\\\\\\\\\\\\\\\feed.tsx\")",
+      "Bash(node -e \"const p='eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpdHVyYXp2YWp0eWpydHJub3ZnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTQ0NDQyOSwiZXhwIjoyMDk1MDIwNDI5fQ'; console.log\\(Buffer.from\\(p,'base64'\\).toString\\('utf8'\\)\\)\")"
     ]
   }
 }

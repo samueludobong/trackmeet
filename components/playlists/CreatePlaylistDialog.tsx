@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { createCuratedPlaylistFull } from "../../services/playlists";
 import { uploadImageToStorage } from "../../services/storage";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator, Alert, Keyboard } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Alert, Keyboard } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
@@ -74,7 +75,7 @@ export function CreatePlaylistDialog({
               {/* Cover image picker */}
               <TouchableOpacity style={cpStyles.imagePicker} onPress={pickImage} activeOpacity={0.8}>
                 {imageUri
-                  ? <Image source={{ uri: imageUri }} style={{ width: 90, height: 90, borderRadius: 18 }} resizeMode="cover" />
+                  ? <CachedImage source={{ uri: imageUri }} style={{ width: 90, height: 90, borderRadius: 18 }} resizeMode="cover" />
                   : <>
                       <Ionicons name="camera-outline" size={26} color="rgba(255,255,255,0.35)" />
                       <Text style={cpStyles.imagePickerText}>Cover Photo</Text>

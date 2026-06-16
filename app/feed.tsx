@@ -28,6 +28,7 @@ import { MeetMiniBar } from "../components/meets/MeetMiniBar";
 import { FeedList } from '../components/feed/FeedList';
 import { FeedDrawer } from '../components/feed/FeedDrawer';
 import { QuickComposer } from '../components/feed/QuickComposer';
+import { type NowPlayingTrack } from '../hooks/useNowPlaying';
 
 // ─── Spotify track card (shown inside chat when a track is shared) ───────────
 
@@ -59,6 +60,11 @@ export default function FeedScreen() {
 
   // Open group chat (mounted at root like the DM ChatDetailView to avoid clipping).
   const [openGroup, setOpenGroup] = useState<GroupChat | null>(null);
+
+  // Track seeded into PostComposerSheet when the sticky now-playing strip's
+  // "Share as Post" is tapped. Cleared when the composer closes so the next
+  // FAB-triggered open isn't accidentally pre-attached.
+  const [composerInitialTrack, setComposerInitialTrack] = useState<NowPlayingTrack | null>(null);
 
   // On the Feed tab, stack the minimized MeetMiniBar directly above the floating
   // quick-post composer: its bottom = composer bottom + composer height + gap.
@@ -103,6 +109,7 @@ export default function FeedScreen() {
                   setDetailPost={setDetailPost}
                   focused={onFeed}
                   userId={currentUser?.id ?? null}
+                  onShareSongAsPost={(t) => { setComposerInitialTrack(t); setMenuVisible(true); }}
                 />
               }
             />
@@ -145,12 +152,14 @@ export default function FeedScreen() {
       )}
       {!keyboardUp && <BottomNav active={activeNav} onPress={setActiveNav} />}      <PostComposerSheet
         visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
+        onClose={() => { setMenuVisible(false); setComposerInitialTrack(null); }}
         currentUser={currentUser}
         initialText={quickText}
+        initialTrack={composerInitialTrack}
         onPosted={(post) => {
           setFeedPosts((prev) => [post, ...prev]);
           setQuickText(""); // clear quick field once posted via sheet
+          setComposerInitialTrack(null);
         }}
       />
       {quickReplyPost && (

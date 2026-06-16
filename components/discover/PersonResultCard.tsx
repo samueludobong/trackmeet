@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { pplStyles } from "../../lib/feed/localStyles";
@@ -24,7 +25,7 @@ export function PersonResultCard({
     <TouchableOpacity style={pplStyles.card} activeOpacity={0.92} onPress={onPress}>
       <View style={pplStyles.bannerWrap}>
         {u.banner_image_url ? (
-          <Image source={{ uri: u.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <CachedImage source={{ uri: u.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : u.banner_color ? (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: u.banner_color }]} />
         ) : (
@@ -56,7 +57,7 @@ export function PersonResultCard({
 
       <View style={pplStyles.avatarRow}>
         {u.avatar_url ? (
-          <Image source={{ uri: u.avatar_url }} style={pplStyles.avatarImg} />
+          <CachedImage source={{ uri: u.avatar_url }} style={pplStyles.avatarImg} />
         ) : (
           <View style={pplStyles.avatarFallback}><Text style={pplStyles.avatarInitials}>{initials}</Text></View>
         )}
@@ -80,7 +81,7 @@ export function PersonResultCard({
         {!!u.pinned_song_name && (
           <View style={pplStyles.pinnedRow}>
             {u.pinned_song_album_art ? (
-              <Image source={{ uri: u.pinned_song_album_art }} style={pplStyles.pinnedArt} />
+              <CachedImage source={{ uri: u.pinned_song_album_art }} style={pplStyles.pinnedArt} />
             ) : (
               <View style={pplStyles.pinnedArtFallback}>
                 <FontAwesome5 name="music" size={9} color="rgba(255,255,255,0.3)" />

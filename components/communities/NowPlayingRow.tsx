@@ -1,5 +1,6 @@
 import React from "react";
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import type { BroadcastingMember } from "../../services/communities";
@@ -41,14 +42,14 @@ export function NowPlayingRow({
             onPress={() => router.push({ pathname: "/user-profile", params: { userId: m.id } })}
           >
             {m.current_song_album_art ? (
-              <Image source={{ uri: m.current_song_album_art }} style={styles.art} />
+              <CachedImage source={{ uri: m.current_song_album_art }} style={styles.art} />
             ) : (
               <View style={[styles.art, styles.artFallback]}>
                 <Ionicons name="musical-note" size={20} color="#AB00FF" />
               </View>
             )}
             {m.avatar_url ? (
-              <Image source={{ uri: m.avatar_url }} style={styles.avatar} />
+              <CachedImage source={{ uri: m.avatar_url }} style={styles.avatar} />
             ) : (
               <View style={[styles.avatar, styles.avatarFallback]}>
                 <Ionicons name="person" size={10} color="#fff" />

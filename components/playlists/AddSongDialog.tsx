@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable,
-  TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator,
-  Keyboard, Alert, ScrollView, FlatList,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Keyboard, Alert, ScrollView, FlatList } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import {
   searchSpotifyTracks, getValidSpotifyToken, getUserPlaylists,
@@ -209,7 +206,7 @@ export function AddSongDialog({
             <View style={styles.nowBanner}>
               <View style={styles.nowDot} />
               {nowPlayingTrack.albumArt ? (
-                <Image source={{ uri: nowPlayingTrack.albumArt }} style={styles.nowArt} />
+                <CachedImage source={{ uri: nowPlayingTrack.albumArt }} style={styles.nowArt} />
               ) : (
                 <View style={[styles.nowArt, styles.artFallback]}>
                   <FontAwesome5 name="music" size={12} color="rgba(255,255,255,0.3)" />
@@ -320,7 +317,7 @@ export function AddSongDialog({
                             <Ionicons name="heart" size={18} color={ACCENT} />
                           </View>
                         ) : item.imageUrl ? (
-                          <Image source={{ uri: item.imageUrl }} style={styles.playlistArt} />
+                          <CachedImage source={{ uri: item.imageUrl }} style={styles.playlistArt} />
                         ) : (
                           <View style={[styles.playlistArt, styles.artFallback]}>
                             <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
@@ -415,7 +412,7 @@ function TrackRow({
   return (
     <View style={styles.trackRow}>
       {track.albumArt ? (
-        <Image source={{ uri: track.albumArt }} style={styles.trackArt} />
+        <CachedImage source={{ uri: track.albumArt }} style={styles.trackArt} />
       ) : (
         <View style={[styles.trackArt, styles.artFallback]}>
           <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />

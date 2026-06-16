@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { getCurrentlyPlaying, refreshSpotifyToken, reconnectSpotify } from '../lib/spotify';
+import { getCurrentlyPlaying, refreshSpotifyToken, reconnectSpotify, setActiveSpotifyToken } from '../lib/spotify';
 import { registerBackgroundSync, unregisterBackgroundSync } from '../lib/backgroundSync';
 import { gradientFromArt, accentFromArt, DEFAULT_ACCENT } from './albumColors';
 
@@ -15,6 +15,10 @@ export type NowPlayingTrack = {
   progressMs: number
   durationMs: number
   isPlaying: boolean
+  /** Name of the active Spotify device (e.g. "oraimo SpaceBuds Hybrid"). */
+  deviceName: string | null
+  /** Active device category — "Smartphone", "Computer", "Speaker", etc. */
+  deviceType: string | null
 }
 
 export const DEFAULT_GRADIENT: [string, string, string] = ['#3D1A0C', '#1E0D08', '#0E0907']
@@ -130,16 +134,25 @@ export function useNowPlaying() {
 
     if (expired && profile.spotify_refresh_token) {
       const refreshed = await refreshSpotifyToken(userId, profile.spotify_refresh_token)
-      if (refreshed) {
-        token = refreshed
+      if (refreshed.ok) {
+        token = refreshed.accessToken
         tokenCache.current = { token, expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }
         setNeedsReconnect(false)
         return token
-      } else {
+      }
+      // Refresh token is actually dead — force a reconnect prompt.
+      if (refreshed.dead) {
         tokenCache.current = null
         setNeedsReconnect(true)
         return null
       }
+      // Transient Spotify failure (5xx, rate-limited, network, "Failed to
+      // remove token"). Don't kill the session — skip this poll and try again
+      // on the next tick. If the stale token still has a tiny grace window
+      // (Spotify accepts up to ~60s past expiry), return it so playback UI
+      // doesn't blank out for a single failed refresh.
+      if (msLeft > -60_000) return token
+      return null
     }
 
     tokenCache.current = { token, expiresAt: profile.spotify_token_expires_at }
@@ -156,6 +169,9 @@ export function useNowPlaying() {
 
     const token = await getValidToken(user.id)
     if (!token || resetGen.current !== startGen) { setLoading(false); return }
+    // Register this token so openSpotifyLink can do an in-place track swap
+    // (instead of opening the Spotify app) when a device is already playing.
+    setActiveSpotifyToken(token)
 
     const raw = await getCurrentlyPlaying(token)
 
@@ -166,6 +182,7 @@ export function useNowPlaying() {
     // 401 — token revoked/expired even though DB says it's valid
     if (raw && 'unauthorized' in raw) {
       tokenCache.current = null
+      setActiveSpotifyToken(null)
       setNeedsReconnect(true)
       setLoading(false)
       return
@@ -264,6 +281,7 @@ export function useNowPlaying() {
   const resetSpotify = () => {
     resetGen.current       += 1
     tokenCache.current      = null
+    setActiveSpotifyToken(null)
     lastBroadcastId.current = null
     fetchedAt.current       = Date.now()
     baseProgress.current    = 0
@@ -275,9 +293,17 @@ export function useNowPlaying() {
     setBroadcastingEnabled(false)
   }
 
+  // Expose the currently cached Spotify access token so feed cards (e.g.
+  // MusicCard's actions sheet, which spawns LyricsOverlay in owner mode) can
+  // use the same token without re-fetching from Supabase. Returns null when
+  // we don't have a valid token in cache (caller should treat as "no Spotify
+  // session yet" and skip Spotify-owner features).
+  const accessToken = tokenCache.current?.token ?? null
+
   return {
     track, liveProgressMs, gradient, accent, loading,
     needsReconnect, refresh: poll, reconnect, resetSpotify,
     broadcastingEnabled, broadcastLoading, toggleBroadcasting,
+    accessToken,
   }
 }

@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import {
-  FlatList, Image, Modal, PanResponder, Pressable,
+  FlatList, Modal, PanResponder, Pressable,
   Text, TouchableOpacity, View, ViewToken,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,6 +11,8 @@ import { type Post } from "../../app/data/mock";
 import { useVideoControls } from "./useVideoControls";
 import { openSpotifyLink } from "../../lib/spotify";
 import { videoPositionStore } from "../../lib/feed/videoPositions";
+import { useCachedVideoUri } from "../../hooks/useCachedVideoUri";
+import { CachedImage } from "../ui/CachedImage";
 import { RailButton } from "./MediaViewer";
 import { mvStyles as s, SW, SH } from "./mediaViewer.styles";
 
@@ -86,7 +88,8 @@ function VideoPage({
   onClose: () => void;
 }) {
   const uri = post.mediaUrls?.[0] ?? null;
-  const player = useVideoPlayer(uri, (p) => {
+  const playUri = useCachedVideoUri(uri ?? undefined, active);
+  const player = useVideoPlayer(playUri ?? null, (p) => {
     p.loop = true;
     p.timeUpdateEventInterval = 0.25;
     const cached = videoPositionStore.get(post.id);
@@ -159,7 +162,7 @@ function VideoPage({
       <View style={[s.rail, { bottom: insets.bottom + 28 }]}>
         <View style={s.profileWrap}>
           {post.avatarUrl ? (
-            <Image source={{ uri: post.avatarUrl }} style={s.railAvatar} />
+            <CachedImage source={{ uri: post.avatarUrl }} style={s.railAvatar} />
           ) : (
             <View style={[s.railAvatar, { backgroundColor: (post.avatarColor || "#AB00FF") + "55", alignItems: "center", justifyContent: "center" }]}>
               <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>{post.initials}</Text>
@@ -199,7 +202,7 @@ function VideoPage({
 
         <View style={s.handleRow}>
           {post.avatarUrl ? (
-            <Image source={{ uri: post.avatarUrl }} style={s.handleAvatar} />
+            <CachedImage source={{ uri: post.avatarUrl }} style={s.handleAvatar} />
           ) : (
             <View style={[s.handleAvatar, { backgroundColor: (post.avatarColor || "#AB00FF") + "55" }]} />
           )}

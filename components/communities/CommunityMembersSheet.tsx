@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, TextInput,
-  ActivityIndicator, ScrollView, Image, Animated, Pressable,
-  KeyboardAvoidingView, Platform,
-} from "react-native";
+import { Modal, View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Animated, Pressable, KeyboardAvoidingView, Platform } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
@@ -111,7 +108,7 @@ export function CommunityMembersSheet({
               {filtered.map((m) => (
                 <View key={m.user_id} style={s.row}>
                   {m.user?.avatar_url ? (
-                    <Image source={{ uri: m.user.avatar_url }} style={s.avatar} />
+                    <CachedImage source={{ uri: m.user.avatar_url }} style={s.avatar} />
                   ) : (
                     <View style={[s.avatar, s.avatarFallback]}>
                       <Ionicons name="person" size={15} color={ACCENT} />

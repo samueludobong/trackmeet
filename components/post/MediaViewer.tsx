@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Image, Modal, PanResponder, Pressable, ScrollView,
+  Modal, PanResponder, Pressable, ScrollView,
   Text, TouchableOpacity, View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,6 +10,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { type Post } from "../../app/data/mock";
 import { useVideoControls } from "./useVideoControls";
 import { openSpotifyLink } from "../../lib/spotify";
+import { useCachedVideoUri } from "../../hooks/useCachedVideoUri";
+import { CachedImage } from "../ui/CachedImage";
 import { mvStyles as s, SW, SH } from "./mediaViewer.styles";
 
 type Media = { type: "image" | "video"; uri: string };
@@ -39,8 +41,9 @@ export function MediaViewer({
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const videoUri = media.find((m) => m.type === "video")?.uri ?? null;
+  const playUri = useCachedVideoUri(videoUri ?? undefined, !!videoUri);
   const videoRef = useRef<VideoView>(null);
-  const player = useVideoPlayer(videoUri, (p) => {
+  const player = useVideoPlayer(playUri ?? null, (p) => {
     p.loop = true;
     p.timeUpdateEventInterval = 0.25;
     if (videoUri) p.play();
@@ -90,7 +93,7 @@ export function MediaViewer({
           {media.map((m, i) => (
             <View key={i} style={s.page}>
               {m.type === "image" ? (
-                <Image source={{ uri: m.uri }} style={s.media} resizeMode="contain" />
+                <CachedImage source={{ uri: m.uri }} style={s.media} resizeMode="contain" />
               ) : (
                 <Pressable style={s.media} onPress={controls.togglePlay}>
                   <VideoView
@@ -150,7 +153,7 @@ export function MediaViewer({
         <View style={[s.rail, { bottom: insets.bottom + 28 }]}>
           <View style={s.profileWrap}>
             {post.avatarUrl ? (
-              <Image source={{ uri: post.avatarUrl }} style={s.railAvatar} />
+              <CachedImage source={{ uri: post.avatarUrl }} style={s.railAvatar} />
             ) : (
               <View style={[s.railAvatar, { backgroundColor: (post.avatarColor || "#AB00FF") + "55", alignItems: "center", justifyContent: "center" }]}>
                 <Text style={{ color: "#fff", fontWeight: "800", fontSize: 16 }}>{post.initials}</Text>
@@ -190,7 +193,7 @@ export function MediaViewer({
 
           <View style={s.handleRow}>
             {post.avatarUrl ? (
-              <Image source={{ uri: post.avatarUrl }} style={s.handleAvatar} />
+              <CachedImage source={{ uri: post.avatarUrl }} style={s.handleAvatar} />
             ) : (
               <View style={[s.handleAvatar, { backgroundColor: (post.avatarColor || "#AB00FF") + "55" }]} />
             )}

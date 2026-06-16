@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator, Keyboard, TouchableWithoutFeedback } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Keyboard, TouchableWithoutFeedback } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { csStyles } from "../../lib/feed/localStyles";
@@ -12,6 +13,7 @@ import { usePostComposer } from "../../hooks/usePostComposer";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
 import { SH } from "../../lib/feed/dimensions";
 import { DragGrabber } from "../common/DragGrabber";
+import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
 
 export function PostComposerSheet({
   visible,
@@ -19,16 +21,20 @@ export function PostComposerSheet({
   currentUser,
   onPosted,
   initialText,
+  initialTrack,
 }: {
   visible: boolean;
   onClose: () => void;
   currentUser: ComposerUser | null;
   onPosted: (post: Post) => void;
   initialText?: string;
+  /** Pre-attach this song to the composer (used from the now-playing strip's
+   *  "Share as Post" → composer already has the song chip seeded). */
+  initialTrack?: NowPlayingTrack | null;
 }) {
   const {
     text, setText, images, setImages, pollMode, setPollMode, pollQuestion, setPollQuestion, pollOptions, setPollOptions, posting, setPosting, mediaPickerOpen, setMediaPickerOpen, musicMode, setMusicMode, attachedTrack, setAttachedTrack, slideAnim, backdropAnim, pickFromCamera, pickFromLibrary, pickVideo, removeImage, canPost, handlePost, initials
-  } = usePostComposer({ visible, onClose, currentUser, onPosted, initialText });
+  } = usePostComposer({ visible, onClose, currentUser, onPosted, initialText, initialTrack });
 
   const { panHandlers: dragHandlers, stretch } = useSheetDragClose({ slideAnim, onClose, closedValue: SH });
   const dragBackdrop = slideAnim.interpolate({ inputRange: [0, SH], outputRange: [1, 0], extrapolate: "clamp" });
@@ -68,7 +74,7 @@ export function PostComposerSheet({
             contentContainerStyle={{ paddingBottom: 20 }}
           >            <View style={csStyles.composeRow}>
               {currentUser?.avatar_url ? (
-                <Image source={{ uri: currentUser.avatar_url }} style={csStyles.avatar} />
+                <CachedImage source={{ uri: currentUser.avatar_url }} style={csStyles.avatar} />
               ) : (
                 <View style={csStyles.avatar}>
                   <Text style={csStyles.avatarInitials}>{initials}</Text>
@@ -86,24 +92,31 @@ export function PostComposerSheet({
             </View>            {musicMode && (
               <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
                 <NowPlayingBanner onAttach={(t) => setAttachedTrack((prev) => (prev?.id === t.id ? null : t))} />
-                {attachedTrack && (
-                  <View style={feedStyles.attachedTrackChip}>
-                    {attachedTrack.albumArt ? (
-                      <Image source={{ uri: attachedTrack.albumArt }} style={feedStyles.attachedTrackArt} />
-                    ) : (
-                      <View style={[feedStyles.attachedTrackArt, { backgroundColor: "#1DB95422", alignItems: "center", justifyContent: "center" }]}>
-                        <Ionicons name="musical-note" size={14} color="#1DB954" />
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <Text style={feedStyles.attachedTrackName} numberOfLines={1}>{attachedTrack.name}</Text>
-                      <Text style={feedStyles.attachedTrackArtist} numberOfLines={1}>{attachedTrack.artist}</Text>
+              </View>
+            )}
+
+            {/* Attached-track chip — render whenever a track is attached, even
+                if the music-picker mode isn't open. Otherwise a track that was
+                pre-attached (e.g. from the now-playing strip's "Share as Post")
+                would be invisible because `musicMode` defaults to false. */}
+            {attachedTrack && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+                <View style={feedStyles.attachedTrackChip}>
+                  {attachedTrack.albumArt ? (
+                    <CachedImage source={{ uri: attachedTrack.albumArt }} style={feedStyles.attachedTrackArt} />
+                  ) : (
+                    <View style={[feedStyles.attachedTrackArt, { backgroundColor: "#1DB95422", alignItems: "center", justifyContent: "center" }]}>
+                      <Ionicons name="musical-note" size={14} color="#1DB954" />
                     </View>
-                    <TouchableOpacity onPress={() => setAttachedTrack(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                      <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.35)" />
-                    </TouchableOpacity>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={feedStyles.attachedTrackName} numberOfLines={1}>{attachedTrack.name}</Text>
+                    <Text style={feedStyles.attachedTrackArtist} numberOfLines={1}>{attachedTrack.artist}</Text>
                   </View>
-                )}
+                  <TouchableOpacity onPress={() => setAttachedTrack(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.35)" />
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
 
@@ -115,7 +128,7 @@ export function PostComposerSheet({
               >
                 {images.map((uri, idx) => (
                   <TouchableOpacity key={idx} onPress={() => removeImage(idx)} activeOpacity={0.8} style={{ position: "relative" }}>
-                    <Image source={{ uri }} style={csStyles.thumbImage} />
+                    <CachedImage source={{ uri }} style={csStyles.thumbImage} />
                     <View style={csStyles.thumbRemove}>
                       <Text style={csStyles.thumbRemoveText}>✕</Text>
                     </View>

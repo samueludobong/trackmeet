@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Image, Text, TouchableOpacity, View, StyleSheet } from "react-native";
+import { ActivityIndicator, Alert, Text, TouchableOpacity, View, StyleSheet } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import {
   listJoinRequests, approveJoinRequest, denyJoinRequest,
@@ -63,7 +64,7 @@ export function AdminPanelRequests({
       {requests.map((r) => (
         <View key={r.user_id} style={a.memberRow}>
           {r.user?.avatar_url ? (
-            <Image source={{ uri: r.user.avatar_url }} style={a.memberAvatar} />
+            <CachedImage source={{ uri: r.user.avatar_url }} style={a.memberAvatar} />
           ) : (
             <View style={[a.memberAvatar, a.chipFallback]}><Ionicons name="person" size={16} color="#AB00FF" /></View>
           )}

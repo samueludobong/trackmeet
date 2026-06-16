@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
 import { styles } from "../../lib/feed/styles";
+import { CachedImage } from "../ui/CachedImage";
 import { COLLAGE_W, COLLAGE_GAP } from "../../lib/feed/dimensions";
 import { MediaViewer } from "../../components/post/MediaViewer";
 import { ActionRow } from "../../components/post/ActionRow";
@@ -20,7 +21,7 @@ export function ImageCollage({
   if (urls.length === 1) {
     return (
       <TouchableOpacity activeOpacity={0.9} onPress={() => onPress(0)}>
-        <Image source={{ uri: urls[0] }} style={{ width: COLLAGE_W, height: 280 }} resizeMode="cover" />
+        <CachedImage source={{ uri: urls[0] }} style={{ width: COLLAGE_W, height: 280 }} resizeMode="cover" />
       </TouchableOpacity>
     );
   }
@@ -32,7 +33,7 @@ export function ImageCollage({
       <View style={{ flexDirection: "row", gap: COLLAGE_GAP }}>
         {urls.map((url, i) => (
           <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => onPress(i)}>
-            <Image source={{ uri: url }} style={{ width: w, height: 220 }} resizeMode="cover" />
+            <CachedImage source={{ uri: url }} style={{ width: w, height: 220 }} resizeMode="cover" />
           </TouchableOpacity>
         ))}
       </View>
@@ -48,14 +49,14 @@ export function ImageCollage({
     return (
       <View style={{ flexDirection: "row", gap: COLLAGE_GAP }}>
         <TouchableOpacity activeOpacity={0.9} onPress={() => onPress(0)}>
-          <Image source={{ uri: urls[0] }} style={{ width: leftW, height: totalH }} resizeMode="cover" />
+          <CachedImage source={{ uri: urls[0] }} style={{ width: leftW, height: totalH }} resizeMode="cover" />
         </TouchableOpacity>
         <View style={{ gap: COLLAGE_GAP }}>
           <TouchableOpacity activeOpacity={0.9} onPress={() => onPress(1)}>
-            <Image source={{ uri: urls[1] }} style={{ width: rightW, height: rightH }} resizeMode="cover" />
+            <CachedImage source={{ uri: urls[1] }} style={{ width: rightW, height: rightH }} resizeMode="cover" />
           </TouchableOpacity>
           <TouchableOpacity activeOpacity={0.9} onPress={() => onPress(2)}>
-            <Image source={{ uri: urls[2] }} style={{ width: rightW, height: rightH }} resizeMode="cover" />
+            <CachedImage source={{ uri: urls[2] }} style={{ width: rightW, height: rightH }} resizeMode="cover" />
           </TouchableOpacity>
         </View>
       </View>
@@ -76,7 +77,7 @@ export function ImageCollage({
             const isLast = idx === 3 && extra > 0;
             return (
               <TouchableOpacity key={idx} activeOpacity={0.9} onPress={() => onPress(idx)} style={{ position: "relative" }}>
-                <Image source={{ uri: url }} style={{ width: cellW, height: cellH }} resizeMode="cover" />
+                <CachedImage source={{ uri: url }} style={{ width: cellW, height: cellH }} resizeMode="cover" />
                 {isLast && (
                   <View style={styles.collageMoreOverlay}>
                     <Text style={styles.collageMoreText}>+{extra}</Text>

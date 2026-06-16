@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, Animated, Pressable, TouchableOpacity, Image, ActivityIndicator, Modal } from "react-native";
+import { View, Text, StyleSheet, Animated, Pressable, TouchableOpacity, ActivityIndicator, Modal } from "react-native";
+import { CachedImage } from "./ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { AddToPlaylistSheet } from "./AddToPlaylistSheet";
 
@@ -51,7 +52,7 @@ export function SongPreviewSheet({ visible, onClose, song, accessToken, userId }
         onPress={onClose}
       />      <Animated.View style={[ps.sheet, { transform: [{ translateY: slideAnim }, { scaleY: stretch }] }]}>        <DragGrabber panHandlers={dragHandlers} />        <View style={ps.artWrap}>
           {song.albumArt ? (
-            <Image source={{ uri: song.albumArt }} style={ps.art} resizeMode="cover" />
+            <CachedImage source={{ uri: song.albumArt }} style={ps.art} resizeMode="cover" />
           ) : (
             <View style={[ps.art, ps.artFallback]}>
               <FontAwesome5 name="music" size={36} color="rgba(255,255,255,0.18)" />

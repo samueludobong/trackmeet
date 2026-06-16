@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { type LiveMeet } from "../../services/meets";
@@ -11,7 +12,7 @@ export function LiveMeetCard({ meet, onJoin }: { meet: LiveMeet; onJoin: (id: st
   return (
     <View style={lmStyles.card}>
       {meet.current_track_album_art ? (
-        <Image source={{ uri: meet.current_track_album_art }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        <CachedImage source={{ uri: meet.current_track_album_art }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       ) : (
         <LinearGradient colors={["#AB00FF66", "#1c0030EE"]} style={StyleSheet.absoluteFill} />
       )}

@@ -1,7 +1,8 @@
 import React from "react";
 import { EditProfilePinnedSong } from "../../components/profile/EditProfilePinnedSong";
 import { EditProfileSocialLinks } from "../../components/profile/EditProfileSocialLinks";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator, Keyboard, TouchableWithoutFeedback } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Keyboard, TouchableWithoutFeedback } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -65,7 +66,7 @@ export function EditProfileOverlay({ visible, onClose, initialData, onSaved, acc
                 <View style={epOverlayStyles.bannerPreview}>
                   {form.banner_image_url ? (
                     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-                      <Image source={{ uri: form.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                      <CachedImage source={{ uri: form.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                     </View>
                   ) : form.banner_color ? (
                     <View style={[StyleSheet.absoluteFill, { backgroundColor: form.banner_color }]} pointerEvents="none" />
@@ -102,7 +103,7 @@ export function EditProfileOverlay({ visible, onClose, initialData, onSaved, acc
                       <ActivityIndicator color="#fff" />
                     </View>
                   ) : form.avatar_url ? (
-                    <Image source={{ uri: form.avatar_url }} style={epOverlayStyles.avatarCircle} />
+                    <CachedImage source={{ uri: form.avatar_url }} style={epOverlayStyles.avatarCircle} />
                   ) : (
                     <View style={epOverlayStyles.avatarCircle}>
                       <Text style={epOverlayStyles.avatarInitials}>{initials}</Text>

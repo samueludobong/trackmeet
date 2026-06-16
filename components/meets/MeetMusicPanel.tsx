@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Animated, TouchableOpacity, TextInput, FlatList, ActivityIndicator, Image } from "react-native";
+import { View, Text, Animated, TouchableOpacity, TextInput, FlatList, ActivityIndicator } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { mlStyles } from "../../lib/feed/localStyles";
 import { type SpotifyAlbum, type SpotifyArtistInfo } from "../../lib/spotify";
@@ -196,7 +197,7 @@ function ArtistRow({ artist, onPress }: { artist: SpotifyArtistInfo; onPress: ()
   return (
     <TouchableOpacity style={mlStyles.albumRow} activeOpacity={0.75} onPress={onPress}>
       {artist.imageUrl ? (
-        <Image source={{ uri: artist.imageUrl }} style={[mlStyles.albumArt, { borderRadius: 22 }]} />
+        <CachedImage source={{ uri: artist.imageUrl }} style={[mlStyles.albumArt, { borderRadius: 22 }]} />
       ) : (
         <View style={[mlStyles.albumArt, mlStyles.albumArtFallback, { borderRadius: 22 }]}>
           <Ionicons name="person" size={18} color="rgba(255,255,255,0.3)" />
@@ -220,7 +221,7 @@ function AlbumRow({ m, album }: { m: MeetMusicControl; album: SpotifyAlbum }) {
     <View>
       <TouchableOpacity style={mlStyles.albumRow} activeOpacity={0.75} onPress={() => m.toggleAlbum(album.id)}>
         {album.imageUrl ? (
-          <Image source={{ uri: album.imageUrl }} style={mlStyles.albumArt} />
+          <CachedImage source={{ uri: album.imageUrl }} style={mlStyles.albumArt} />
         ) : (
           <View style={[mlStyles.albumArt, mlStyles.albumArtFallback]}>
             <Ionicons name="disc-outline" size={18} color="rgba(255,255,255,0.3)" />

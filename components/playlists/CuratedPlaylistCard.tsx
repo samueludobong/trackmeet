@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { cpStyles, profileStyles } from "../../lib/feed/localStyles";
 import { type CuratedPlaylist } from "../../lib/feed/types";
 
@@ -8,7 +9,7 @@ export function CuratedPlaylistCard({ pl, onPress }: { pl: CuratedPlaylist; onPr
     <TouchableOpacity style={profileStyles.playlistListItem} onPress={onPress} activeOpacity={0.82}>
       <View style={[profileStyles.playlistListArt, { backgroundColor: '#1a0030' }]}>
         {pl.image_url
-          ? <Image source={{ uri: pl.image_url }} style={{ width: 56, height: 56 }} resizeMode="cover" />
+          ? <CachedImage source={{ uri: pl.image_url }} style={{ width: 56, height: 56 }} resizeMode="cover" />
           : <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 22 }}>🎵</Text>
             </View>

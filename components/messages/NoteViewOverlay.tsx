@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { openSpotifyLink } from "../../lib/spotify";
 import { type Note } from "../../services/notes";
@@ -37,7 +38,7 @@ export function NoteViewOverlay({ note, onClose }: { note: Note; onClose: () => 
           {/* Author */}
           <View style={s.authorRow}>
             {note.avatar_url ? (
-              <Image source={{ uri: note.avatar_url }} style={s.avatar} />
+              <CachedImage source={{ uri: note.avatar_url }} style={s.avatar} />
             ) : (
               <View style={[s.avatar, s.avatarFallback]}>
                 <Text style={s.avatarInitials}>{initial}</Text>
@@ -56,7 +57,7 @@ export function NoteViewOverlay({ note, onClose }: { note: Note; onClose: () => 
           {note.type === "song" ? (
             <View style={s.songWrap}>
               {note.song_album_art ? (
-                <Image source={{ uri: note.song_album_art }} style={s.songArt} />
+                <CachedImage source={{ uri: note.song_album_art }} style={s.songArt} />
               ) : (
                 <View style={[s.songArt, s.artFallback]}>
                   <FontAwesome5 name="music" size={28} color="rgba(255,255,255,0.3)" />

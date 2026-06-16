@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Image, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "../../lib/supabase";
@@ -75,7 +76,7 @@ export function FeedStoriesStrip() {
       {/* {track && (
         <TouchableOpacity activeOpacity={0.85} onPress={shareCurrentSong} style={s.npCard}>
           {track.albumArt ? (
-            <Image source={{ uri: track.albumArt }} style={s.npArt} />
+            <CachedImage source={{ uri: track.albumArt }} style={s.npArt} />
           ) : (
             <View style={[s.npArt, s.npArtFallback]}>
               <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
@@ -111,7 +112,7 @@ export function FeedStoriesStrip() {
         >
           <View style={[styles.storyRing, { borderColor: myStories.length > 0 ? "#AB00FF" : "rgba(255,255,255,0.15)" }]}>
             {myStories.length > 0 && meAvatar ? (
-              <Image source={{ uri: meAvatar }} style={styles.storyAvatar} />
+              <CachedImage source={{ uri: meAvatar }} style={styles.storyAvatar} />
             ) : (
               <View style={[styles.storyAvatar, { backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center" }]}>
                 <Ionicons name={myStories.length > 0 ? "musical-note" : "add"} size={28} color="#fff" />
@@ -146,7 +147,7 @@ export function FeedStoriesStrip() {
             <TouchableOpacity key={authorId} style={styles.nowPlayingItem} activeOpacity={0.85} onPress={() => openViewer(authorId)}>
               <View style={[styles.storyRing, { borderColor: "#AB00FF" }]}>
                 {a.avatar_url ? (
-                  <Image source={{ uri: a.avatar_url }} style={styles.storyAvatar} />
+                  <CachedImage source={{ uri: a.avatar_url }} style={styles.storyAvatar} />
                 ) : (
                   <View style={[styles.storyAvatar, { backgroundColor: "rgba(171,0,255,0.18)" }]}>
                     <Text style={[styles.storyInitials, { color: "#AB00FF" }]}>{initial}</Text>

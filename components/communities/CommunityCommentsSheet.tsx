@@ -1,9 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable,
-  TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
-  Image, Alert,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Alert } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
@@ -141,7 +138,7 @@ export function CommunityCommentsSheet({
                   style={s.row}
                 >
                   {c.author?.avatar_url ? (
-                    <Image source={{ uri: c.author.avatar_url }} style={s.avatar} />
+                    <CachedImage source={{ uri: c.author.avatar_url }} style={s.avatar} />
                   ) : (
                     <View style={[s.avatar, s.avatarFallback]}>
                       <Ionicons name="person" size={13} color={ACCENT} />

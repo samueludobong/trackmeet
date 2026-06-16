@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { pplStyles } from "../../lib/feed/localStyles";
@@ -35,7 +36,7 @@ export function ArtistResultCard({
     >
       <View style={pplStyles.artistBanner}>
         {a.banner_image_url ? (
-          <Image
+          <CachedImage
             source={{ uri: a.banner_image_url }}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
@@ -65,7 +66,7 @@ export function ArtistResultCard({
 
       <View style={pplStyles.artistAvatarRow}>
         {heroImageUrl ? (
-          <Image
+          <CachedImage
             source={{ uri: heroImageUrl }}
             style={pplStyles.artistAvatar}
           />

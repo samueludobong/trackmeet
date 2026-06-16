@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
 import { useViewer } from "../../hooks/useViewer";
 import { addPostComment } from "../../services/posts";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, Image, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, ActivityIndicator } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { styles } from "../../lib/feed/styles";
 import { BOTTOM_INSET } from "../../lib/feed/dimensions";
@@ -119,7 +120,7 @@ export function QuickReplyOverlay({
         {selectedSong && (
           <View style={styles.qrSongCard}>
             {selectedSong.albumArt ? (
-              <Image source={{ uri: selectedSong.albumArt }} style={styles.qrSongArt} />
+              <CachedImage source={{ uri: selectedSong.albumArt }} style={styles.qrSongArt} />
             ) : (
               <View style={[styles.qrSongArt, styles.qrSongArtFallback]}>
                 <FontAwesome5 name="music" size={9} color="rgba(255,255,255,0.3)" />
@@ -147,7 +148,7 @@ export function QuickReplyOverlay({
           </TouchableOpacity>
 
           {currentUser?.avatarUrl ? (
-            <Image source={{ uri: currentUser.avatarUrl }} style={styles.qrAvatar} />
+            <CachedImage source={{ uri: currentUser.avatarUrl }} style={styles.qrAvatar} />
           ) : (
             <View style={[styles.qrAvatar, { backgroundColor: "#AB00FF22" }]}>
               <Text style={[styles.qrAvatarText, { color: "#AB00FF" }]}>

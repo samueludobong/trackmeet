@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { epOverlayStyles } from "../../lib/feed/localStyles";
 import { type EditFormData } from "../../types/profile";
@@ -17,7 +18,7 @@ export function EditProfilePinnedSong({
       <Text style={epOverlayStyles.sectionLabel}>PINNED SONG</Text>
       <TouchableOpacity style={epOverlayStyles.songRow} activeOpacity={0.75} onPress={onOpenPicker}>
         {form.pinned_song_album_art ? (
-          <Image source={{ uri: form.pinned_song_album_art }} style={epOverlayStyles.songArt} />
+          <CachedImage source={{ uri: form.pinned_song_album_art }} style={epOverlayStyles.songArt} />
         ) : (
           <View style={[epOverlayStyles.songArt, epOverlayStyles.songArtFallback]}>
             <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.25)" />

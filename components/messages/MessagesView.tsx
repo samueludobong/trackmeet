@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { feedCache } from "../../lib/feed/caches";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Pressable, RefreshControl, Image } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Pressable, RefreshControl } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { getConversations, type ConversationInfo } from "../../services/messages";
 import { getFollowingNowListening, type NowListeningUser } from "../../services/follows";
@@ -327,7 +328,7 @@ function NoteShell({
 
 function Avatar({ uri, initials }: { uri: string | null; initials: string }) {
   return uri ? (
-    <Image source={{ uri }} style={msgStyles.noteAvatar} />
+    <CachedImage source={{ uri }} style={msgStyles.noteAvatar} />
   ) : (
     <View style={[msgStyles.noteAvatar, msgStyles.noteAvatarFallback]}>
       <Text style={msgStyles.noteAvatarInitials}>{initials}</Text>
@@ -341,7 +342,7 @@ function NoteBubbleContent({ note }: { note: Note }) {
     return (
       <>
         {note.song_album_art ? (
-          <Image source={{ uri: note.song_album_art }} style={msgStyles.noteBubbleArt} />
+          <CachedImage source={{ uri: note.song_album_art }} style={msgStyles.noteBubbleArt} />
         ) : (
           <FontAwesome5 name="music" size={9} color={note.color ? "#fff" : "#AB00FF"} style={{ marginRight: 5 }} />
         )}
@@ -423,9 +424,9 @@ function LiveVisual({
       </View>
       <View style={msgStyles.noteAvatarWrap}>
         {user.song_album_art ? (
-          <Image source={{ uri: user.song_album_art }} style={[msgStyles.noteAvatar, msgStyles.noteAvatarLiveRing]} />
+          <CachedImage source={{ uri: user.song_album_art }} style={[msgStyles.noteAvatar, msgStyles.noteAvatarLiveRing]} />
         ) : user.avatar_url ? (
-          <Image source={{ uri: user.avatar_url }} style={[msgStyles.noteAvatar, msgStyles.noteAvatarLiveRing]} />
+          <CachedImage source={{ uri: user.avatar_url }} style={[msgStyles.noteAvatar, msgStyles.noteAvatarLiveRing]} />
         ) : (
           <View style={[msgStyles.noteAvatar, msgStyles.noteAvatarFallback, msgStyles.noteAvatarLiveRing]}>
             <Text style={msgStyles.noteAvatarInitials}>{initial}</Text>

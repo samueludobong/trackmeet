@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { type CommunityPost } from "../../services/communities";
 import { SongPreviewSheet } from "../SongPreviewSheet";
@@ -81,7 +82,7 @@ export function CommunityPostCard({
       )}
       <View style={styles.cardHead}>
         {a.avatar_url ? (
-          <Image source={{ uri: a.avatar_url }} style={styles.cardAvatar} />
+          <CachedImage source={{ uri: a.avatar_url }} style={styles.cardAvatar} />
         ) : (
           <View style={[styles.cardAvatar, styles.cardAvatarFallback]}>
             <Text style={styles.cardAvatarText}>{initials(a)}</Text>
@@ -113,7 +114,7 @@ export function CommunityPostCard({
           onPress={() => post.song_id && setPreviewOpen(true)}
         >
           {post.song_album_art ? (
-            <Image source={{ uri: post.song_album_art }} style={styles.songArt} />
+            <CachedImage source={{ uri: post.song_album_art }} style={styles.songArt} />
           ) : (
             <View style={[styles.songArt, { backgroundColor: "rgba(29,185,84,0.18)", alignItems: "center", justifyContent: "center" }]}>
               <Ionicons name="musical-note" size={14} color="#1DB954" />

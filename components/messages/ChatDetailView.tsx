@@ -1,6 +1,7 @@
 import React, { useCallback, useState, useEffect } from "react";
 import { useChatDetail } from "../../hooks/useChatDetail";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { sendSpotifyTrackMessage, type ConversationInfo, type DbMessage } from "../../services/messages";
@@ -79,7 +80,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
 
           <View style={chatStyles.headerCenter}>
             {conv.otherUser.avatar_url ? (
-              <Image source={{ uri: conv.otherUser.avatar_url }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+              <CachedImage source={{ uri: conv.otherUser.avatar_url }} style={{ width: 36, height: 36, borderRadius: 18 }} />
             ) : (
               <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#AB00FF33", alignItems: "center", justifyContent: "center" }}>
                 <Text style={{ fontSize: 14, fontWeight: "800", color: "#AB00FF" }}>{otherInitials}</Text>
@@ -201,7 +202,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                           )}
                           <View style={[chatStyles.replyQuote, chatStyles.replyQuoteDetached, fromMe && chatStyles.replyQuoteDetachedMe, repliedToMe && chatStyles.replyQuoteDetachedSelf]}>
                             <View style={[chatStyles.replyQuoteBody, chatStyles.replyQuoteBodyDetached, !!repliedArt && chatStyles.replyQuoteBodyRow]}>
-                              {!!repliedArt && <Image source={{ uri: repliedArt }} style={chatStyles.replyQuoteArt} />}
+                              {!!repliedArt && <CachedImage source={{ uri: repliedArt }} style={chatStyles.replyQuoteArt} />}
                               <Text style={[chatStyles.replyQuoteText, fromMe && chatStyles.replyQuoteTextMe, !!repliedArt && { flex: 1 }]} numberOfLines={2}>
                                 {repliedArt ? msg.reply_to_preview.replace(/^🎵\s*/, "") : msg.reply_to_preview}
                               </Text>
@@ -243,7 +244,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
             <View style={chatStyles.replyBar}>
               <View style={chatStyles.replyBarAccent} />
               {replyTo.kind === "song" && !!replyTo.albumArt && (
-                <Image source={{ uri: replyTo.albumArt }} style={chatStyles.replyBarArt} />
+                <CachedImage source={{ uri: replyTo.albumArt }} style={chatStyles.replyBarArt} />
               )}
               <View style={{ flex: 1 }}>
                 <Text style={chatStyles.replyBarName} numberOfLines={1}>

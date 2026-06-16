@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Image, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { getCommunityInsights, type CommunityInsights } from "../../services/communities";
 import { adminStyles as a } from "./adminPanel.styles";
@@ -47,7 +48,7 @@ export function AdminPanelInsights({ communityId }: { communityId: string }) {
               <View key={user.id} style={st.posterRow}>
                 <Text style={st.posterRank}>#{i + 1}</Text>
                 {user.avatar_url ? (
-                  <Image source={{ uri: user.avatar_url }} style={st.posterAvatar} />
+                  <CachedImage source={{ uri: user.avatar_url }} style={st.posterAvatar} />
                 ) : (
                   <View style={[st.posterAvatar, { backgroundColor: "rgba(171,0,255,0.18)", alignItems: "center", justifyContent: "center" }]}>
                     <Ionicons name="person" size={13} color={ACCENT} />

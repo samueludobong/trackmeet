@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { setMeetOnProfile, type MeetTrack } from "../../services/meets";
@@ -78,7 +79,7 @@ export function MeetSummaryScreen({
           ) : tracks.map((t) => (
             <View key={t.id} style={sumStyles.trackRow}>
               {t.album_art ? (
-                <Image source={{ uri: t.album_art }} style={sumStyles.art} />
+                <CachedImage source={{ uri: t.album_art }} style={sumStyles.art} />
               ) : (
                 <View style={[sumStyles.art, { backgroundColor: "#1DB95422", alignItems: "center", justifyContent: "center" }]}>
                   <Ionicons name="musical-note" size={16} color="#1DB954" />

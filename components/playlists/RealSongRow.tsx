@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { pdStyles } from "../../lib/feed/localStyles";
 import { type CuratedSong } from "../../lib/feed/types";
@@ -8,7 +9,7 @@ export function RealSongRow({ track, accent, onDelete }: { track: CuratedSong; a
   return (
     <TouchableOpacity style={pdStyles.songRow} activeOpacity={0.75}>
       {track.album_art
-        ? <Image source={{ uri: track.album_art }} style={[pdStyles.songArt, { borderRadius: 8 }]} />
+        ? <CachedImage source={{ uri: track.album_art }} style={[pdStyles.songArt, { borderRadius: 8 }]} />
         : <View style={[pdStyles.songArt, { backgroundColor: accent + '30', alignItems: 'center', justifyContent: 'center' }]}>
             <Text style={{ fontSize: 13 }}>🎵</Text>
           </View>

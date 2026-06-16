@@ -1,8 +1,9 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { profileStyles } from "../../lib/feed/localStyles";
+import { CachedImage } from "../ui/CachedImage";
 import { PROFILE_AVATAR_OVERLAP } from "../../constants/feedLayout";
 import { SOCIAL_PLATFORMS, BANNER_PLATFORM_PRIORITY } from "../../lib/feed/social";
 import { BannerShape } from "../../components/profile/BannerShape";
@@ -22,7 +23,7 @@ export function ProfileHeaderCard({ profile, getInitials, setEditOpen, setSocial
         {/* Banner */}
         <View style={profileStyles.bannerWrap}>
           {profile?.banner_image_url ? (
-            <Image source={{ uri: profile.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            <CachedImage source={{ uri: profile.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" recyclingKey={profile.banner_image_url} />
           ) : profile?.banner_color ? (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: profile.banner_color }]} />
           ) : (
@@ -91,7 +92,7 @@ export function ProfileHeaderCard({ profile, getInitials, setEditOpen, setSocial
         {/* Avatar row — negative margin overlaps banner bottom */}
         <View style={[profileStyles.avatarRow, { marginTop: -PROFILE_AVATAR_OVERLAP }]}>
           {profile?.avatar_url ? (
-            <Image source={{ uri: profile.avatar_url }} style={profileStyles.avatar} />
+            <CachedImage source={{ uri: profile.avatar_url }} style={profileStyles.avatar} recyclingKey={profile.avatar_url} />
           ) : (
             <View style={profileStyles.avatar}>
               <Text style={profileStyles.avatarInitials}>{getInitials(profile?.display_name)}</Text>

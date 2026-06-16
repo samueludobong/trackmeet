@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, Platform,
-  Image, KeyboardAvoidingView, ActivityIndicator, ScrollView, Alert,
-} from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, ScrollView, Alert } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { chatStyles } from "../../lib/feed/localStyles";
@@ -333,7 +331,7 @@ export function GroupChatDetailView({
                   {media.map((m) => (
                     <TouchableOpacity key={m.id} style={g.mediaCell} activeOpacity={0.85}
                       onPress={() => m.spotify_track_id && openSpotifyLink(`spotify:track:${m.spotify_track_id}`, `https://open.spotify.com/track/${m.spotify_track_id}`)}>
-                      <Image source={{ uri: m.spotify_album_art! }} style={{ width: "100%", height: "100%" }} />
+                      <CachedImage source={{ uri: m.spotify_album_art! }} style={{ width: "100%", height: "100%" }} />
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -377,7 +375,7 @@ function optimisticVote(poll: GroupPoll, optionId: string, prevVote: string | nu
 
 function Avatar({ user, accent, show }: { user?: GroupUser; accent: string; show: boolean }) {
   if (!show) return <View style={{ width: 30 }} />;
-  if (user?.avatar_url) return <Image source={{ uri: user.avatar_url }} style={g.avatar} />;
+  if (user?.avatar_url) return <CachedImage source={{ uri: user.avatar_url }} style={g.avatar} />;
   const initial = (user?.display_name || user?.username || "?").trim().slice(0, 1).toUpperCase();
   return <View style={[g.avatar, { backgroundColor: accent + "33", alignItems: "center", justifyContent: "center" }]}><Text style={{ color: accent, fontWeight: "800", fontSize: 12 }}>{initial}</Text></View>;
 }

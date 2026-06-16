@@ -246,8 +246,23 @@ export const disconnectSpotify = async (userId: string): Promise<void> => {
   }).eq('id', userId)
 }
 
-// Refresh expired token
-export const refreshSpotifyToken = async (userId: string, refreshToken: string) => {
+/**
+ * Result of a refresh attempt.
+ * - `dead: true`  → the refresh token is truly invalid (revoked, expired, app
+ *   uninstalled in Spotify settings, etc.). Caller should prompt reconnect.
+ * - `dead: false` → transient failure (Spotify 5xx, "Failed to remove token",
+ *   network error, rate-limit). Caller should keep using the existing access
+ *   token if it's still valid and retry on the next poll — DO NOT prompt
+ *   reconnect, that's terrible UX for a Spotify backend blip.
+ */
+export type RefreshResult =
+  | { ok: true;  accessToken: string }
+  | { ok: false; dead: boolean }
+
+// Refresh expired token. Distinguishes transient failures (server_error,
+// network, rate-limit) from permanent ones (invalid_grant, invalid_client) so
+// the caller can avoid forcing a full reconnect for a temporary Spotify blip.
+export const refreshSpotifyToken = async (userId: string, refreshToken: string): Promise<RefreshResult> => {
   try {
     const response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
@@ -259,13 +274,34 @@ export const refreshSpotifyToken = async (userId: string, refreshToken: string) 
       }).toString(),
     })
 
-    const tokens = await response.json()
+    // 5xx → Spotify is having issues. Don't kill the session.
+    if (response.status >= 500) {
+      console.log('[Spotify] refresh transient HTTP', response.status)
+      return { ok: false, dead: false }
+    }
+    // 429 → rate-limited. Transient by definition; retry next poll.
+    if (response.status === 429) {
+      console.log('[Spotify] refresh rate-limited (429)')
+      return { ok: false, dead: false }
+    }
+
+    const tokens = await response.json().catch(() => null) as any
+    if (!tokens) return { ok: false, dead: false }
 
     // Spotify returns { error, error_description } when the refresh token is
-    // invalid or revoked — guard before touching expires_in to avoid RangeError
+    // invalid or revoked — guard before touching expires_in to avoid RangeError.
+    // `invalid_grant` / `invalid_client` = the token is dead, force reconnect.
+    // Anything else (notably `server_error` "Failed to remove token") is a
+    // backend hiccup on Spotify's side — keep the session, retry next poll.
     if (tokens.error) {
-      console.log('Spotify refresh failed:', tokens.error, tokens.error_description)
-      return null
+      const dead = tokens.error === 'invalid_grant' || tokens.error === 'invalid_client'
+      console.log('[Spotify] refresh failed', tokens.error, tokens.error_description, dead ? '(dead)' : '(transient)')
+      return { ok: false, dead }
+    }
+
+    if (typeof tokens.expires_in !== 'number' || !tokens.access_token) {
+      // Malformed success response — treat as transient.
+      return { ok: false, dead: false }
     }
 
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString()
@@ -279,11 +315,12 @@ export const refreshSpotifyToken = async (userId: string, refreshToken: string) 
 
     await supabase.from('users').update(update).eq('id', userId)
 
-    return tokens.access_token
+    return { ok: true, accessToken: tokens.access_token }
 
   } catch (error) {
-    console.log('Token refresh error:', error)
-    return null
+    // Network/JSON exception — assume transient (offline, DNS hiccup, etc.).
+    console.log('[Spotify] refresh network error:', error)
+    return { ok: false, dead: false }
   }
 }
 
@@ -393,14 +430,36 @@ export const reconnectSpotify = async (userId: string): Promise<
   }
 }
 
-// Open a Spotify URI in the app if installed, otherwise fall back to the web player in a WebView.
-// uri  — Spotify URI,  e.g. "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
-// webUrl — fallback web URL, e.g. "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"
+// Module-level access token used by openSpotifyLink to decide whether it can
+// swap a track in place instead of yanking the user out to the Spotify app.
+// `useNowPlaying` sets/clears this as its token cache lifecycle changes.
+let _activeViewerToken: string | null = null
+export const setActiveSpotifyToken = (token: string | null): void => { _activeViewerToken = token }
+export const getActiveSpotifyToken = (): string | null => _activeViewerToken
+
+// Open a Spotify URI. For a track URI, if the viewer has a Spotify session AND a
+// device is currently playing, swap the song in place (no app switch). For any
+// other URI (playlist/album/artist), or when no device is playing, open the
+// Spotify app (falling back to the web player when the app isn't installed).
 //
 // Uses try/catch rather than canOpenURL — canOpenURL('spotify://') requires
 // LSApplicationQueriesSchemes on iOS and returns false even when the app is installed
 // if the scheme isn't declared there, causing it to always fall into the WebView branch.
 export const openSpotifyLink = async (uri: string, webUrl: string) => {
+  const trackMatch = uri.match(/^spotify:track:([A-Za-z0-9]+)$/)
+  if (trackMatch && _activeViewerToken) {
+    try {
+      const cp = await getCurrentlyPlaying(_activeViewerToken)
+      if (cp && !('unauthorized' in cp) && cp.isPlaying) {
+        const ok = await playTrack(_activeViewerToken, uri)
+        if (ok) return
+        // playTrack failed (no premium / no active device race / API error) —
+        // fall through to opening the app so the user still gets the track.
+      }
+    } catch {
+      // network/API error — fall through to open behavior
+    }
+  }
   try {
     await Linking.openURL(uri)
   } catch {
@@ -437,6 +496,12 @@ export const getCurrentlyPlaying = async (accessToken: string) => {
       progressMs: data.progress_ms,
       durationMs: data.item.duration_ms,
       isPlaying: data.is_playing,
+      // Active device name (e.g. "oraimo SpaceBuds Hybrid") for the now-playing
+      // strip's "playing on …" line. Spotify returns the device block when the
+      // user-read-playback-state scope is granted; null when scope is missing
+      // or no device info is in the response.
+      deviceName: (data.device?.name as string | undefined) ?? null,
+      deviceType: (data.device?.type as string | undefined) ?? null,
     }
 
   } catch (error) {
@@ -741,7 +806,11 @@ export const getValidSpotifyToken = async (userId: string): Promise<string | nul
     // Token expired (or about to) — try to refresh
     if (!profile.spotify_refresh_token) return null
     const refreshed = await refreshSpotifyToken(userId, profile.spotify_refresh_token)
-    return refreshed ?? null
+    if (refreshed.ok) return refreshed.accessToken
+    // Transient failure: the stale access token may still have a few seconds left
+    // (Spotify accepts tokens up to a minute past expiry), so it's worth returning.
+    if (!refreshed.dead && msLeft > -60_000) return profile.spotify_access_token
+    return null
   } catch {
     return null
   }
@@ -1300,10 +1369,13 @@ export const playTracks = async (
 };
 
 // Play a specific track immediately by its Spotify URI (e.g. "spotify:track:<id>").
-// Requires an active Spotify device; silently no-ops if none is available.
-export const playTrack = async (accessToken: string, trackUri: string): Promise<void> => {
+// Requires an active Spotify device. Returns true on success, false otherwise
+// (no active device → 404, no premium → 403, network error, etc.). Callers
+// like openSpotifyLink use the false to decide whether to fall back to opening
+// the Spotify app instead.
+export const playTrack = async (accessToken: string, trackUri: string): Promise<boolean> => {
   try {
-    await fetch('https://api.spotify.com/v1/me/player/play', {
+    const res = await fetch('https://api.spotify.com/v1/me/player/play', {
       method: 'PUT',
       headers: {
         Authorization:  `Bearer ${accessToken}`,
@@ -1311,8 +1383,10 @@ export const playTrack = async (accessToken: string, trackUri: string): Promise<
       },
       body: JSON.stringify({ uris: [trackUri] }),
     })
+    return res.ok || res.status === 202 || res.status === 204
   } catch (e) {
     console.log('[Spotify] playTrack error:', e)
+    return false
   }
 }
 

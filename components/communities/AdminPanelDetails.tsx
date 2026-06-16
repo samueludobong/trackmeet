@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, Image, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { uploadImageToStorage } from "../../services/storage";
@@ -67,7 +68,7 @@ export function AdminPanelDetails(p: Props) {
   return (
     <>
       <TouchableOpacity style={a.avatarPick} onPress={pickImage} activeOpacity={0.8}>
-        {p.imageUri ? <Image source={{ uri: p.imageUri }} style={{ width: 100, height: 100, borderRadius: 22 }} />
+        {p.imageUri ? <CachedImage source={{ uri: p.imageUri }} style={{ width: 100, height: 100, borderRadius: 22 }} />
           : <Ionicons name="image-outline" size={30} color="rgba(255,255,255,0.4)" />}
         {uploading && <View style={[StyleSheet.absoluteFill, a.uploadOverlay]}><ActivityIndicator color="#fff" /></View>}
         <View style={a.editBadge}><Ionicons name="camera" size={12} color="#fff" /></View>
@@ -78,7 +79,7 @@ export function AdminPanelDetails(p: Props) {
 
       <Text style={a.label}>BANNER</Text>
       <TouchableOpacity style={a.bannerPick} onPress={pickBanner} activeOpacity={0.85}>
-        {p.bannerUri ? <Image source={{ uri: p.bannerUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        {p.bannerUri ? <CachedImage source={{ uri: p.bannerUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
           : <View style={[StyleSheet.absoluteFill, { backgroundColor: p.bannerColor ?? "#AB00FF" }]} />}
         {bannerUploading && <View style={[StyleSheet.absoluteFill, a.uploadOverlay]}><ActivityIndicator color="#fff" /></View>}
         <View style={a.bannerPickHint}><Ionicons name="image-outline" size={14} color="#fff" /><Text style={a.bannerPickHintText}>{p.bannerUri ? "Change banner" : "Upload banner"}</Text></View>
@@ -105,7 +106,7 @@ export function AdminPanelDetails(p: Props) {
       <Text style={a.label}>LINKED ARTIST</Text>
       {p.artist ? (
         <View style={a.chip}>
-          {p.artist.avatar_url ? <Image source={{ uri: p.artist.avatar_url }} style={a.chipImg} />
+          {p.artist.avatar_url ? <CachedImage source={{ uri: p.artist.avatar_url }} style={a.chipImg} />
             : <View style={[a.chipImg, a.chipFallback]}><Ionicons name="musical-note" size={14} color="#AB00FF" /></View>}
           <Text style={a.chipName} numberOfLines={1}>{p.artist.name}</Text>
           <TouchableOpacity onPress={() => p.setArtist(null)} hitSlop={8}>
@@ -119,7 +120,7 @@ export function AdminPanelDetails(p: Props) {
             <View style={a.suggestBox}>
               {artistResults.map((ar) => (
                 <TouchableOpacity key={ar.id} style={a.suggestRow} activeOpacity={0.75} onPress={() => { p.setArtist(ar); setArtistQuery(""); setArtistResults([]); }}>
-                  {ar.avatar_url ? <Image source={{ uri: ar.avatar_url }} style={a.suggestImg} />
+                  {ar.avatar_url ? <CachedImage source={{ uri: ar.avatar_url }} style={a.suggestImg} />
                     : <View style={[a.suggestImg, a.chipFallback]}><Ionicons name="musical-note" size={13} color="#AB00FF" /></View>}
                   <Text style={a.suggestName} numberOfLines={1}>{ar.name}</Text>
                 </TouchableOpacity>

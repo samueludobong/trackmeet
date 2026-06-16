@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { s } from "../../app/userProfile.styles";
@@ -37,7 +38,7 @@ export function OtherProfileBody({ profile, isFollowing, followLoading, follower
     <>
           <View style={s.card}>            <View style={s.bannerWrap}>
               {profile.banner_image_url ? (
-                <Image source={{ uri: profile.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                <CachedImage source={{ uri: profile.banner_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
               ) : profile.banner_color ? (
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: profile.banner_color }]} />
               ) : (
@@ -71,7 +72,7 @@ export function OtherProfileBody({ profile, isFollowing, followLoading, follower
                     style={s.avatarLiveRing}
                   >
                     {profile.avatar_url ? (
-                      <Image source={{ uri: profile.avatar_url }} style={s.avatarRingImg} />
+                      <CachedImage source={{ uri: profile.avatar_url }} style={s.avatarRingImg} />
                     ) : (
                       <View style={[s.avatarRingImg, s.avatarRingFallback]}>
                         <Text style={s.avatarInitials}>{getInitials(profile.display_name)}</Text>
@@ -83,7 +84,7 @@ export function OtherProfileBody({ profile, isFollowing, followLoading, follower
                   </View>
                 </View>
               ) : profile.avatar_url ? (
-                <Image source={{ uri: profile.avatar_url }} style={s.avatarImg} />
+                <CachedImage source={{ uri: profile.avatar_url }} style={s.avatarImg} />
               ) : (
                 <View style={s.avatar}>
                   <Text style={s.avatarInitials}>{getInitials(profile.display_name)}</Text>

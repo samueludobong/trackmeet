@@ -1,9 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable,
-  TextInput, Platform, Image, KeyboardAvoidingView, ActivityIndicator, Alert,
-  Keyboard, TouchableWithoutFeedback, ScrollView,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, KeyboardAvoidingView, ActivityIndicator, Alert, Keyboard, TouchableWithoutFeedback, ScrollView } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { type CuratedPlaylist } from "../../lib/feed/types";
@@ -157,7 +154,7 @@ export function EditPlaylistOverlay({
               <View style={{ alignItems: "center", marginTop: 16, marginBottom: 24 }}>
                 <TouchableOpacity activeOpacity={0.85} onPress={pickImage} style={styles.imagePicker}>
                   {imageUri ? (
-                    <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                    <CachedImage source={{ uri: imageUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                   ) : (
                     <View style={[StyleSheet.absoluteFill, styles.imagePickerEmpty]}>
                       <FontAwesome5 name="image" size={26} color="rgba(255,255,255,0.35)" />

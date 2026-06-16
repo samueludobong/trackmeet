@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
-import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView, Image,
-  ActivityIndicator, Alert, Switch, TextInput, Platform, KeyboardAvoidingView,
-} from "react-native";
+import { Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Switch, TextInput, Platform, KeyboardAvoidingView } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { openSpotifyLink } from "../../lib/spotify";
@@ -203,7 +201,7 @@ export function GroupSettingsScreen({
                     key={m.id} style={s.mediaCell} activeOpacity={0.85}
                     onPress={() => m.spotify_track_id && openSpotifyLink(`spotify:track:${m.spotify_track_id}`, `https://open.spotify.com/track/${m.spotify_track_id}`)}
                   >
-                    <Image source={{ uri: m.spotify_album_art! }} style={s.mediaImg} />
+                    <CachedImage source={{ uri: m.spotify_album_art! }} style={s.mediaImg} />
                   </TouchableOpacity>
                 ))}
               </View>
@@ -229,7 +227,7 @@ export function GroupSettingsScreen({
                 </View>
                 {addResults.map((u) => (
                   <TouchableOpacity key={u.id} style={s.memberRow} activeOpacity={0.8} onPress={() => addMember(u)}>
-                    {u.avatar_url ? <Image source={{ uri: u.avatar_url }} style={s.memberAvatar} />
+                    {u.avatar_url ? <CachedImage source={{ uri: u.avatar_url }} style={s.memberAvatar} />
                       : <View style={[s.memberAvatar, s.fallback]}><Ionicons name="person" size={15} color={color} /></View>}
                     <Text style={s.memberName} numberOfLines={1}>{u.display_name || u.username}</Text>
                     <Ionicons name="add-circle-outline" size={20} color={color} />
@@ -240,7 +238,7 @@ export function GroupSettingsScreen({
 
             {members.map((m) => (
               <TouchableOpacity key={m.user_id} style={s.memberRow} activeOpacity={isAdmin ? 0.7 : 1} onPress={() => isAdmin && memberMenu(m)}>
-                {m.user?.avatar_url ? <Image source={{ uri: m.user.avatar_url }} style={s.memberAvatar} />
+                {m.user?.avatar_url ? <CachedImage source={{ uri: m.user.avatar_url }} style={s.memberAvatar} />
                   : <View style={[s.memberAvatar, s.fallback]}><Ionicons name="person" size={15} color={color} /></View>}
                 <View style={{ flex: 1 }}>
                   <Text style={s.memberName} numberOfLines={1}>

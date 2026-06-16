@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { s } from "../../app/userProfile.styles";
-import { View, Text, TouchableOpacity, Image, Animated } from "react-native";
+import { View, Text, TouchableOpacity, Animated } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { openSpotifyLink } from "../../lib/spotify";
@@ -130,7 +131,7 @@ export function NowListeningCard({
 
       <View style={s.npBody}>
         {song.albumArt ? (
-          <Image source={{ uri: song.albumArt }} style={s.npAlbumArt} />
+          <CachedImage source={{ uri: song.albumArt }} style={s.npAlbumArt} />
         ) : (
           <View style={[s.npAlbumArt, s.npAlbumArtFallback]}>
             <FontAwesome5 name="music" size={18} color="rgba(255,255,255,0.3)" />

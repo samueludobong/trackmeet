@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { openSpotifyLink } from "../../lib/spotify";
@@ -38,7 +39,7 @@ export function SpotifyTrackCard({
   return (
     <View style={[spCard.card, fromMe && spCard.cardMe]}>
       {track.albumArt ? (
-        <Image source={{ uri: track.albumArt }} style={spCard.art} resizeMode="cover" />
+        <CachedImage source={{ uri: track.albumArt }} style={spCard.art} resizeMode="cover" />
       ) : (
         <View style={spCard.artFallback}>
           <Ionicons name="musical-notes" size={22} color="#1DB954" />

@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { styles } from "../../app/signup.styles";
 
@@ -12,7 +13,7 @@ export function SignupAccountsList({ savedAccounts, handleSelectSavedAccount, ha
       {savedAccounts.map((account: any) => (
         <TouchableOpacity key={account.email} style={styles.savedAccountCard} activeOpacity={0.82} onPress={() => handleSelectSavedAccount(account)}>
           {account.avatarUrl ? (
-            <Image source={{ uri: account.avatarUrl }} style={styles.savedAccountAvatar} />
+            <CachedImage source={{ uri: account.avatarUrl }} style={styles.savedAccountAvatar} />
           ) : (
             <View style={[styles.savedAccountAvatar, styles.savedAccountAvatarFallback]}>
               <Text style={styles.savedAccountInitials}>{(account.displayName || account.username || "?").slice(0, 1).toUpperCase()}</Text>

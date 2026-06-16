@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Image, TouchableOpacity, StyleSheet, Platform, type TextStyle } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Platform, type TextStyle } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 
 // ─── Font picker presets ─────────────────────────────────────────────────────
@@ -118,7 +119,7 @@ function DesignMinimal({
       <View style={{ paddingHorizontal: 18, flex: 1 }}>
         <View style={{ flex: 1, borderRadius: 18, overflow: "hidden", backgroundColor: "#f1f1f1", justifyContent: "flex-end" }}>
           {song.albumArt
-            ? <Image source={{ uri: song.albumArt }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            ? <CachedImage source={{ uri: song.albumArt }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
             : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "#e5e5e5", alignItems: "center", justifyContent: "center" }]}>
                 <FontAwesome5 name="music" size={28} color="rgba(0,0,0,0.2)" />
               </View>}
@@ -156,7 +157,7 @@ function DesignDarkHero({
     <View style={[s.card, { width: size, height: size, backgroundColor: "#0D0D0D" }]}>
       <View style={{ flex: 1, margin: 14, borderRadius: 22, overflow: "hidden", backgroundColor: "#1a1a1a" }}>
         {song.albumArt
-          ? <Image source={{ uri: song.albumArt }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          ? <CachedImage source={{ uri: song.albumArt }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           : <View style={[StyleSheet.absoluteFillObject, { alignItems: "center", justifyContent: "center" }]}>
               <FontAwesome5 name="music" size={36} color="rgba(255,255,255,0.2)" />
             </View>}
@@ -207,7 +208,7 @@ function DesignProfileHeader({
       {/* Top: dark header band with avatar/handle/like */}
       <View style={{ backgroundColor: "#1a1a1a", padding: 14, flexDirection: "row", alignItems: "center", gap: 10 }}>
         {author.avatar_url
-          ? <Image source={{ uri: author.avatar_url }} style={{ width: 38, height: 38, borderRadius: 19 }} />
+          ? <CachedImage source={{ uri: author.avatar_url }} style={{ width: 38, height: 38, borderRadius: 19 }} />
           : <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: "#AB00FF", alignItems: "center", justifyContent: "center" }}>
               <Text style={{ color: "#fff", fontWeight: "800" }}>{initials}</Text>
             </View>}
@@ -231,7 +232,7 @@ function DesignProfileHeader({
       {/* Middle: artwork */}
       <View style={{ flex: 1, backgroundColor: "#000" }}>
         {song.albumArt
-          ? <Image source={{ uri: song.albumArt }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          ? <CachedImage source={{ uri: song.albumArt }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
           : <View style={[StyleSheet.absoluteFillObject, { alignItems: "center", justifyContent: "center" }]}>
               <FontAwesome5 name="music" size={36} color="rgba(255,255,255,0.18)" />
             </View>}

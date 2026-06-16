@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, Image, ActivityIndicator, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, ActivityIndicator, Linking } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { linksSheetStyles } from "../../lib/feed/localStyles";
 import { parseSpotifyUrl, fetchSpotifyLinkInfo, type SpotifyLinkInfo } from "../../lib/feed/helpers";
@@ -75,7 +76,7 @@ export function LinksSheet({
             ? isLoading
               ? <View style={linksSheetStyles.spotifyWrap}><ActivityIndicator size="small" color="#1DB954" /></View>
               : meta?.imageUrl
-                ? <Image source={{ uri: meta.imageUrl }} style={meta.resourceType === "artist" ? linksSheetStyles.artCircle : linksSheetStyles.art} />
+                ? <CachedImage source={{ uri: meta.imageUrl }} style={meta.resourceType === "artist" ? linksSheetStyles.artCircle : linksSheetStyles.art} />
                 : <View style={linksSheetStyles.spotifyWrap}><FontAwesome5 name="spotify" size={20} color="#1DB954" /></View>
             : <View style={linksSheetStyles.iconWrap}><FontAwesome5 name="link" size={14} color="#FF6C1A" /></View>;
 

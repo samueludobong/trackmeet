@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  View, Text, TouchableOpacity, TextInput, Image, ActivityIndicator,
-  StyleSheet, FlatList,
-} from "react-native";
+import { View, Text, TouchableOpacity, TextInput, ActivityIndicator, StyleSheet, FlatList } from "react-native";
+import { CachedImage } from "../components/ui/CachedImage";
 import { useRouter } from "expo-router";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
@@ -181,7 +179,7 @@ function MusicComposer() {
                   <Text style={s.sectionHeader}>Now playing</Text>
                   <TouchableOpacity activeOpacity={0.8} style={s.trackRow} onPress={() => onPick(nowPlaying!)}>
                     {nowPlaying!.albumArt ? (
-                      <Image source={{ uri: nowPlaying!.albumArt }} style={s.trackArt} />
+                      <CachedImage source={{ uri: nowPlaying!.albumArt }} style={s.trackArt} />
                     ) : (
                       <View style={[s.trackArt, s.trackArtFallback]}>
                         <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
@@ -205,7 +203,7 @@ function MusicComposer() {
           renderItem={({ item }) => (
             <TouchableOpacity activeOpacity={0.8} style={s.trackRow} onPress={() => onPick(item)}>
               {item.albumArt ? (
-                <Image source={{ uri: item.albumArt }} style={s.trackArt} />
+                <CachedImage source={{ uri: item.albumArt }} style={s.trackArt} />
               ) : (
                 <View style={[s.trackArt, s.trackArtFallback]}>
                   <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />

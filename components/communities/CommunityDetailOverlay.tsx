@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
-import {
-  Modal, View, Text, ScrollView, TouchableOpacity, TextInput,
-  ActivityIndicator, Platform, KeyboardAvoidingView, StyleSheet, Image, Alert,
-} from "react-native";
+import { Modal, View, Text, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Platform, KeyboardAvoidingView, StyleSheet, Alert } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -343,7 +341,7 @@ export function CommunityDetailOverlay({
                 {attachedSong && (
                   <View style={x.attachedChip}>
                     {attachedSong.albumArt
-                      ? <Image source={{ uri: attachedSong.albumArt }} style={x.attachedArt} />
+                      ? <CachedImage source={{ uri: attachedSong.albumArt }} style={x.attachedArt} />
                       : <View style={[x.attachedArt, { backgroundColor: "rgba(29,185,84,0.18)" }]} />}
                     <View style={{ flex: 1 }}>
                       <Text style={x.attachedName} numberOfLines={1}>{attachedSong.name}</Text>
@@ -377,7 +375,7 @@ export function CommunityDetailOverlay({
                         onPress={() => { setAttachedSong(t); setSongSearchOpen(false); setSongQuery(""); setSongResults([]); }}
                       >
                         {t.albumArt
-                          ? <Image source={{ uri: t.albumArt }} style={x.attachedArt} />
+                          ? <CachedImage source={{ uri: t.albumArt }} style={x.attachedArt} />
                           : <View style={[x.attachedArt, { backgroundColor: "rgba(29,185,84,0.18)" }]} />}
                         <View style={{ flex: 1 }}>
                           <Text style={x.attachedName} numberOfLines={1}>{t.name}</Text>

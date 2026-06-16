@@ -1,8 +1,9 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { styles } from "../../lib/feed/styles";
+import { CachedImage } from "../ui/CachedImage";
 import { AVATAR_MAP, type Post } from "../../app/data/mock";
 
 export function PostHeader({ post }: { post: Post }) {
@@ -16,9 +17,9 @@ export function PostHeader({ post }: { post: Post }) {
   };
 
   const avatarEl = post.avatarUrl ? (
-    <Image source={{ uri: post.avatarUrl }} style={styles.postAvatar} />
+    <CachedImage source={{ uri: post.avatarUrl }} style={styles.postAvatar} recyclingKey={post.avatarUrl} />
   ) : photo ? (
-    <Image source={photo} style={styles.postAvatar} />
+    <CachedImage source={photo} style={styles.postAvatar} />
   ) : (
     <View style={[styles.postAvatar, { backgroundColor: post.avatarColor + "22" }]}>
       <Text style={[styles.postAvatarText, { color: post.avatarColor }]}>{post.initials}</Text>

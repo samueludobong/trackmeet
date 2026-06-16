@@ -1,5 +1,6 @@
 import React from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";
 
 /** Square avatar — uploaded image, else first letter of name on gradient bg. */
@@ -14,7 +15,7 @@ export function CommunityAvatar({
 }) {
   const r = radius ?? Math.round(size * 0.28);
   if (uri) {
-    return <Image source={{ uri }} style={[styles.base, { width: size, height: size, borderRadius: r }]} />;
+    return <CachedImage source={{ uri }} style={[styles.base, { width: size, height: size, borderRadius: r }]} />;
   }
   const c = color || "#AB00FF";
   return (

@@ -3,7 +3,8 @@ import { MeetMusicPanel } from "../../components/meets/MeetMusicPanel";
 import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
 import { useMeetMusicControl } from "../../hooks/useMeetMusicControl";
 import { useMeetHost } from "../../hooks/useMeetHost";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, Image, KeyboardAvoidingView, PanResponder } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, PanResponder } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { SW } from "../../lib/feed/dimensions";
 import { VideoView } from "expo-video";
 import { Ionicons } from "@expo/vector-icons";
@@ -46,7 +47,7 @@ export function MeetLiveScreen({
 
   const music = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl });
   const {
-    slideAnim, musicSlideX, canvasUrl, ctrlLoading, pickerOpen, apiToken, player, openMusicPicker, closeMusicPicker, pickerOpenRef,
+    slideAnim, musicSlideX, canvasUrl, ctrlLoading, pickerOpen, setPickerOpen, apiToken, player, openMusicPicker, closeMusicPicker, pickerOpenRef,
     handlePrev, handleNext, handlePlayPause, fmtMs, progressPct,
   } = music;
   apiTokenRef.current = apiToken;
@@ -55,33 +56,94 @@ export function MeetLiveScreen({
   const title = jam ? (jam.otherName || "Jam") : (meetName ?? "My Meet");
 
   // ── Page swipe pager: Lyrics ← Playback → Music ──────────────────────────────
-  // Lyrics slides in from the LEFT (right-swipe), music from the RIGHT
-  // (left-swipe); the inverse swipe on either returns to playback.
+  // An *interactive* pager: the music page (slides from the right) and lyrics
+  // page (slides from the left) follow your finger 1:1 during the drag, then
+  // settle open/closed on release by position + flick. Same feel either side.
   const lyricsSlideX = useRef(new Animated.Value(-SW)).current;
   const lyricsOpenRef = useRef(false);
   lyricsOpenRef.current = lyricsOpen;
   const openLyrics = () => {
     setLyricsOpen(true);
-    Animated.spring(lyricsSlideX, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }).start();
+    Animated.spring(lyricsSlideX, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 220 }).start();
   };
   const closeLyrics = () => {
-    Animated.timing(lyricsSlideX, { toValue: -SW, useNativeDriver: true, duration: 240 }).start(() => setLyricsOpen(false));
+    Animated.timing(lyricsSlideX, { toValue: -SW, useNativeDriver: true, duration: 200 }).start(() => setLyricsOpen(false));
+  };
+
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+  const dragModeRef = useRef<null | "music" | "lyrics">(null);
+  const dragBaseRef = useRef(0);   // slide value where the drag started
+  const dragOffRef = useRef(0);    // dx at the moment the drag was recognised
+  const settle = (mode: "music" | "lyrics", cur: number, vx: number) => {
+    if (mode === "music") {
+      // musicSlideX: 0 = open, SW = closed. Left flick / past halfway → open.
+      const open = vx < -0.35 ? true : vx > 0.35 ? false : cur < SW * 0.5;
+      if (open) Animated.spring(musicSlideX, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 220 }).start();
+      else Animated.timing(musicSlideX, { toValue: SW, useNativeDriver: true, duration: 180 }).start(() => setPickerOpen(false));
+    } else {
+      // lyricsSlideX: 0 = open, -SW = closed. Right flick / past halfway → open.
+      const open = vx > 0.35 ? true : vx < -0.35 ? false : cur > -SW * 0.5;
+      if (open) Animated.spring(lyricsSlideX, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 220 }).start();
+      else Animated.timing(lyricsSlideX, { toValue: -SW, useNativeDriver: true, duration: 180 }).start(() => setLyricsOpen(false));
+    }
   };
   const pagePan = useRef(
     PanResponder.create({
-      // Claim clearly-horizontal swipes (either direction) EARLY — a low
-      // threshold + modest ratio so it wins over the lyrics/music inner
-      // scrollers before they commit to a vertical scroll. Vertical still passes.
-      onMoveShouldSetPanResponderCapture: (_, { dx, dy }) =>
-        Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.1,
-      onPanResponderRelease: (_, { dx, vx }) => {
-        const left  = dx < -50 || vx < -0.3;
-        const right = dx >  50 || vx >  0.3;
-        if (pickerOpenRef.current) { if (right) closeMusicPicker(); return; }   // music → playback
-        if (lyricsOpenRef.current) { if (left)  closeLyrics();      return; }   // lyrics → playback
-        if (left)  openMusicPicker();   // playback → music
-        else if (right) openLyrics();   // playback → lyrics
+      // Never grab plain taps — children (chat input, buttons, the lyrics
+      // scroll, etc.) need them.
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      // Only claim once the user has committed to a *clearly* horizontal drag.
+      // Previously `dx > 4 && dx > dy * 0.6` was too lenient: accidental
+      // diagonal twitches captured, and on the chat area the child scroll
+      // sometimes won the race so the pager felt stuck. New rule:
+      //  • dx must be > 10px (filters tap jitter)
+      //  • horizontal must dominate vertical by 1.6× on playback, 2× on a panel
+      //    (so vertical scrolling in lyrics / music panel always wins)
+      // Same threshold on both capture (preempt children) and non-capture
+      // (catch-up if a child slipped past us first), for resilience.
+      onMoveShouldSetPanResponderCapture: (_, { dx, dy }) => {
+        const onPanel = pickerOpenRef.current || lyricsOpenRef.current;
+        return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * (onPanel ? 2 : 1.6);
       },
+      onMoveShouldSetPanResponder: (_, { dx, dy }) => {
+        const onPanel = pickerOpenRef.current || lyricsOpenRef.current;
+        return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * (onPanel ? 2 : 1.6);
+      },
+      // Once we own the horizontal drag, never give it back — a momentary
+      // vertical wiggle mid-swipe shouldn't cancel into a scroll.
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
+      onPanResponderGrant: () => {
+        // A page already open → we're dragging it back toward playback (base 0).
+        dragModeRef.current = pickerOpenRef.current ? "music" : lyricsOpenRef.current ? "lyrics" : null;
+        dragBaseRef.current = 0;
+        dragOffRef.current = 0;
+      },
+      onPanResponderMove: (_, { dx }) => {
+        let mode = dragModeRef.current;
+        if (!mode) {
+          // From playback: the swipe direction picks the page, mounted off-screen.
+          if (dx < 0) { mode = "music";  dragBaseRef.current = SW;  setPickerOpen(true); }
+          else        { mode = "lyrics"; dragBaseRef.current = -SW; setLyricsOpen(true); }
+          dragModeRef.current = mode;
+          dragOffRef.current = dx;   // so the page starts exactly under the finger
+        }
+        const d = dx - dragOffRef.current;
+        if (mode === "music")  musicSlideX.setValue(clamp(dragBaseRef.current + d, 0, SW));
+        else                   lyricsSlideX.setValue(clamp(dragBaseRef.current + d, -SW, 0));
+      },
+      onPanResponderRelease: (_, { dx, vx }) => {
+        const mode = dragModeRef.current;
+        dragModeRef.current = null;
+        if (!mode) return;
+        const d = dx - dragOffRef.current;
+        const cur = mode === "music"
+          ? clamp(dragBaseRef.current + d, 0, SW)
+          : clamp(dragBaseRef.current + d, -SW, 0);
+        settle(mode, cur, vx);
+      },
+      onPanResponderTerminate: () => { dragModeRef.current = null; },
     }),
   ).current;
 
@@ -97,7 +159,7 @@ export function MeetLiveScreen({
         {canvasUrl ? (
           <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} allowsFullscreen={false} />
         ) : displayTrack?.albumArt ? (
-          <Image source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <CachedImage source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
         )}
@@ -257,7 +319,7 @@ export function MeetLiveScreen({
         {lyricsOpen && (
           <Animated.View style={[mlStyles.lyricsPage, { transform: [{ translateX: lyricsSlideX }] }]}>
             {displayTrack?.albumArt && (
-              <Image source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={22} />
+              <CachedImage source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={22} />
             )}
             <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(8,0,6,0.82)" }]} />
             <View style={mlStyles.musicHeader}>

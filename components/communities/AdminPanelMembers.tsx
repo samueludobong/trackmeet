@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Image, Text, TextInput, TouchableOpacity, View, StyleSheet } from "react-native";
+import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity, View, StyleSheet } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import {
   listMembers, setMemberRole, removeMember, transferOwnership,
@@ -123,7 +124,7 @@ export function AdminPanelMembers({
         const isSelf = m.user_id === viewerId;
         return (
           <View key={m.user_id} style={a.memberRow}>
-            {m.user?.avatar_url ? <Image source={{ uri: m.user.avatar_url }} style={a.memberAvatar} />
+            {m.user?.avatar_url ? <CachedImage source={{ uri: m.user.avatar_url }} style={a.memberAvatar} />
               : <View style={[a.memberAvatar, a.chipFallback]}><Ionicons name="person" size={16} color="#AB00FF" /></View>}
             <View style={{ flex: 1 }}>
               <Text style={a.memberName} numberOfLines={1}>
@@ -145,7 +146,7 @@ export function AdminPanelMembers({
           <Text style={[a.sectionTitle, { marginTop: 16 }]}>BANNED ({bans.length})</Text>
           {bans.map((b) => (
             <View key={b.user_id} style={a.memberRow}>
-              {b.user?.avatar_url ? <Image source={{ uri: b.user.avatar_url }} style={[a.memberAvatar, { opacity: 0.5 }]} />
+              {b.user?.avatar_url ? <CachedImage source={{ uri: b.user.avatar_url }} style={[a.memberAvatar, { opacity: 0.5 }]} />
                 : <View style={[a.memberAvatar, a.chipFallback, { opacity: 0.5 }]}><Ionicons name="person" size={16} color="#AB00FF" /></View>}
               <View style={{ flex: 1 }}>
                 <Text style={[a.memberName, { color: "rgba(255,255,255,0.55)" }]} numberOfLines={1}>

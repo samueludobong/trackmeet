@@ -53,8 +53,13 @@ if (!isExpoGo) {
 
       if (msLeft < 60_000 && profile.spotify_refresh_token) {
         const refreshed = await refreshSpotifyToken(user.id, profile.spotify_refresh_token)
-        if (!refreshed) return BackgroundFetch.BackgroundFetchResult.Failed
-        token = refreshed
+        if (!refreshed.ok) {
+          // Transient Spotify failures get retried on the next background tick;
+          // a dead refresh token can't be recovered from a background task, so
+          // also bail and let the next foreground poll prompt reconnect.
+          return BackgroundFetch.BackgroundFetchResult.Failed
+        }
+        token = refreshed.accessToken
       }
 
       if (!token) return BackgroundFetch.BackgroundFetchResult.NoData

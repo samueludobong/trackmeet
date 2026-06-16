@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from "react";
-import { View, Text, ScrollView, Image } from "react-native";
+import { View, Text, ScrollView } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { type MeetMessage } from "../../services/meets";
 import { mcStyles } from "../../lib/feed/localStyles";
 
@@ -27,7 +28,7 @@ export function MeetChatList({ messages }: { messages: MeetMessage[] }) {
         return (
           <View key={m.id} style={mcStyles.row}>
             {m.author?.avatar_url ? (
-              <Image source={{ uri: m.author.avatar_url }} style={mcStyles.avatar} />
+              <CachedImage source={{ uri: m.author.avatar_url }} style={mcStyles.avatar} />
             ) : (
               <View style={[mcStyles.avatar, mcStyles.avatarFallback]}>
                 <Text style={mcStyles.avatarLetter}>{name.slice(0, 1).toUpperCase()}</Text>

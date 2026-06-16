@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { ProfilePlaylistsTab } from "../../components/profile/ProfilePlaylistsTab";
 import { useProfileTabsData } from "../../hooks/useProfileTabsData";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ActivityIndicator, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, ActivityIndicator } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { profileStyles } from "../../lib/feed/localStyles";
@@ -115,7 +116,7 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
           communities.map((co) => (
             <TouchableOpacity key={co.id} style={profileStyles.communityCard} activeOpacity={0.82} onPress={() => setOpenCommunity(co)}>
               {co.avatar_url ? (
-                <Image source={{ uri: co.avatar_url }} style={cStyles.avatar} />
+                <CachedImage source={{ uri: co.avatar_url }} style={cStyles.avatar} />
               ) : (
                 <View style={[cStyles.avatar, cStyles.avatarFallback]}>
                   <Ionicons name="people" size={20} color="rgba(255,255,255,0.5)" />

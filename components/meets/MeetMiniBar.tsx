@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { mbStyles } from "../../lib/feed/localStyles";
@@ -34,7 +35,7 @@ export function MeetMiniBar({
         onPress={onExpand}
       >
         {albumArt ? (
-          <Image source={{ uri: albumArt }} style={mbStyles.art} />
+          <CachedImage source={{ uri: albumArt }} style={mbStyles.art} />
         ) : (
           <View style={[mbStyles.art, mbStyles.artFallback]}>
             <Ionicons name="musical-note" size={16} color="#fff" />

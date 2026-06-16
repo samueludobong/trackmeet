@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image, ActivityIndicator } from "react-native";
+import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { type ConversationInfo } from "../../services/messages";
 import { msgStyles } from "../../lib/feed/localStyles";
@@ -63,7 +64,7 @@ export function DirectMessagesList({ conversations, loading, onSelect }: {
           >
             <View style={msgStyles.dmAvatarWrap}>
               {conv.otherUser.avatar_url ? (
-                <Image source={{ uri: conv.otherUser.avatar_url }} style={{ width: 56, height: 56, borderRadius: 28 }} />
+                <CachedImage source={{ uri: conv.otherUser.avatar_url }} style={{ width: 56, height: 56, borderRadius: 28 }} />
               ) : (
                 <View style={[msgStyles.dmAvatar, { backgroundColor: "#AB00FF33" }]}>
                   <Text style={msgStyles.dmAvatarText}>{initials(conv.otherUser)}</Text>

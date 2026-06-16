@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { type SpotifyPlaylist } from "../../lib/spotify";
 import { profileStyles } from "../../lib/feed/localStyles";
 
@@ -8,7 +9,7 @@ export function SpotifyPlaylistCard({ pl, onPress }: { pl: SpotifyPlaylist; onPr
     <TouchableOpacity style={profileStyles.playlistListItem} onPress={onPress} activeOpacity={0.82}>
       <View style={[profileStyles.playlistListArt, { backgroundColor: '#0a1a0a' }]}>
         {pl.imageUrl
-          ? <Image source={{ uri: pl.imageUrl }} style={{ width: 56, height: 56 }} resizeMode="cover" />
+          ? <CachedImage source={{ uri: pl.imageUrl }} style={{ width: 56, height: 56 }} resizeMode="cover" />
           : <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontSize: 22 }}>🎵</Text>
             </View>

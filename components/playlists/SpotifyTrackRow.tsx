@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { type SpotifyTrackResult } from "../../lib/spotify";
 import { pdStyles } from "../../lib/feed/localStyles";
 
@@ -7,7 +8,7 @@ export function SpotifyTrackRow({ track, accent }: { track: SpotifyTrackResult; 
   return (
     <TouchableOpacity style={pdStyles.songRow} activeOpacity={0.75}>
       {track.albumArt
-        ? <Image source={{ uri: track.albumArt }} style={[pdStyles.songArt, { borderRadius: 8 }]} />
+        ? <CachedImage source={{ uri: track.albumArt }} style={[pdStyles.songArt, { borderRadius: 8 }]} />
         : <View style={[pdStyles.songArt, { backgroundColor: accent + '30', alignItems: 'center', justifyContent: 'center' }]}>
             <Text style={{ fontSize: 13 }}>🎵</Text>
           </View>

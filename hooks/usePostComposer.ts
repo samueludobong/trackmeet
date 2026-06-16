@@ -8,7 +8,7 @@ import { dbRowToPost } from "../lib/feed/helpers";
 import { type Post } from "../app/data/mock";
 import { type NowPlayingTrack } from "./useNowPlaying";
 
-export function usePostComposer({ visible, onClose, currentUser, onPosted, initialText }: { visible: boolean; onClose: () => void; currentUser: ComposerUser | null; onPosted: (post: Post) => void; initialText?: string }) {
+export function usePostComposer({ visible, onClose, currentUser, onPosted, initialText, initialTrack }: { visible: boolean; onClose: () => void; currentUser: ComposerUser | null; onPosted: (post: Post) => void; initialText?: string; initialTrack?: NowPlayingTrack | null }) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [pollMode, setPollMode] = useState(false);
@@ -27,7 +27,7 @@ export function usePostComposer({ visible, onClose, currentUser, onPosted, initi
   useEffect(() => {
     if (visible) {
       setText(initialText ?? ""); setImages([]); setPollMode(false); setMediaPickerOpen(false);
-      setPollQuestion(""); setPollOptions(["", ""]); setMusicMode(false); setAttachedTrack(null);
+      setPollQuestion(""); setPollOptions(["", ""]); setMusicMode(false); setAttachedTrack(initialTrack ?? null);
       Animated.parallel([
         Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 200 }),
         Animated.timing(backdropAnim, { toValue: 1, duration: 220, useNativeDriver: true }),

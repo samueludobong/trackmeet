@@ -1,5 +1,6 @@
 import React from "react";
-import { View, StyleSheet, Image, Dimensions } from "react-native";
+import { View, StyleSheet, Dimensions } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "react-native";
@@ -19,7 +20,7 @@ export function CommunityBanner({
   return (
     <View style={styles.cover}>
       {bannerUrl ? (
-        <Image source={{ uri: bannerUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        <CachedImage source={{ uri: bannerUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       ) : (
         <LinearGradient
           colors={[shade(base, 0.35), base, shade(base, -0.35)]}

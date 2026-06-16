@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { ds } from "../../lib/feed/localStyles";
@@ -41,7 +42,7 @@ export function ForYouRow({
                   <View style={[ds.vinylRing, { width: 80, height: 80, borderColor: rec.color + "28" }]} />
                   <View style={[ds.vinylRing, { width: 48, height: 48, borderColor: rec.color + "40" }]} />
                   <View style={[ds.vinylCenter, { backgroundColor: rec.color + "22", borderColor: rec.color + "50" }]}>
-                    {photo ? <Image source={photo} style={ds.vinylPhoto} /> : <Ionicons name="musical-note" size={16} color={rec.color} />}
+                    {photo ? <CachedImage source={photo} style={ds.vinylPhoto} /> : <Ionicons name="musical-note" size={16} color={rec.color} />}
                   </View>
                   <View style={ds.songDurationBadge}>
                     <Ionicons name="musical-note" size={8} color="rgba(255,255,255,0.5)" />
@@ -63,7 +64,7 @@ export function ForYouRow({
           return (
             <TouchableOpacity key={rec.id} style={ds.recCard} activeOpacity={0.85}>
               <View style={[ds.recThumb, { backgroundColor: rec.color + "30" }]}>
-                {photo && <Image source={photo} style={ds.recThumbImg} />}
+                {photo && <CachedImage source={photo} style={ds.recThumbImg} />}
                 <LinearGradient colors={["rgba(0,0,0,0.1)", "rgba(0,0,0,0.75)"]} style={StyleSheet.absoluteFill} />
                 <View style={ds.recPlayBtn}><Ionicons name="play" size={16} color="#fff" /></View>
                 <View style={[ds.videoBadge, { backgroundColor: rec.color }]}>

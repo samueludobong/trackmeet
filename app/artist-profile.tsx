@@ -2,7 +2,8 @@ import { type Tab } from "../types/artist";
 import { DiscographyTab, CommunitiesTab, EventsTab } from "../components/artist/ArtistTabs";
 import { fmtListeners } from "../lib/artistFormat";
 import { s } from "./artistProfile.styles";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Dimensions } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Dimensions } from "react-native";
+import { CachedImage } from "../components/ui/CachedImage";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
@@ -50,7 +51,7 @@ export default function ArtistProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false} >
         <View style={{ height: HERO_H }}>
           {heroImageUrl ? (
-            <Image source={{ uri: heroImageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            <CachedImage source={{ uri: heroImageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
           ) : (
             <LinearGradient colors={["#3D0C00", "#CC4200", "#FF6C1A"]} style={StyleSheet.absoluteFill} />
           )}

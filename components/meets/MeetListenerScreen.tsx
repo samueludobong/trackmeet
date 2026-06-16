@@ -2,7 +2,8 @@ import React, { useState, useRef } from "react";
 import { MeetGuideOverlay } from "../../components/meets/MeetGuideOverlay";
 import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
 import { useMeetListener } from "../../hooks/useMeetListener";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, Image, KeyboardAvoidingView, ActivityIndicator, PanResponder } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, ActivityIndicator, PanResponder } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -63,7 +64,7 @@ export function MeetListenerScreen({
     <Modal visible animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? handleLeave}>
       <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]} {...lyricsPan.panHandlers}>
         {trackState?.albumArt ? (
-          <Image source={{ uri: trackState.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <CachedImage source={{ uri: trackState.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
         )}
@@ -195,7 +196,7 @@ export function MeetListenerScreen({
         <View style={mlStyles.topBar}>
           <View style={mlStyles.topLeft}>
             {host?.avatar_url ? (
-              <Image source={{ uri: host.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+              <CachedImage source={{ uri: host.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />
             ) : (
               <LinearGradient colors={["#AB00FF", "#FF6C1A"]} style={mlStyles.avatarRing}>
                 <View style={mlStyles.avatarInner}>

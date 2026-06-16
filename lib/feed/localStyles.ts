@@ -832,7 +832,11 @@ export const cpStyles = StyleSheet.create({
   profileBadgeText: { fontSize: 10, fontWeight: '700', color: '#AB00FF' },
   // Dialog overlay + sheet
   dialogOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'flex-end' },
-  dialogSheet: { backgroundColor: '#161618', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.08)', maxHeight: SH * 0.88 },
+  // Bottom corners are rounded too — invisible when the sheet sits at the
+  // screen edge, but visible when the keyboard lifts it up. Border swapped from
+  // borderTopWidth to a full borderWidth so the rounded edges have the same
+  // hairline outline as the top.
+  dialogSheet: { backgroundColor: '#161618', borderTopLeftRadius: 28, borderTopRightRadius: 28, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', maxHeight: SH * 0.88 },
   dialogHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.15)', alignSelf: 'center', marginBottom: 20 },
   dialogTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 18 },
   // Image picker
@@ -1392,7 +1396,7 @@ export const profileStyles = StyleSheet.create({
   npInfo: { flex: 1, gap: 3 },
   npTitle: { fontSize: 15, fontWeight: "700", color: "#ffffff" },
   npArtist: { fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 10 },
-  npProgressTrack: { height: 3, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 2, marginBottom: 5 },
+  npProgressTrack: { height: 1, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 2, marginBottom: 5 },
   npProgressFill: { width: "35%", height: 3, backgroundColor: "#ffffff", borderRadius: 2, position: "relative" },
   npProgressThumb: { position: "absolute", right: -5, top: -4, width: 11, height: 11, borderRadius: 6, backgroundColor: "#fff" },
   npTimestamps: { flexDirection: "row", justifyContent: "space-between" },

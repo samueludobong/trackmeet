@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { type SpotifyPlaylist } from "../../lib/spotify";
 import { mlStyles } from "../../lib/feed/localStyles";
@@ -13,7 +14,7 @@ export function MusicPlaylistRow({
   return (
     <TouchableOpacity style={mlStyles.musicRow} activeOpacity={0.75} onPress={onPress}>
       {playlist.imageUrl ? (
-        <Image source={{ uri: playlist.imageUrl }} style={mlStyles.musicRowArt} />
+        <CachedImage source={{ uri: playlist.imageUrl }} style={mlStyles.musicRowArt} />
       ) : (
         <View style={[mlStyles.musicRowArt, { backgroundColor: playlist.isLiked ? "#1c4d2e" : "#1e1e22", alignItems: "center", justifyContent: "center" }]}>
           <Ionicons name={playlist.isLiked ? "heart" : "musical-notes"} size={18} color={playlist.isLiked ? "#1DB954" : "rgba(255,255,255,0.3)"} />

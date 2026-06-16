@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { type SpotifyTrackResult } from "../../lib/spotify";
 import { ms, mlStyles } from "../../lib/feed/localStyles";
@@ -18,7 +19,7 @@ export function MusicTrackRow({
   return (
     <TouchableOpacity style={mlStyles.musicRow} activeOpacity={0.75} onPress={() => onPlay(track)}>
       {track.albumArt ? (
-        <Image source={{ uri: track.albumArt }} style={mlStyles.musicRowArt} />
+        <CachedImage source={{ uri: track.albumArt }} style={mlStyles.musicRowArt} />
       ) : (
         <View style={[mlStyles.musicRowArt, { backgroundColor: "#2a2a2e", alignItems: "center", justifyContent: "center" }]}>
           <Ionicons name="musical-note" size={18} color="rgba(255,255,255,0.25)" />

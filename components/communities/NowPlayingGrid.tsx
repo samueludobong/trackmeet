@@ -1,7 +1,6 @@
 import React, { useState } from "react";
-import {
-  Modal, View, Text, StyleSheet, FlatList, Image, TouchableOpacity,
-} from "react-native";
+import { Modal, View, Text, StyleSheet, FlatList, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -57,7 +56,7 @@ export function NowPlayingGrid({
                 onPress={() => router.push({ pathname: "/user-profile", params: { userId: item.id } })}
               >
                 {item.current_song_album_art ? (
-                  <Image source={{ uri: item.current_song_album_art }} style={styles.art} />
+                  <CachedImage source={{ uri: item.current_song_album_art }} style={styles.art} />
                 ) : (
                   <View style={[styles.art, styles.artFallback]}>
                     <Ionicons name="musical-note" size={28} color="#AB00FF" />
@@ -66,7 +65,7 @@ export function NowPlayingGrid({
               </TouchableOpacity>
               <View style={styles.meta}>
                 {item.avatar_url ? (
-                  <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
+                  <CachedImage source={{ uri: item.avatar_url }} style={styles.avatar} />
                 ) : (
                   <View style={[styles.avatar, styles.avatarFallback]}>
                     <Ionicons name="person" size={12} color="#fff" />

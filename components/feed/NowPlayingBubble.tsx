@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Image, TouchableOpacity } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { AVATAR_MAP, type NowPlayingStory } from "../../app/data/mock";
 import { styles } from "../../lib/feed/styles";
@@ -11,7 +12,7 @@ export function NowPlayingBubble({ item }: { item: NowPlayingStory }) {
     <TouchableOpacity style={styles.nowPlayingItem} activeOpacity={0.8}>
       <View style={[styles.storyRing, { borderColor: item.color }]}>
         {photo ? (
-          <Image source={photo} style={styles.storyAvatar} />
+          <CachedImage source={photo} style={styles.storyAvatar} />
         ) : (
           <View style={[styles.storyAvatar, { backgroundColor: item.color + "25" }]}>
             <Text style={[styles.storyInitials, { color: item.color }]}>{item.initials}</Text>

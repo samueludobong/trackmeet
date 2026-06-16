@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, TextInput, Animated, Image } from "react-native";
+import { View, Text, TouchableOpacity, TextInput, Animated } from "react-native";
+import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { styles } from "../../lib/feed/styles";
 import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
@@ -36,7 +37,7 @@ export function QuickComposer({
           {attachedTrack && (
             <View style={styles.attachedTrackChip}>
               {attachedTrack.albumArt ? (
-                <Image source={{ uri: attachedTrack.albumArt }} style={styles.attachedTrackArt} />
+                <CachedImage source={{ uri: attachedTrack.albumArt }} style={styles.attachedTrackArt} />
               ) : (
                 <View style={[styles.attachedTrackArt, { backgroundColor: "#1DB95422", alignItems: "center", justifyContent: "center" }]}>
                   <Ionicons name="musical-note" size={14} color="#1DB954" />
