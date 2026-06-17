@@ -2,7 +2,7 @@
 import { BOTTOM_INSET, NAVBAR_H, SW } from "../../../../lib/feed/dimensions";
 
 // Attached-track chip (shown below the now-playing banner once "+" is tapped)
-export const attachedtrackChipShownBelowTheNowplayingBannerOnceIsTapped = StyleSheet.create({
+export const attachedTrackChip = StyleSheet.create({
   attachedTrackChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -24,3 +24,4 @@ export const attachedtrackChipShownBelowTheNowplayingBannerOnceIsTapped = StyleS
   },
 
 });
+

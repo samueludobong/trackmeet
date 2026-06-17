@@ -2,7 +2,7 @@
 import { BOTTOM_INSET, NAVBAR_H, SW } from "../../../../lib/feed/dimensions";
 
 // Swipe container + reply indicator
-export const swipeContainerReplyIndicator = StyleSheet.create({
+export const swipeContainer = StyleSheet.create({
   swipeContainer: { position: "relative" },
   replyIndicator: {
     position: "absolute",
@@ -23,3 +23,4 @@ export const swipeContainerReplyIndicator = StyleSheet.create({
   },
 
 });
+

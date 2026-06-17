@@ -2,7 +2,7 @@
 import { BOTTOM_INSET, NAVBAR_H, SW } from "../../../../lib/feed/dimensions";
 
 // Music player (visual only)
-export const musicPlayerVisualOnly = StyleSheet.create({
+export const musicPlayer = StyleSheet.create({
   musicPlayerCard: { width: "100%", overflow: "hidden" },
   musicArtArea: { width: "100%", height: 280, position: "relative" },
   musicArtFill: {
@@ -79,3 +79,4 @@ export const musicPlayerVisualOnly = StyleSheet.create({
   musicTime: { fontSize: 11, color: "rgba(255,255,255,0.45)" },
 
 });
+

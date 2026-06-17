@@ -1,8 +1,8 @@
-import { StyleSheet } from "react-native";
+﻿import { StyleSheet } from "react-native";
 import { BOTTOM_INSET, NAVBAR_H, SW } from "../../../../lib/feed/dimensions";
 
-// ─── Song card in PostDetailOverlay composer bar ──────────────────────────
-export const songCardInPostdetailoverlayComposerBar = StyleSheet.create({
+// â”€â”€â”€ Song card in PostDetailOverlay composer bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export const detailComposerSongCard = StyleSheet.create({
   detailSongCard: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -33,3 +33,4 @@ export const songCardInPostdetailoverlayComposerBar = StyleSheet.create({
   },
 
 });
+

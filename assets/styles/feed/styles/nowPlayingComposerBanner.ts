@@ -2,7 +2,7 @@
 import { BOTTOM_INSET, NAVBAR_H, SW } from "../../../../lib/feed/dimensions";
 
 // Now-playing composer banner
-export const nowplayingComposerBanner = StyleSheet.create({
+export const nowPlayingComposerBanner = StyleSheet.create({
   nowPlayingBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -48,3 +48,4 @@ export const nowplayingComposerBanner = StyleSheet.create({
   },
 
 });
+

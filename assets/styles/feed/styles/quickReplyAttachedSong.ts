@@ -2,7 +2,7 @@
 import { BOTTOM_INSET, NAVBAR_H, SW } from "../../../../lib/feed/dimensions";
 
 // Attached song card above the quick-reply input glass
-export const attachedSongCardAboveTheQuickreplyInputGlass = StyleSheet.create({
+export const quickReplyAttachedSong = StyleSheet.create({
   qrSongCard: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -29,3 +29,4 @@ export const attachedSongCardAboveTheQuickreplyInputGlass = StyleSheet.create({
   qrSongArtist: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 1 },
 
 });
+

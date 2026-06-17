@@ -1,8 +1,8 @@
-import { StyleSheet } from "react-native";
+﻿import { StyleSheet } from "react-native";
 import { BOTTOM_INSET, NAVBAR_H, SW } from "../../../../lib/feed/dimensions";
 
-// ─── Song card embedded inside a comment bubble ───────────────────────────
-export const songCardEmbeddedInsideACommentBubble = StyleSheet.create({
+// â”€â”€â”€ Song card embedded inside a comment bubble â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export const commentSongCard = StyleSheet.create({
   commentSongCard: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -33,3 +33,4 @@ export const songCardEmbeddedInsideACommentBubble = StyleSheet.create({
   },
 
 });
+

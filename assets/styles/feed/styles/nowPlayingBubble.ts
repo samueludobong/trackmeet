@@ -2,7 +2,7 @@
 import { BOTTOM_INSET, NAVBAR_H, SW } from "../../../../lib/feed/dimensions";
 
 // Now-playing bubble (wider than storyItem to fit artist line)
-export const nowplayingBubbleWiderThanStoryitemToFitArtistLine = StyleSheet.create({
+export const nowPlayingBubble = StyleSheet.create({
   nowPlayingItem: { alignItems: "center", width: 72 },
   nowPlayingBadge: {
     position: "absolute",
@@ -18,3 +18,4 @@ export const nowplayingBubbleWiderThanStoryitemToFitArtistLine = StyleSheet.crea
   },
 
 });
+
