@@ -77,9 +77,6 @@ export type Post = {
   pollQuestion?: string;
   pollOptions?: PollOption[];
   totalVotes?: number;
-  communityId?: string | null;
-  communityName?: string | null;
-  communitySlug?: string | null;
   voiceUrl?: string | null;
   voiceDurationMs?: number | null;
   voiceWaveform?: number[] | null;
@@ -104,14 +101,6 @@ export type DummyPlaylist = {
   source: string;
   sourceColor: string;
   duration: string;
-};
-
-export type DummyCommunity = {
-  id: string;
-  name: string;
-  members: string;
-  desc: string;
-  color: string;
 };
 
 export type DummySong = {
@@ -398,28 +387,6 @@ export const GROUP_CHATS: GroupChat[] = [
   { id: "gc5", name: "Track Meet OGs 🎧",     members: ["maya_v", "ayo", "nate_x", "dan.b"], preview: "Who's coming to Night Frequencies on the 24th?",   sender: "dan.b",  time: "Mon",       unread: 0, color: "#FF3CAC", memberCount: 12 },
 ];
 
-// ─── Community ────────────────────────────────────────────────────────────────
-
-export type CommunityItem = {
-  id: string;
-  title: string;
-  author: string;
-  authorUser: string;
-  followers: string;
-  tags: string[];
-  date: string;
-  active: boolean;
-  viewerUsers: string[];
-};
-
-export const COMMUNITY_ITEMS: CommunityItem[] = [
-  { id: "ci1", title: "How underground Afrobeats is taking over streaming charts globally",    author: "Bernadya", authorUser: "maya_v", followers: "12K",  tags: ["#Afrobeats", "#Streaming"],  date: "24 Jul, 2024", active: true,  viewerUsers: ["jaykay", "tolu", "seren"]   },
-  { id: "ci2", title: "The vinyl revival and what it means for digital artists in 2024",       author: "Tems",      authorUser: "tolu",   followers: "8.4K", tags: ["#Vinyl", "#Industry"],       date: "22 Jul, 2024", active: true,  viewerUsers: ["ayo", "nate_x", "priya"]    },
-  { id: "ci3", title: "Why lo-fi music became the unofficial sound of Gen Z hustle culture",  author: "Rema",      authorUser: "nate_x", followers: "15K",  tags: ["#LoFi", "#GenZ"],            date: "19 Jul, 2024", active: false, viewerUsers: ["dan.b", "seren", "maya_v"]  },
-  { id: "ci4", title: "Producing your first EP with only your phone: a complete guide",       author: "Sarz",      authorUser: "seren",  followers: "6.2K", tags: ["#Production", "#DIY"],       date: "15 Jul, 2024", active: true,  viewerUsers: ["jaykay", "priya", "ayo"]    },
-];
-
-
 export type ChatMessage = {
   id: string;
   text: string;
@@ -499,7 +466,7 @@ export const CHAT_MESSAGES: Record<string, ChatMessage[]> = {
 
 // ─── Profile ──────────────────────────────────────────────────────────────────
 
-export const PROFILE_TABS = ["Posts", "Reposts", "Playlists", "Communities"] as const;
+export const PROFILE_TABS = ["Posts", "Reposts", "Playlists"] as const;
 export type ProfileTab = typeof PROFILE_TABS[number];
 
 export const PROFILE_POSTS    = POSTS.slice(0, 3);
@@ -512,13 +479,6 @@ export const DUMMY_PLAYLISTS: DummyPlaylist[] = [
   { id: "pl4", name: "Chill Sundays",     tracks: 15, color: "#001520", accent: "#00C2FF", source: "trackmeet",   sourceColor: "#AB00FF", duration: "48 min"      },
   { id: "pl5", name: "Rap Rotation",      tracks: 41, color: "#1a0800", accent: "#FF6B35", source: "Spotify",     sourceColor: "#1DB954", duration: "2 hr 38 min" },
   { id: "pl6", name: "Girl Math",         tracks: 27, color: "#1a001a", accent: "#FF3CAC", source: "Apple Music", sourceColor: "#FC3C44", duration: "1 hr 42 min" },
-];
-
-export const DUMMY_COMMUNITIES: DummyCommunity[] = [
-  { id: "co1", name: "Afrobeats Global",     members: "12.4K", desc: "Daily drops & live sets",        color: "#CAFF00" },
-  { id: "co2", name: "Vinyl Collectors",     members: "8.2K",  desc: "For the heads who buy physical", color: "#FF6B35" },
-  { id: "co3", name: "Late Night Listeners", members: "5.6K",  desc: "Night owl music fans only",      color: "#AB00FF" },
-  { id: "co4", name: "Producer Hub",         members: "3.1K",  desc: "Beats, samples & collabs",       color: "#00C2FF" },
 ];
 
 export const ALL_SONGS: DummySong[] = [

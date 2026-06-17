@@ -8,7 +8,7 @@ import { DragGrabber } from "../common/DragGrabber";
 import { useSheetDragClose } from "../../hooks/useSheetDragClose";
 import { openSpotifyLink } from "../../lib/spotify";
 import { NowPlayingCtx } from "../../lib/feed/contexts";
-import { ps } from "../../assets/styles/components/songPreviewSheet";
+import { ps } from "../../assets/styles/components/SongPreviewSheet";
 import { local } from "../../assets/styles/post/MusicCardActionsSheet";
 
 type Song = {

@@ -1,4 +1,4 @@
-export type Tab = "DISCOGRAPHY" | "COMMUNITIES" | "EVENTS";
+export type Tab = "DISCOGRAPHY" | "EVENTS";
 
 export type ArtistProfile = {
   id:                string;

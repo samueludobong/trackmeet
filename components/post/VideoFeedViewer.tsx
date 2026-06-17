@@ -14,7 +14,7 @@ import { videoPositionStore } from "../../lib/feed/videoPositions";
 import { useCachedVideoUri } from "../../hooks/useCachedVideoUri";
 import { CachedImage } from "../ui/CachedImage";
 import { RailButton } from "./MediaViewer";
-import { mvStyles as s, SW, SH } from "../../assets/styles/post/mediaViewer";
+import { mvStyles as s, SW, SH } from "../../assets/styles/post/MediaViewer";
 
 // A page has to be the dominant one on screen before it becomes the playing card.
 const VIEWABILITY = { itemVisiblePercentThreshold: 80 };
@@ -120,7 +120,7 @@ function VideoPage({
 
   const progress = controls.duration > 0 ? Math.min(1, controls.current / controls.duration) : 0;
   const captionLong = (post.text ?? "").length > 80;
-  const tagLabel = post.communityName;
+  const tagLabel: string | null = null;
 
   return (
     <View style={{ width: SW, height: SH, backgroundColor: "#000" }}>

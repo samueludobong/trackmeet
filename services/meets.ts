@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { notifyFollowersOfMeet, notifyCommunityOfMeet } from '../lib/notifications';
+import { notifyFollowersOfMeet } from '../lib/notifications';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +66,26 @@ export type MeetTrackState = {
   talkMode: boolean
 }
 
+// Ephemeral sync payload sent over a Realtime Broadcast channel. `sentAtMs` is
+// the host's wall clock at send time — listeners use (Date.now() - sentAtMs) to
+// compensate for one-way channel latency before computing their seek target.
+export type MeetSyncPayload = {
+  id: string | null
+  name: string | null
+  artist: string | null
+  albumArt: string | null
+  durationMs: number | null
+  positionMs: number | null
+  isPlaying: boolean
+  talkMode: boolean
+  sentAtMs: number
+}
+
+// Shared broadcast channel name for live playback sync. Used by host (send) and
+// listeners (receive) — bypasses the DB write → postgres_changes round-trip so
+// state-change events land in ~100ms instead of ~1s.
+export const meetSyncChannelName = (meetId: string) => `meet-sync-${meetId}`
+
 // ─── Create / end ───────────────────────────────────────────────────────────
 
 // Create a live meet, mark the host as the first participant, and fan out a
@@ -76,8 +96,6 @@ export const startMeet = async (opts: {
   tags?: string[]
   allowComments?: boolean
   allowReactions?: boolean
-  /** If set, scopes the Meet to a community and notifies every member. */
-  communityId?: string | null
 }): Promise<{ meetId?: string; error?: string }> => {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
@@ -92,7 +110,6 @@ export const startMeet = async (opts: {
       allow_comments:  opts.allowComments ?? true,
       allow_reactions: opts.allowReactions ?? true,
       is_live:         true,
-      community_id:    opts.communityId ?? null,
     })
     .select('id')
     .single()
@@ -107,22 +124,6 @@ export const startMeet = async (opts: {
 
   // Fire-and-forget — never block starting the meet on notification delivery.
   notifyFollowersOfMeet(data.id, opts.name.trim()).catch(() => {})
-
-  // Goal #10: community Meets push to *every* member, not just followers.
-  if (opts.communityId) {
-    // Best-effort: include caller's currently broadcasting song if available.
-    supabase
-      .from('users')
-      .select('current_song_name, current_song_artist')
-      .eq('id', user.id)
-      .maybeSingle()
-      .then(({ data: row }) => {
-        const song = row?.current_song_name
-          ? `${row.current_song_name}${row.current_song_artist ? ` · ${row.current_song_artist}` : ''}`
-          : null
-        notifyCommunityOfMeet(data.id, opts.name.trim(), opts.communityId as string, song).catch(() => {})
-      }, () => {})
-  }
 
   return { meetId: data.id }
 }
@@ -236,7 +237,7 @@ export const getActiveDmJam = async (conversationId: string): Promise<string | n
 
 // Find the conversation's live jam, or create one. A jam is a personal (private,
 // hostless) meet scoped to a DM. The caller joins privately either way. No
-// follower/community notifications — it's not a broadcast.
+// follower notifications — it's not a broadcast.
 export const joinOrStartDmJam = async (
   conversationId: string,
 ): Promise<{ meetId?: string; error?: string }> => {

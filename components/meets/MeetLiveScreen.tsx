@@ -3,6 +3,7 @@ import { MeetMusicPanel } from "../../components/meets/MeetMusicPanel";
 import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
 import { useMeetMusicControl } from "../../hooks/useMeetMusicControl";
 import { useMeetHost } from "../../hooks/useMeetHost";
+import { useSmoothProgressMs } from "../../hooks/useNowPlaying";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, PanResponder } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { SW } from "../../lib/feed/dimensions";
@@ -44,7 +45,12 @@ export function MeetLiveScreen({
   const canControl = jamConfig ? isDriver : true;
   const otherHasStage = !!jamConfig && !!driverId && driverId !== userId;
 
-  const music = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl });
+  // The polled liveProgressMs only updates every 3s, which makes the bar/timer
+  // visibly jump. Use the 1Hz-extrapolated value for everything *displayed*;
+  // useMeetHost still uses the polled value internally as the broadcast source.
+  const smoothProgressMs = useSmoothProgressMs();
+
+  const music = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs: smoothProgressMs, canControl });
   const {
     slideAnim, musicSlideX, ctrlLoading, pickerOpen, setPickerOpen, apiToken, openMusicPicker, closeMusicPicker, pickerOpenRef,
     handlePrev, handleNext, handlePlayPause, fmtMs, progressPct,
@@ -207,7 +213,7 @@ export function MeetLiveScreen({
                 <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
               </View>
               <View style={mlStyles.progressTimes}>
-                <Text style={mlStyles.progressTime}>{fmtMs(liveProgressMs)}</Text>
+                <Text style={mlStyles.progressTime}>{fmtMs(smoothProgressMs)}</Text>
                 <Text style={mlStyles.progressTime}>{fmtMs(track?.durationMs ?? 0)}</Text>
               </View>
               <View style={mlStyles.controls}>
@@ -329,7 +335,7 @@ export function MeetLiveScreen({
             <View style={{ flex: 1 }}>
               <MeetLyricsView
                 track={track ? { id: track.id, name: track.name, artist: track.artist, durationMs: track.durationMs } : null}
-                positionMs={liveProgressMs}
+                positionMs={smoothProgressMs}
                 onClose={closeLyrics}
               />
             </View>

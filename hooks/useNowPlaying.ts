@@ -30,7 +30,14 @@ const SEEK_DRIFT_MS = 3500
 
 export function useNowPlaying() {
   const [track,               setTrack]               = useState<NowPlayingTrack | null>(null)
+  // `liveProgressMs` updates ONLY at poll time (every 3s) — not every second.
+  // Previously a 1Hz ticker called setLiveProgressMs every second, which
+  // changed the context value's identity and forced all ~16 NowPlayingCtx
+  // consumers to re-render every second — making tab swaps feel laggy because
+  // the JS thread was constantly busy. Components that visibly need smooth
+  // sub-second progress now opt-in via `useSmoothProgressMs()` and tick locally.
   const [liveProgressMs,      setLiveProgressMs]      = useState(0)
+  const [polledAt,            setPolledAt]            = useState(0)
   const [loading,             setLoading]             = useState(true)
   const [needsReconnect,      setNeedsReconnect]      = useState(false)
   const [broadcastingEnabled, setBroadcastingEnabled] = useState(false)
@@ -226,6 +233,7 @@ export function useNowPlaying() {
 
     setTrack(result)
     setLiveProgressMs(result?.progressMs ?? 0)
+    setPolledAt(Date.now())
     setLoading(false)
   }
 
@@ -247,16 +255,9 @@ export function useNowPlaying() {
     return () => { active = false }
   }, [track?.albumArt])
 
-  // 1-second local ticker for smooth progress
-  useEffect(() => {
-    if (!track?.isPlaying) return
-    const id = setInterval(() => {
-      const elapsed = Date.now() - fetchedAt.current
-      const live = Math.min(baseProgress.current + elapsed, track.durationMs)
-      setLiveProgressMs(live)
-    }, 1_000)
-    return () => clearInterval(id)
-  }, [track?.id, track?.isPlaying, track?.durationMs])
+  // (Removed) 1-second local ticker. Components that need smooth visual
+  // progress use `useSmoothProgressMs()` which ticks locally — this keeps the
+  // shared context value stable between polls.
 
   // Reconnect Spotify after token revocation
   const reconnect = async () => {
@@ -301,9 +302,40 @@ export function useNowPlaying() {
   const accessToken = tokenCache.current?.token ?? null
 
   return {
-    track, liveProgressMs, gradient, accent, loading,
+    track, liveProgressMs, polledAt, gradient, accent, loading,
     needsReconnect, refresh: poll, reconnect, resetSpotify,
     broadcastingEnabled, broadcastLoading, toggleBroadcasting,
     accessToken,
   }
+}
+
+/**
+ * Smooth progress in milliseconds, ticked locally at 1Hz from the last poll
+ * snapshot. Use this in components that visibly render a moving seek bar —
+ * the shared NowPlayingCtx value no longer changes every second, so global
+ * consumers don't pay for the tick anymore.
+ */
+export function useSmoothProgressMs(): number {
+  // Local import to keep this hook colocated with its data source.
+  const ctx = useNowPlayingCtxLazy();
+  const { track, liveProgressMs, polledAt } = ctx;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!track?.isPlaying) return;
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, [track?.id, track?.isPlaying]);
+  if (!track) return 0;
+  if (!track.isPlaying) return liveProgressMs;
+  const elapsed = polledAt ? now - polledAt : 0;
+  return Math.min(liveProgressMs + Math.max(0, elapsed), track.durationMs);
+}
+
+// Avoid a circular import by accessing the context lazily.
+import { useContext } from "react";
+import { NowPlayingCtx } from "../lib/feed/contexts";
+function useNowPlayingCtxLazy() {
+  const ctx = useContext(NowPlayingCtx);
+  if (!ctx) throw new Error("useSmoothProgressMs must be used inside NowPlayingCtx.Provider");
+  return ctx;
 }

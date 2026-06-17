@@ -4,22 +4,22 @@ export { moreOptionsStyles, profileSStyles } from './styles/misc';
 import { intro } from './styles/intro';
 import { topNavbar } from './styles/topNavbar';
 import { stories } from './styles/stories';
-import { nowplayingBubbleWiderThanStoryitemToFitArtistLine } from './styles/nowplayingBubbleWiderThanStoryitemToFitArtistLine';
-import { nowplayingComposerBanner } from './styles/nowplayingComposerBanner';
-import { attachedtrackChipShownBelowTheNowplayingBannerOnceIsTapped } from './styles/attachedtrackChipShownBelowTheNowplayingBannerOnceIsTapped';
+import { nowPlayingBubble } from './styles/nowPlayingBubble';
+import { nowPlayingComposerBanner } from './styles/nowPlayingComposerBanner';
+import { attachedTrackChip } from './styles/attachedTrackChip';
 import { cardShell } from './styles/cardShell';
 import { postHeader } from './styles/postHeader';
 import { media } from './styles/media';
-import { musicPlayerVisualOnly } from './styles/musicPlayerVisualOnly';
+import { musicPlayer } from './styles/musicPlayer';
 import { poll } from './styles/poll';
 import { actionRow } from './styles/actionRow';
 import { floatingComposer } from './styles/floatingComposer';
-import { songCardInPostdetailoverlayComposerBar } from './styles/songCardInPostdetailoverlayComposerBar';
-import { songCardEmbeddedInsideACommentBubble } from './styles/songCardEmbeddedInsideACommentBubble';
+import { detailComposerSongCard } from './styles/detailComposerSongCard';
+import { commentSongCard } from './styles/commentSongCard';
 import { bottomGlassNavbar } from './styles/bottomGlassNavbar';
-import { swipeContainerReplyIndicator } from './styles/swipeContainerReplyIndicator';
+import { swipeContainer } from './styles/swipeContainer';
 import { quickReplyOverlay } from './styles/quickReplyOverlay';
-import { attachedSongCardAboveTheQuickreplyInputGlass } from './styles/attachedSongCardAboveTheQuickreplyInputGlass';
+import { quickReplyAttachedSong } from './styles/quickReplyAttachedSong';
 import { actionMenuSheet } from './styles/actionMenuSheet';
 import { postDetailOverlay } from './styles/postDetailOverlay';
 import { commentRows } from './styles/commentRows';
@@ -30,25 +30,26 @@ export const styles = {
   ...intro,
   ...topNavbar,
   ...stories,
-  ...nowplayingBubbleWiderThanStoryitemToFitArtistLine,
-  ...nowplayingComposerBanner,
-  ...attachedtrackChipShownBelowTheNowplayingBannerOnceIsTapped,
+  ...nowPlayingBubble,
+  ...nowPlayingComposerBanner,
+  ...attachedTrackChip,
   ...cardShell,
   ...postHeader,
   ...media,
-  ...musicPlayerVisualOnly,
+  ...musicPlayer,
   ...poll,
   ...actionRow,
   ...floatingComposer,
-  ...songCardInPostdetailoverlayComposerBar,
-  ...songCardEmbeddedInsideACommentBubble,
+  ...detailComposerSongCard,
+  ...commentSongCard,
   ...bottomGlassNavbar,
-  ...swipeContainerReplyIndicator,
+  ...swipeContainer,
   ...quickReplyOverlay,
-  ...attachedSongCardAboveTheQuickreplyInputGlass,
+  ...quickReplyAttachedSong,
   ...actionMenuSheet,
   ...postDetailOverlay,
   ...commentRows,
   ...threadedReplies,
   ...detailReplyBar,
 } as const;
+

@@ -10,7 +10,7 @@ import Animated, {
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { styles } from "../assets/styles/components/parallax-scroll-view";
+import { styles } from "../assets/styles/components/ParallaxScrollView";
 
 const HEADER_HEIGHT = 250;
 

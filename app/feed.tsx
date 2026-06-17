@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, type ReactNode } from "react";
+import { useMemo, useState, useEffect, useCallback, startTransition, type ReactNode } from "react";
 import { View, Animated, StyleSheet } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,7 +26,6 @@ import { MeetListenerScreen } from "../components/meets/MeetListenerScreen";
 import { MeetLiveScreen } from "../components/meets/MeetLiveScreen";
 import { MeetMiniBar } from "../components/meets/MeetMiniBar";
 import { FeedList } from '../components/feed/FeedList';
-import { FeedDrawer } from '../components/feed/FeedDrawer';
 import { QuickComposer } from '../components/feed/QuickComposer';
 import { type NowPlayingTrack } from '../hooks/useNowPlaying';
 
@@ -37,26 +36,54 @@ export { FeedUserCtx }
 
 // Keeps a tab's screen mounted but hidden when inactive, so its state and
 // fetched data persist across tab switches (no remount = no reload).
+//
+// Hiding inactive tabs uses opacity + pointerEvents — NOT `display: none`.
+// `display` toggling forces a native layout reflow of the *entire* destination
+// subtree every time it becomes visible. With Profile's ~50 PostCards that
+// reflow runs on the UI thread and shows up as a perceptible tab-swap hitch.
+// Opacity-hidden tabs stay laid out; the swap is essentially free.
 function TabScreen({ active, children }: { active: boolean; children: ReactNode }) {
   // Absolute children don't inherit the SafeAreaView's top padding, so apply the
   // top inset here — otherwise content draws under the status bar/notch.
   const insets = useSafeAreaInsets();
   return (
     <View
-      style={[StyleSheet.absoluteFill, { paddingTop: insets.top }, !active && hidden]}
+      style={[StyleSheet.absoluteFill, { paddingTop: insets.top, opacity: active ? 1 : 0 }]}
       pointerEvents={active ? "auto" : "none"}
     >
       {children}
     </View>
   );
 }
-const hidden = { display: "none" as const };
 
 export default function FeedScreen() {
   // Instantiate once at the top level so token cache + needsReconnect survive tab switches
   const {
     nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, jamMeetId, jamOther, jamToken, jamMinimized, setJamMinimized, openJam, closeJam, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, repostedPostIds, onToggleRepost, pollVotes, onVoteOnPoll, fetchFeedPosts, onToggleLike, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight
   } = useFeedScreen();
+
+  // ── Tab switch perf ────────────────────────────────────────────────────────
+  // `useFeedScreen` re-renders every second (live now-playing ticker), so the
+  // context provider values below need stable identities — otherwise every
+  // consumer in every tab re-renders on each tick, and tab switches pay for
+  // that accumulated work synchronously, feeling laggy.
+  const currentUserId = currentUser?.id ?? null;
+  const feedUserCtxValue = useMemo(
+    () => ({ currentUserId, likedPostIds, onToggleLike, repostedPostIds, onToggleRepost, pollVotes, onVoteOnPoll }),
+    [currentUserId, likedPostIds, onToggleLike, repostedPostIds, onToggleRepost, pollVotes, onVoteOnPoll],
+  );
+  const onRemovePost = useCallback(
+    (id: string) => setFeedPosts((prev) => prev.filter((p) => p.id !== id)),
+    [setFeedPosts],
+  );
+  const postActionsCtxValue = useMemo(() => ({ onRemovePost }), [onRemovePost]);
+
+  // Defer the (potentially heavy) tab swap re-render so the tap-press feedback
+  // commits immediately. The new tab renders on the next idle slice instead of
+  // blocking the press handler.
+  const onTabChange = useCallback((label: string) => {
+    startTransition(() => setActiveNav(label));
+  }, [setActiveNav]);
 
   // Open group chat (mounted at root like the DM ChatDetailView to avoid clipping).
   const [openGroup, setOpenGroup] = useState<GroupChat | null>(null);
@@ -86,8 +113,8 @@ export default function FeedScreen() {
 
   return (
     <NowPlayingCtx.Provider value={nowPlaying}>
-    <FeedUserCtx.Provider value={{ currentUserId: currentUser?.id ?? null, likedPostIds, onToggleLike, repostedPostIds, onToggleRepost, pollVotes, onVoteOnPoll }}>
-    <PostActionsCtx.Provider value={{ onRemovePost: (id) => setFeedPosts((prev) => prev.filter((p) => p.id !== id)) }}>
+    <FeedUserCtx.Provider value={feedUserCtxValue}>
+    <PostActionsCtx.Provider value={postActionsCtxValue}>
     <OpenMeetCtx.Provider value={openListenerMeet}>
     <HostMeetCtx.Provider value={openHostMeet}>
     <JamCtx.Provider value={openJam}>
@@ -95,23 +122,17 @@ export default function FeedScreen() {
       <SafeAreaView style={{ flex: 1 }} edges={[]}>
         {visited.has("Feed") && (
           <TabScreen active={onFeed}>
-            <FeedDrawer
-              userId={currentUser?.id ?? null}
+            <FeedList
+              feedPosts={feedPosts}
+              feedScrollEnabled={feedScrollEnabled}
+              feedRefreshing={feedRefreshing}
+              onFeedRefresh={onFeedRefresh}
+              setQuickReplyPost={setQuickReplyPost}
+              setFeedScrollEnabled={setFeedScrollEnabled}
+              setDetailPost={setDetailPost}
               focused={onFeed}
-              feedContent={
-                <FeedList
-                  feedPosts={feedPosts}
-                  feedScrollEnabled={feedScrollEnabled}
-                  feedRefreshing={feedRefreshing}
-                  onFeedRefresh={onFeedRefresh}
-                  setQuickReplyPost={setQuickReplyPost}
-                  setFeedScrollEnabled={setFeedScrollEnabled}
-                  setDetailPost={setDetailPost}
-                  focused={onFeed}
-                  userId={currentUser?.id ?? null}
-                  onShareSongAsPost={(t) => { setComposerInitialTrack(t); setMenuVisible(true); }}
-                />
-              }
+              userId={currentUser?.id ?? null}
+              onShareSongAsPost={(t) => { setComposerInitialTrack(t); setMenuVisible(true); }}
             />
           </TabScreen>
         )}
@@ -150,7 +171,7 @@ export default function FeedScreen() {
           onMeasure={setComposerHeight}
         />
       )}
-      {!keyboardUp && <BottomNav active={activeNav} onPress={setActiveNav} />}      <PostComposerSheet
+      {!keyboardUp && <BottomNav active={activeNav} onPress={onTabChange} />}      <PostComposerSheet
         visible={menuVisible}
         onClose={() => { setMenuVisible(false); setComposerInitialTrack(null); }}
         currentUser={currentUser}

@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { useLocalSearchParams } from "expo-router";
 import { getFeedPosts, getLikedPostIds, togglePostLike, createPost, getRepostedPostIds, togglePostRepost, getMyPollVotes, voteOnPoll } from "../services/posts";
 import { Animated, Platform, Keyboard, Alert } from "react-native";
@@ -124,8 +124,11 @@ export function useFeedScreen() {
     }
   };
 
-  // Toggle like with optimistic UI + DB sync via toggle_post_like RPC
-  const onToggleLike = async (postId: string) => {
+  // Toggle like with optimistic UI + DB sync via toggle_post_like RPC.
+  // useCallback so consumers in <FeedUserCtx.Provider value={…}> get a stable
+  // identity — without it the context value changes every 1s tick of
+  // useNowPlaying and every consumer re-renders.
+  const onToggleLike = useCallback(async (postId: string) => {
     if (!currentUser) return;
     // Optimistic toggle
     setLikedPostIds((prev) => {
@@ -154,14 +157,14 @@ export function useFeedScreen() {
       });
       console.error("toggle_post_like:", e);
     }
-  };
+  }, [currentUser]);
 
   /**
    * Toggle a repost. Same pattern as like: optimistic flip, RPC sync, revert
    * on failure. The RPC keeps `posts.reposts_count` in sync so the feed
    * card's badge updates on the next render.
    */
-  const onToggleRepost = async (postId: string) => {
+  const onToggleRepost = useCallback(async (postId: string) => {
     if (!currentUser) return;
     setRepostedPostIds((prev) => {
       const next = new Set(prev);
@@ -188,7 +191,7 @@ export function useFeedScreen() {
       });
       console.error("toggle_post_repost:", e);
     }
-  };
+  }, [currentUser]);
 
   /**
    * Cast a poll vote. Idempotent against double-tapping the same option.
@@ -197,7 +200,10 @@ export function useFeedScreen() {
    * "previous option" on poll_votes (not the client), so the bug where the
    * same user could vote forever by reopening the post is closed.
    */
-  const onVoteOnPoll = async (postId: string, optId: string) => {
+  const pollVotesRef = useRef(pollVotes);
+  pollVotesRef.current = pollVotes;
+  const onVoteOnPoll = useCallback(async (postId: string, optId: string) => {
+    const pollVotes = pollVotesRef.current;
     if (!currentUser) return;
     const prevOptId = pollVotes.get(postId) ?? null;
     if (prevOptId === optId) return; // already voted for this option
@@ -249,7 +255,7 @@ export function useFeedScreen() {
       );
       console.error("vote_on_poll:", e);
     }
-  };
+  }, [currentUser]);
 
   // Post directly from the floating quick-field without opening the sheet.
   // If a track is attached the post type becomes "music" and song_data is stored.

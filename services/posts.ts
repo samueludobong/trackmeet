@@ -45,7 +45,7 @@ import { dbRowToPost } from "../lib/feed/helpers";
 import { type Post } from "../app/data/mock";
 
 const FEED_POST_SELECT =
-  "id, type, text, media_urls, media_aspect, song_id, song_name, song_artist, song_album_art, song_preview_url, poll_question, poll_options, voice_url, voice_duration_ms, voice_waveform, created_at, likes_count, comments_count, reposts_count, community_id, users!user_id(id, username, display_name, avatar_url, is_verified), communities!community_id(id, name, slug)";
+  "id, type, text, media_urls, media_aspect, song_id, song_name, song_artist, song_album_art, song_preview_url, poll_question, poll_options, voice_url, voice_duration_ms, voice_waveform, created_at, likes_count, comments_count, reposts_count, users!user_id(id, username, display_name, avatar_url, is_verified)";
 
 /** Fetch the latest feed posts (newest first). */
 export async function getFeedPosts(limit = 50): Promise<Post[]> {

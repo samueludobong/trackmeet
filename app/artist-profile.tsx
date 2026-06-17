@@ -1,5 +1,5 @@
 import { type Tab } from "../types/artist";
-import { DiscographyTab, CommunitiesTab, EventsTab } from "../components/artist/ArtistTabs";
+import { DiscographyTab, EventsTab } from "../components/artist/ArtistTabs";
 import { fmtListeners } from "../lib/artistFormat";
 import { s } from "../assets/styles/app/artistProfile";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Dimensions } from "react-native";
@@ -18,7 +18,7 @@ import { useArtistProfile } from "../hooks/useArtistProfile";
 const { width: SW, height: SH } = Dimensions.get("window");
 const HERO_H = Math.round(SH * 0.50);
 
-const TABS = ["DISCOGRAPHY", "COMMUNITIES", "EVENTS"] as const;
+const TABS = ["DISCOGRAPHY", "EVENTS"] as const;
 
 export default function ArtistProfileScreen() {
   const {
@@ -137,7 +137,6 @@ export default function ArtistProfileScreen() {
               spotifyInfo={spotifyInfo}
             />
           )}
-          {activeTab === "COMMUNITIES" && <CommunitiesTab />}
           {activeTab === "EVENTS"      && <EventsTab />}
         </View>
 

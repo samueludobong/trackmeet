@@ -3,7 +3,7 @@ import { Keyboard, AppState } from "react-native";
 import { supabase } from "../lib/supabase";
 import { setPlayback, openSpotifyLink, playTrackAt } from "../lib/spotify";
 import { cacheJamTrack, getCachedJamTrack, clearJamTrack } from "../lib/jamCache";
-import { endMeet, getActiveListenerCount, getMeetMessages, sendMeetMessage, updateMeetTrack, setTalkMode, recordMeetTrack, getMeetTracks, getMeet, meetRowToTrackState, leaveMeet, setMeetDriver, endDmJamIfEmpty, type MeetMessage, type MeetTrack, type MeetTrackState } from "../services/meets";
+import { endMeet, getActiveListenerCount, getMeetMessages, sendMeetMessage, updateMeetTrack, setTalkMode, recordMeetTrack, getMeetTracks, getMeet, meetRowToTrackState, leaveMeet, setMeetDriver, endDmJamIfEmpty, meetSyncChannelName, type MeetMessage, type MeetSyncPayload, type MeetTrack, type MeetTrackState } from "../services/meets";
 import { syncListenerToHost } from "../lib/meetSync";
 import { useNowPlayingCtx } from "../lib/feed/contexts";
 import { type FloatingReactionItem } from "../types/meets";
@@ -43,6 +43,10 @@ export function useMeetHost({
   const [summary, setSummary] = useState<MeetTrack[] | null>(null);
   const [reactions, setReactions] = useState<FloatingReactionItem[]>([]);
   const reactChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  // Separate broadcast channel used by meet hosts (not jams) to push live sync
+  // events to listeners with no DB round-trip. Jams keep using the jam-sync
+  // event on reactChannelRef instead.
+  const syncChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastWrittenRef = useRef<string | null>(null);
 
   // ── Co-control (jam) state ───────────────────────────────────────────────────
@@ -108,6 +112,18 @@ export function useMeetHost({
   // unlike the DB write → postgres_changes path (~seconds).
   const broadcastState = (state: MeetTrackState) => {
     reactChannelRef.current?.send({ type: "broadcast", event: "jam-sync", payload: state });
+  };
+  // Meet (non-jam) host → listeners broadcast. `sentAtMs` lets the listener
+  // compensate for one-way channel latency when computing its seek target.
+  const broadcastMeetSync = () => {
+    const t = trackRef.current;
+    if (!t || !syncChannelRef.current) return;
+    const payload: MeetSyncPayload = {
+      id: t.id, name: t.name, artist: t.artist, albumArt: t.albumArt,
+      durationMs: t.durationMs, positionMs: progressRef.current,
+      isPlaying: t.isPlaying, talkMode: false, sentAtMs: Date.now(),
+    };
+    syncChannelRef.current.send({ type: "broadcast", event: "sync", payload });
   };
   const liveState = (): MeetTrackState | null => {
     const t = trackRef.current;
@@ -175,31 +191,67 @@ export function useMeetHost({
 
     channel.subscribe();
     reactChannelRef.current = channel;
-    return () => { active = false; reactChannelRef.current = null; supabase.removeChannel(channel); };
+
+    // Meets only: open a dedicated sync channel so we can push playback state
+    // (track change / play-pause / 10s heartbeat) to listeners instantly. Jams
+    // already do this over reactChannelRef via the jam-sync event.
+    let syncCh: ReturnType<typeof supabase.channel> | null = null;
+    if (!isJam) {
+      syncCh = supabase.channel(meetSyncChannelName(meetId));
+      syncCh.subscribe();
+      syncChannelRef.current = syncCh;
+    }
+
+    return () => {
+      active = false;
+      reactChannelRef.current = null;
+      supabase.removeChannel(channel);
+      if (syncCh) { syncChannelRef.current = null; supabase.removeChannel(syncCh); }
+    };
   }, [visible, meetId, isJam]);
 
   useEffect(() => {
     if (!visible || !meetId || summary) return;
-    const write = () => {
-      // In a jam, only the current driver broadcasts their now-playing.
-      if (isJam && !isDriverRef.current) return;
-      const live = liveState();
-      if (live) {
-        updateMeetTrack(meetId, live);
-        if (isJam) { cachedTrackRef.current = live; broadcastState(live); }
-      } else if (isJam && cachedTrackRef.current) {
-        // Device gone (e.g. paused → idle) → hold the jam on the last cached
-        // frame, marked paused, so neither side drifts or goes blank.
-        const paused: MeetTrackState = { ...cachedTrackRef.current, isPlaying: false };
-        updateMeetTrack(meetId, paused);
-        broadcastState(paused);
-      }
+
+    if (isJam) {
+      // Jam: 2s cadence — broadcasts the driver's live frame to the partner over
+      // jam-sync, and caches a last-good frame for the resume-from-idle path.
+      const write = () => {
+        if (!isDriverRef.current) return;
+        const live = liveState();
+        if (live) {
+          updateMeetTrack(meetId, live);
+          cachedTrackRef.current = live;
+          broadcastState(live);
+        } else if (cachedTrackRef.current) {
+          // Device gone (e.g. paused → idle) → hold the jam on the last cached
+          // frame, marked paused, so neither side drifts or goes blank.
+          const paused: MeetTrackState = { ...cachedTrackRef.current, isPlaying: false };
+          updateMeetTrack(meetId, paused);
+          broadcastState(paused);
+        }
+      };
+      const id = setInterval(write, 2_000);
+      return () => clearInterval(id);
+    }
+
+    // Meet (non-jam): listeners' Spotify is ticking forward at 1x on its own,
+    // so we don't need a fast heartbeat — events (track / play-pause) push
+    // instantly via broadcastMeetSync in the effect below. This 10s loop is
+    // just a slow safety net: refreshes the DB row (for late joiners reading a
+    // snapshot) and emits a tick (for the listener's drift checker to anchor on).
+    const tick = () => {
+      const t = trackRef.current;
+      if (!t) return;
+      updateMeetTrack(meetId, {
+        id: t.id, name: t.name, artist: t.artist, albumArt: t.albumArt,
+        durationMs: t.durationMs, positionMs: progressRef.current, isPlaying: t.isPlaying,
+      });
+      broadcastMeetSync();
     };
-    // Match the meet's 2s cadence — the broadcast handles instant events; the
-    // heartbeat is just steady drift upkeep, so a faster tick only adds churn.
-    const id = setInterval(write, 2_000);
+    const id = setInterval(tick, 10_000);
     return () => clearInterval(id);
-  }, [visible, meetId, summary]);
+  }, [visible, meetId, summary, isJam]);
 
   useEffect(() => {
     if (!visible || !meetId || summary || !track) return;
@@ -213,6 +265,10 @@ export function useMeetHost({
     if (isJam) {
       const live = liveState();
       if (live) { cachedTrackRef.current = live; broadcastState(live); } // lands on partner immediately
+    } else {
+      // Meet host: push the event over the sync channel so every listener can
+      // re-anchor in ~100ms instead of waiting for the postgres_changes round-trip.
+      broadcastMeetSync();
     }
     // Tracklist/summary is host-meet only — jams are personal, not recorded.
     if (!isJam && track.isPlaying && lastWrittenRef.current !== track.id) {

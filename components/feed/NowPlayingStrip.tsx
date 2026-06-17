@@ -9,7 +9,7 @@ import { AddToPlaylistSheet } from "../AddToPlaylistSheet";
 import { isTrackInAnyPlaylist } from "../../services/playlists";
 import { supabase } from "../../lib/supabase";
 import { seekPlayback, setPlayback } from "../../lib/spotify";
-import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
+import { type NowPlayingTrack, useSmoothProgressMs } from "../../hooks/useNowPlaying";
 import { shareStyles, styles } from "../../assets/styles/feed/NowPlayingStrip";
 
 /**
@@ -30,7 +30,8 @@ export function NowPlayingStrip({
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const track = np?.track;
-  const live = np?.liveProgressMs ?? 0;
+  // Smooth seek-bar progress — ticked locally so we don't tax the global ctx.
+  const live = useSmoothProgressMs();
   const accessToken = np?.accessToken ?? null;
   const refresh = np?.refresh;
 

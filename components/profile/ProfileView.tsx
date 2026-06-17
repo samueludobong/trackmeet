@@ -9,12 +9,18 @@ import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { styles } from "../../assets/styles/feed/styles";
 import { profileStyles } from "../../assets/styles/feed/localStyles";
 import { useOpenMeet, useOpenHostMeet, useNowPlayingCtx } from "../../lib/feed/contexts";
+import { useSmoothProgressMs } from "../../hooks/useNowPlaying";
 import { type ComposerUser } from "../../types/composer";
 import { ProfileTabs } from "../../components/profile/ProfileTabs";
 import { type Post } from "../../app/data/mock";
 
-export function ProfileView() {
-  const { track, liveProgressMs, gradient, needsReconnect, reconnect } = useNowPlayingCtx();
+// Memoized: ProfileView takes no props, so it should never re-render from the
+// parent's render cycle. Without memo, every FeedScreen re-render (e.g. the
+// useNowPlaying poll every 3s, or any state change anywhere up there) walks
+// through ProfileView's whole tree — ProfileTabs alone maps up to 50 posts.
+export const ProfileView = React.memo(function ProfileView() {
+  const { track, gradient, needsReconnect, reconnect } = useNowPlayingCtx();
+  const liveProgressMs = useSmoothProgressMs();
   const router = useRouter();
   const { profile, setProfile, userId, accessToken, refreshing, activeMeet, meetChecked, onRefresh, refetch } = useOwnProfile();
   const [editOpen,            setEditOpen]            = useState(false);
@@ -114,7 +120,7 @@ export function ProfileView() {
       <ProfileOverlays linksSheetOpen={linksSheetOpen} setLinksSheetOpen={setLinksSheetOpen} socialLinksSheetOpen={socialLinksSheetOpen} setSocialLinksSheetOpen={setSocialLinksSheetOpen} editOpen={editOpen} setEditOpen={setEditOpen} settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen} pinnedPreviewOpen={pinnedPreviewOpen} setPinnedPreviewOpen={setPinnedPreviewOpen} meetOverlayVisible={meetOverlayVisible} setMeetOverlayVisible={setMeetOverlayVisible} fabMenuOpen={fabMenuOpen} setFabMenuOpen={setFabMenuOpen} composerOpen={composerOpen} setComposerOpen={setComposerOpen} profile={profile} setProfile={setProfile} accessToken={accessToken} userId={userId} refetch={refetch} openHostMeet={openHostMeet} composerUser={composerUser} setPostsKey={setPostsKey} />
     </View>
   );
-}
+});
 
 
 // ─── Start Meet Overlay styles ───────────────────────────────────────────────

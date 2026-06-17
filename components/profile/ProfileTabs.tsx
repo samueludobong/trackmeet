@@ -10,9 +10,6 @@ import { PostCard } from "../../components/post/PostCard";
 import { CreatePlaylistDialog } from "../../components/playlists/CreatePlaylistDialog";
 import { CuratedPlaylistDetailOverlay } from "../../components/playlists/CuratedPlaylistDetailOverlay";
 import { SpotifyPlaylistDetailOverlay } from "../../components/playlists/SpotifyPlaylistDetailOverlay";
-import { CreateCommunityDialog } from "../../components/communities/CreateCommunityDialog";
-import { CommunityDetailOverlay } from "../../components/communities/CommunityDetailOverlay";
-import { getMyCommunities, type Community } from "../../services/communities";
 import { PROFILE_TABS } from "../../app/data/mock";
 import { type Post } from "../../app/data/mock";
 import { getUserReposts } from "../../services/posts";
@@ -22,13 +19,6 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
   const {
     active, setActive, myPosts, setMyPosts, postsLoading, setPostsLoading, indicatorAnim, contentAnim, activeRef, tabWidth, playlistFilter, setPlaylistFilter, curatedPlaylists, setCuratedPlaylists, curatedLoading, setCuratedLoading, curatedLoaded, setCuratedLoaded, spotifyPlaylists, setSpotifyPlaylists, spLoading, setSpLoading, spLoaded, setSpLoaded, showCreatePlaylist, setShowCreatePlaylist, openCurated, setOpenCurated, openSpotify, setOpenSpotify, switchTo, swipePan
   } = useProfileTabsData(userId, readOnly);
-
-  // Communities tab — real data + create flow (own profile only).
-  const [communities, setCommunities] = useState<Community[]>([]);
-  const [communitiesLoading, setCommunitiesLoading] = useState(false);
-  const [communitiesLoaded, setCommunitiesLoaded] = useState(false);
-  const [showCreateCommunity, setShowCreateCommunity] = useState(false);
-  const [openCommunity, setOpenCommunity] = useState<Community | null>(null);
 
   // Reposts tab — fetched from public.post_reposts joined to posts on demand.
   const [reposts, setReposts] = useState<Post[]>([]);
@@ -42,14 +32,6 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
       .then(setReposts)
       .catch((e) => console.error("getUserReposts:", e))
       .finally(() => { setRepostsLoading(false); setRepostsLoaded(true); });
-  }, [active, userId]);
-
-  useEffect(() => {
-    if (active !== "Communities" || communitiesLoaded || !userId) return;
-    setCommunitiesLoading(true);
-    getMyCommunities(userId)
-      .then(setCommunities)
-      .finally(() => { setCommunitiesLoading(false); setCommunitiesLoaded(true); });
   }, [active, userId]);
 
   const renderContent = () => {
@@ -96,50 +78,7 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
 
     if (active === "Playlists") return <ProfilePlaylistsTab readOnly={readOnly} playlistFilter={playlistFilter} setPlaylistFilter={setPlaylistFilter} curatedLoading={curatedLoading} curatedPlaylists={curatedPlaylists} setShowCreatePlaylist={setShowCreatePlaylist} setOpenCurated={setOpenCurated} spLoading={spLoading} spLoaded={spLoaded} spotifyPlaylists={spotifyPlaylists} setOpenSpotify={setOpenSpotify} />;
 
-    // Communities
-    return (
-      <View style={{ gap: 10, paddingTop: 12 }}>
-        {!readOnly && (
-          <TouchableOpacity style={cStyles.createBtn} activeOpacity={0.85} onPress={() => setShowCreateCommunity(true)}>
-            <Ionicons name="add-circle" size={20} color="#AB00FF" />
-            <Text style={cStyles.createBtnText}>Create Community</Text>
-          </TouchableOpacity>
-        )}
-        {communitiesLoading ? (
-          <ActivityIndicator color="#FF6C1A" style={{ marginTop: 32 }} />
-        ) : communities.length === 0 ? (
-          <View style={{ alignItems: "center", paddingTop: 36 }}>
-            <Text style={{ color: "rgba(255,255,255,0.25)", fontSize: 15 }}>
-              {readOnly ? "No communities yet" : "No communities yet — create one!"}
-            </Text>
-          </View>
-        ) : (
-          communities.map((co) => (
-            <TouchableOpacity key={co.id} style={profileStyles.communityCard} activeOpacity={0.82} onPress={() => setOpenCommunity(co)}>
-              {co.avatar_url ? (
-                <CachedImage source={{ uri: co.avatar_url }} style={cStyles.avatar} />
-              ) : (
-                <View style={[cStyles.avatar, cStyles.avatarFallback]}>
-                  <Ionicons name="people" size={20} color="rgba(255,255,255,0.5)" />
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <View style={cStyles.nameRow}>
-                  <Text style={profileStyles.communityName} numberOfLines={1}>{co.name}</Text>
-                  {co.is_private && <Ionicons name="lock-closed" size={12} color="rgba(255,255,255,0.4)" />}
-                </View>
-                <Text style={profileStyles.communityDesc} numberOfLines={1}>
-                  {co.description || "No description"}
-                </Text>
-              </View>
-              <Text style={[profileStyles.communityMembers, { color: "#AB00FF" }]}>
-                {co.member_count} {co.member_count === 1 ? "member" : "members"}
-              </Text>
-            </TouchableOpacity>
-          ))
-        )}
-      </View>
-    );
+    return null;
   };
 
   return (
@@ -206,24 +145,6 @@ export function ProfileTabs({ userId, readOnly = false }: { userId: string | nul
         />
       )}
 
-      {showCreateCommunity && userId && (
-        <CreateCommunityDialog
-          userId={userId}
-          onClose={() => setShowCreateCommunity(false)}
-          onCreated={(co) => {
-            setCommunities((prev) => [co, ...prev]);
-            setShowCreateCommunity(false);
-          }}
-        />
-      )}
-
-      {openCommunity && (
-        <CommunityDetailOverlay
-          community={openCommunity}
-          userId={userId}
-          onClose={() => setOpenCommunity(null)}
-        />
-      )}
     </View>
   );
 }

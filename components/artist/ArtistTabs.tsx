@@ -1,19 +1,9 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
-import { FontAwesome5, Ionicons } from "@expo/vector-icons";
-import { comm, ev } from "../../assets/styles/app/artistProfile";
+import { Ionicons } from "@expo/vector-icons";
+import { ev } from "../../assets/styles/app/artistProfile";
 import { MOCK_EVENTS } from "../../constants/artist";
 export { DiscographyTab } from "./DiscographyTab";
-
-export function CommunitiesTab() {
-  return (
-    <View style={comm.center}>
-      <FontAwesome5 name="users" size={38} color="rgba(255,255,255,0.10)" />
-      <Text style={comm.emptyText}>No communities yet</Text>
-      <Text style={comm.emptySubtext}>This artist hasn't created any communities</Text>
-    </View>
-  );
-}
 
 // ─── EVENTS TAB ───────────────────────────────────────────────────────────────
 export function EventsTab() {

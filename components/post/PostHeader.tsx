@@ -27,19 +27,8 @@ export function PostHeader({ post }: { post: Post }) {
     </View>
   );
 
-  const openCommunity = () => {
-    if (!post.communityId) return;
-    router.push({ pathname: "/community", params: { id: post.communityId } });
-  };
-
   return (
     <View>
-      {post.communityId && (post.communitySlug || post.communityName) && (
-        <TouchableOpacity style={ph.communityTag} activeOpacity={0.7} onPress={openCommunity}>
-          <Ionicons name="people" size={12} color="rgba(255,255,255,0.5)" />
-          <Text style={ph.communityTagText}>From /{post.communitySlug ?? post.communityName}</Text>
-        </TouchableOpacity>
-      )}
     <View style={styles.postHeader}>
       {/* Avatar → opens author profile */}
       <TouchableOpacity activeOpacity={0.72} onPress={handleAuthorPress} disabled={!post.authorId}>

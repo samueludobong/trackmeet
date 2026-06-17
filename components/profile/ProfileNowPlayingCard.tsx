@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, TouchableOpacity, PanResponder } from "react-native";
+import { View, Text, TouchableOpacity, PanResponder, Pressable } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -53,66 +53,86 @@ export function ProfileNowPlayingCard({
   const tokenRef = useRef(accessToken);
   tokenRef.current = accessToken;
 
-  // `dragMs` shows the finger's position during drag. `holdMs` keeps the bar
-  // pinned at the seeked target after release, until the next poll catches up
-  // (so it doesn't snap back to the old position briefly). Both are simple
-  // state, no per-frame ticker — that was the source of the flicker.
+  // `dragMs` shows the finger's position during drag/tap.
+  // `holdMs` keeps the bar pinned at the seeked target until Spotify's
+  // currently-playing endpoint catches up — that endpoint is eventually
+  // consistent and can return the OLD progress for several seconds after a
+  // seek, so we can't trust `liveProgressMs` immediately. We clear hold only
+  // when `liveProgressMs` has actually arrived within ~1.5s of the target, or
+  // after a generous 6s ceiling (in case the seek silently failed).
   const [dragMs, setDragMs] = useState<number | null>(null);
   const [holdMs, setHoldMs] = useState<number | null>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdStartedAt = useRef(0);
 
-  // Auto-clear the hold once the parent's liveProgressMs catches up (within
-  // ~1.5s of the target) or 2.5s have passed, whichever comes first.
   useEffect(() => {
     if (holdMs == null) return;
-    if (Math.abs(liveProgressMs - holdMs) < 1500) { setHoldMs(null); return; }
+    // Spotify reported a position close to where we asked — release the hold.
+    if (Math.abs(liveProgressMs - holdMs) < 1500) {
+      if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; }
+      setHoldMs(null);
+      return;
+    }
+    // Ceiling so the bar doesn't pin forever if Spotify never catches up.
     if (holdTimer.current) clearTimeout(holdTimer.current);
-    holdTimer.current = setTimeout(() => setHoldMs(null), 2500);
+    const elapsed = Date.now() - holdStartedAt.current;
+    holdTimer.current = setTimeout(() => setHoldMs(null), Math.max(0, 6000 - elapsed));
     return () => { if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; } };
   }, [holdMs, liveProgressMs]);
 
+  // Compute target ms from the *current* X on the bar — used by both grant
+  // (initial press) and release (final position).
+  const targetMsAt = (x: number) => {
+    const w = trackWRef.current;
+    const dur = durRef.current;
+    if (!w || dur <= 0) return 0;
+    return Math.round(msFromX(x, w, dur));
+  };
+
+  const commitSeek = async (target: number) => {
+    if (!trackWRef.current || durRef.current <= 0) return;
+    if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; }
+    holdStartedAt.current = Date.now();
+    setHoldMs(target);
+    const tok = tokenRef.current;
+    if (!tok) return;
+    try {
+      await seekPlayback(tok, target);
+      // Re-poll so liveProgressMs catches up faster than the regular 3s tick.
+      setTimeout(() => { refresh(); }, 350);
+    } catch {}
+  };
+
+  // Drag-to-seek. Plain taps go through to the inner <Pressable> below.
+  // Vertical scrolls starting on the bar stay with the parent ScrollView
+  // because we only claim on horizontal-dominant Move motion.
   const pan = useRef(
     PanResponder.create({
-      // Don't grab plain taps — only commit when the user is clearly dragging
-      // horizontally. This means a vertical-dominant motion that happens to
-      // start on the bar still scrolls the page.
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_e, g) =>
         !!tokenRef.current && durRef.current > 0 &&
-        Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-      // Once we own the gesture, never let the parent ScrollView reclaim it —
-      // a vertical wiggle mid-drag must not cancel the seek into a scroll.
+        Math.abs(g.dx) > 3 && Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
+      // Once we claim the drag, never give it back — a vertical wiggle mid-drag
+      // must not cancel into a scroll.
       onPanResponderTerminationRequest: () => false,
       onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: (e, g) => {
-        // Capture the touch position relative to the bar at grant time. From
-        // here on we drive the visual from g.dx (gesture distance), which is
-        // platform-reliable, instead of trusting per-event locationX (which
-        // can flicker on some Android devices).
+        // Grant fires from Move here, so `locationX` is the current finger
+        // position and `g.dx` is the cumulative motion since touch-down.
+        // Reconstruct the original press point so subsequent Moves stay
+        // anchored to it.
         dragStartLocalX.current = e.nativeEvent.locationX - g.dx;
-        const x = dragStartLocalX.current + g.dx;
-        setDragMs(msFromX(x, trackWRef.current, durRef.current));
+        setDragMs(targetMsAt(e.nativeEvent.locationX));
       },
       onPanResponderMove: (_e, g) => {
         const x = dragStartLocalX.current + g.dx;
-        setDragMs(msFromX(x, trackWRef.current, durRef.current));
+        setDragMs(targetMsAt(x));
       },
       onPanResponderRelease: async (_e, g) => {
-        const dur = durRef.current;
-        const w = trackWRef.current;
         const x = dragStartLocalX.current + g.dx;
-        const target = Math.round(msFromX(x, w, dur));
+        const target = targetMsAt(x);
         setDragMs(null);
-        if (!w || dur <= 0) return;
-        // Hold the bar at the seeked position until the next poll lands.
-        setHoldMs(target);
-        const tok = tokenRef.current;
-        if (!tok) return;
-        try {
-          await seekPlayback(tok, target);
-          // Re-poll so liveProgressMs catches up faster than the regular 3s tick.
-          setTimeout(() => { refresh(); }, 350);
-        } catch {}
+        await commitSeek(target);
       },
       onPanResponderTerminate: () => setDragMs(null),
     }),
@@ -189,11 +209,20 @@ export function ProfileNowPlayingCard({
             onLayout={(e) => { trackWRef.current = e.nativeEvent.layout.width; }}
             {...pan.panHandlers}
           >
-            <View style={profileStyles.npProgressTrack}>
-              <View style={[profileStyles.npProgressFill, { width: `${progress * 100}%` as any }]}>
-                <View style={profileStyles.npProgressThumb} />
+            {/* Tap-to-seek. Drag is handled by the parent PanResponder, which
+                claims on horizontal-dominant Move and overrides this press. */}
+            <Pressable
+              onPress={(e) => {
+                if (!tokenRef.current || durRef.current <= 0) return;
+                commitSeek(targetMsAt(e.nativeEvent.locationX));
+              }}
+            >
+              <View style={profileStyles.npProgressTrack}>
+                <View style={[profileStyles.npProgressFill, { width: `${progress * 100}%` as any }]}>
+                  <View style={profileStyles.npProgressThumb} />
+                </View>
               </View>
-            </View>
+            </Pressable>
           </View>
           <View style={profileStyles.npTimestamps}>
             <Text style={profileStyles.npTime}>{fmt(effectiveMs)}</Text>

@@ -94,6 +94,48 @@ export const getConversations = async (): Promise<ConversationInfo[]> => {
   })
 }
 
+// ─── Conversation settings (per-user personalization) ───────────────────────
+
+export type ConversationSettings = {
+  conversation_id: string
+  user_id: string
+  nickname: string | null
+  accent_color: string | null
+  background_color: string | null
+  background_image_url: string | null
+}
+
+/** The viewer's own personalization for a 1:1 conversation. Null if none yet. */
+export const getConversationSettings = async (
+  conversationId: string,
+): Promise<ConversationSettings | null> => {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data } = await supabase
+    .from('conversation_settings')
+    .select('conversation_id, user_id, nickname, accent_color, background_color, background_image_url')
+    .eq('conversation_id', conversationId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  return (data ?? null) as ConversationSettings | null
+}
+
+/** Create/update the viewer's settings for a conversation. */
+export const upsertConversationSettings = async (
+  conversationId: string,
+  patch: Partial<Pick<ConversationSettings, 'nickname' | 'accent_color' | 'background_color' | 'background_image_url'>>,
+): Promise<ConversationSettings | null> => {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data, error } = await supabase
+    .from('conversation_settings')
+    .upsert({ conversation_id: conversationId, user_id: user.id, ...patch }, { onConflict: 'conversation_id,user_id' })
+    .select('conversation_id, user_id, nickname, accent_color, background_color, background_image_url')
+    .single()
+  if (error) { console.error('[messages] upsert conversation settings:', error.message); return null }
+  return data as ConversationSettings
+}
+
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
 export const getMessages = async (conversationId: string): Promise<DbMessage[]> => {

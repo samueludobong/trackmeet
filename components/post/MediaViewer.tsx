@@ -12,7 +12,7 @@ import { useVideoControls } from "./useVideoControls";
 import { openSpotifyLink } from "../../lib/spotify";
 import { useCachedVideoUri } from "../../hooks/useCachedVideoUri";
 import { CachedImage } from "../ui/CachedImage";
-import { mvStyles as s, SW, SH } from "../../assets/styles/post/mediaViewer";
+import { mvStyles as s, SW, SH } from "../../assets/styles/post/MediaViewer";
 
 type Media = { type: "image" | "video"; uri: string };
 
@@ -75,7 +75,7 @@ export function MediaViewer({
 
   const progress = controls.duration > 0 ? Math.min(1, controls.current / controls.duration) : 0;
   const captionLong = (post.text ?? "").length > 80;
-  const tagLabel = post.communityName;
+  const tagLabel: string | null = null;
 
   return (
     <Modal transparent visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>

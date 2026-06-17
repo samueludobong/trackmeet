@@ -1,5 +1,5 @@
-import React from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import React, { useEffect, useState, useCallback } from "react";
+import { View, Text, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { styles } from "../../assets/styles/feed/styles";
 import { NAV_ITEMS } from "../../constants/messages";
@@ -11,17 +11,29 @@ export function BottomNav({
   active: string;
   onPress: (label: string) => void;
 }) {
+  // Optimistic local highlight. `active` from the parent is updated inside a
+  // `startTransition` so it can take a frame or two to commit; this local
+  // state flips synchronously on press so the icon/label highlight is instant
+  // and the press feels snappy. Reconciles to the prop on every commit.
+  const [pendingActive, setPendingActive] = useState(active);
+  useEffect(() => { setPendingActive(active); }, [active]);
+
+  const handlePress = useCallback((label: string) => {
+    setPendingActive(label);
+    onPress(label);
+  }, [onPress]);
+
   return (
     <View style={styles.navBarWrap} pointerEvents="box-none">
       <View style={styles.navBarGlass}>
         {NAV_ITEMS.map((item) => {
-          const isActive = item.label === active;
+          const isActive = item.label === pendingActive;
           return (
-            <TouchableOpacity
+            <Pressable
               key={item.label}
               style={styles.navItem}
-              activeOpacity={0.7}
-              onPress={() => onPress(item.label)}
+              onPress={() => handlePress(item.label)}
+              android_ripple={{ color: "rgba(171,0,255,0.12)", borderless: true }}
             >
               <Ionicons
                 name={(isActive ? item.iconActive : item.icon) as keyof typeof Ionicons.glyphMap}
@@ -29,7 +41,7 @@ export function BottomNav({
                 color={isActive ? "#AB00FF" : "rgba(255,255,255,0.3)"}
               />
               <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{item.label}</Text>
-            </TouchableOpacity>
+            </Pressable>
           );
         })}
       </View>

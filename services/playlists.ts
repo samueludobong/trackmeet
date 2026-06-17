@@ -109,7 +109,7 @@ export const createCuratedPlaylist = async (
 }
 
 // ─── Curated playlist detail operations ──────────────────────────────────────
-import { type CuratedSong } from '../lib/feed/types';
+import { type CuratedSong, type CuratedPlaylist } from '../lib/feed/types';
 
 /** Load the songs in a curated playlist, ordered by position. */
 export async function getCuratedPlaylistSongs(playlistId: string): Promise<CuratedSong[]> {
@@ -325,4 +325,45 @@ export async function createCuratedPlaylistFull(
     .select()
     .single()
   return !error && data ? data : null
+}
+
+// ─── DM-scoped playlists ─────────────────────────────────────────────────────
+// A curated playlist with `conversation_id` set is collaborative: both DM
+// participants can read, add songs, and edit. RLS in
+// `add_conversation_settings.sql` enforces this.
+
+/** Curated playlists collaboratively owned by both participants of a DM. */
+export async function getConversationPlaylists(conversationId: string): Promise<CuratedPlaylist[]> {
+  const { data, error } = await supabase
+    .from('curated_playlists')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+  if (error || !data) return []
+  return data as CuratedPlaylist[]
+}
+
+/** Create a new collaborative playlist scoped to a 1:1 conversation. */
+export async function createConversationPlaylist(
+  userId: string,
+  conversationId: string,
+  name: string,
+  imageUrl: string | null = null,
+): Promise<CuratedPlaylist | null> {
+  const trimmed = name.trim()
+  if (!trimmed) return null
+  const { data, error } = await supabase
+    .from('curated_playlists')
+    .insert({
+      user_id: userId,
+      conversation_id: conversationId,
+      name: trimmed,
+      image_url: imageUrl,
+      tags: [],
+      show_on_profile: false,
+    })
+    .select()
+    .single()
+  if (error) { console.error('[playlists] create conversation playlist:', error.message); return null }
+  return data as CuratedPlaylist
 }

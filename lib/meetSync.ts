@@ -22,13 +22,22 @@ import { meetRowToTrackState, type MeetRow, type MeetTrackState } from '../servi
 
 export const MEET_SYNC_TASK = 'trackmeet-meet-listener-sync'
 
-// How far a listener may drift from the host before we re-seek (ms).
-const DRIFT_TOLERANCE_MS = 2_000
+// How far a listener may drift from the host before we re-seek (ms). Generous
+// because steady playback at 1x is naturally aligned once the initial seek lands;
+// only real desync (throttled JS thread, dropped broadcast, Spotify hiccup)
+// crosses this threshold.
+const DRIFT_TOLERANCE_MS = 5_000
 
 // After issuing a corrective seek/play we hold off on further corrections for
 // this long, so Spotify has time to settle and we don't thrash the playback.
-const ACTION_COOLDOWN_MS = 4_000
+const ACTION_COOLDOWN_MS = 2_000
 let _lastActionAt = 0
+
+// Empirically, between issuing a Spotify Web API command and audio actually
+// starting/seeking, ~300ms elapses (network + device-side queue). Adding this
+// to seek targets makes the audio land where the host actually is at that
+// moment, rather than ~300ms behind.
+const SPOTIFY_CMD_LATENCY_MS = 2000
 
 // Talk mode ducks the listener's volume to 0 (instead of pausing, which can let
 // the device go idle and leave playback stuck). We remember the pre-talk volume
@@ -134,9 +143,11 @@ export async function sanityCheckSync(
   const myPlaying = mine && !('unauthorized' in mine) ? mine.isPlaying : false
 
   // Wrong song (or stopped) → start the host's track at the right spot.
-  // This is a hard mismatch, so correct it regardless of the cooldown.
+  // This is a hard mismatch, so correct it regardless of the cooldown. Add the
+  // Spotify command buffer so audio lands where the host actually is by the
+  // time the command finishes travelling.
   if (myTrackId !== state.id || !myPlaying) {
-    await playTrackAt(accessToken, `spotify:track:${state.id}`, target)
+    await playTrackAt(accessToken, `spotify:track:${state.id}`, target + SPOTIFY_CMD_LATENCY_MS)
     _lastActionAt = Date.now()
     return {
       inSync: false,
@@ -152,7 +163,7 @@ export async function sanityCheckSync(
     // Drifted too far → re-seek, unless we just issued a correction (Spotify is
     // still settling and reporting a stale position).
     if (Date.now() - _lastActionAt > actionCooldown) {
-      await seekPlayback(accessToken, target)
+      await seekPlayback(accessToken, target + SPOTIFY_CMD_LATENCY_MS)
       _lastActionAt = Date.now()
       return { inSync: false, corrected: true, reason: 'drift', driftMs }
     }

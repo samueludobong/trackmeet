@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { sendSpotifyTrackMessage, type ConversationInfo, type DbMessage } from "../../services/messages";
+import { sendSpotifyTrackMessage, getConversationSettings, type ConversationInfo, type ConversationSettings, type DbMessage } from "../../services/messages";
 import { getActiveDmJam } from "../../services/meets";
 import { supabase } from "../../lib/supabase";
 import { chatStyles } from "../../assets/styles/feed/localStyles";
@@ -13,6 +13,7 @@ import { NowPlayingBanner } from "../../components/feed/NowPlayingBanner";
 import { SpotifyTrackCard } from "../../components/messages/SpotifyTrackCard";
 import { SwipeToReply } from "../../components/messages/SwipeToReply";
 import { TypingBubble } from "../../components/messages/TypingBubble";
+import { ChatSettingsScreen } from "./ChatSettingsScreen";
 
 export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onClose: () => void }) {
   const {
@@ -60,39 +61,65 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
     finally { setStartingJam(false); }
   };
 
+  // Per-DM personalization (nickname / accent / background). Loaded once;
+  // re-read after the settings sheet saves so the header reflects the change.
+  const [settings, setSettings] = useState<ConversationSettings | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => {
+    let active = true;
+    getConversationSettings(conv.conversationId).then((s) => { if (active) setSettings(s); });
+    return () => { active = false; };
+  }, [conv.conversationId]);
+
+  const headerName = settings?.nickname || otherName;
+  const accent = settings?.accent_color ?? "#AB00FF";
+  const bgColor = settings?.background_color ?? "#0D0D0D";
+  const bgImage = settings?.background_image_url ?? null;
+
 
 
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, {
         transform: [{ translateX: slideX }],
-        backgroundColor: "#0D0D0D",
+        backgroundColor: bgColor,
         zIndex: 200,
         elevation: 200,
       }]}
       {...pan.panHandlers}
     >
+      {bgImage && (
+        <CachedImage
+          source={{ uri: bgImage }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
+      )}
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         <View style={chatStyles.header}>
           <TouchableOpacity onPress={handleClose} style={chatStyles.backBtn} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={26} color="#fff" />
           </TouchableOpacity>
 
-          <View style={chatStyles.headerCenter}>
+          <TouchableOpacity
+            style={chatStyles.headerCenter}
+            activeOpacity={0.7}
+            onPress={() => setSettingsOpen(true)}
+          >
             {conv.otherUser.avatar_url ? (
               <CachedImage source={{ uri: conv.otherUser.avatar_url }} style={{ width: 36, height: 36, borderRadius: 18 }} />
             ) : (
-              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#AB00FF33", alignItems: "center", justifyContent: "center" }}>
-                <Text style={{ fontSize: 14, fontWeight: "800", color: "#AB00FF" }}>{otherInitials}</Text>
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: accent + "33", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 14, fontWeight: "800", color: accent }}>{otherInitials}</Text>
               </View>
             )}
             <View style={{ gap: 1, flex: 1 }}>
-              <Text style={chatStyles.headerName} numberOfLines={1}>{otherName}</Text>
+              <Text style={chatStyles.headerName} numberOfLines={1}>{headerName}</Text>
               <Text style={[chatStyles.headerStatus, { color: "rgba(255,255,255,0.35)" }]}>@{conv.otherUser.username}</Text>
             </View>
-          </View>
+          </TouchableOpacity>
 
-          <TouchableOpacity style={[chatStyles.jamBtn, jamId && chatStyles.jamBtnActive]} activeOpacity={0.8} onPress={handleJam} disabled={startingJam}>
+          <TouchableOpacity style={[chatStyles.jamBtn, jamId && chatStyles.jamBtnActive, jamId && { backgroundColor: accent }]} activeOpacity={0.8} onPress={handleJam} disabled={startingJam}>
             {startingJam
               ? <ActivityIndicator size="small" color="#0D0D0D" />
               : <Ionicons name="musical-notes" size={12} color="#0D0D0D" />}
@@ -123,7 +150,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           {loading ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-              <ActivityIndicator color="#AB00FF" />
+              <ActivityIndicator color={accent} />
             </View>
           ) : (
             <FlatList
@@ -210,7 +237,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                           </View>
                         </>
                       )}
-                      <View style={[chatStyles.bubble, fromMe ? chatStyles.bubbleMe : chatStyles.bubbleThem, fromMe ? chatStyles.bubbleSelfEnd : chatStyles.bubbleSelfStart]}>
+                      <View style={[chatStyles.bubble, fromMe ? chatStyles.bubbleMe : chatStyles.bubbleThem, fromMe ? chatStyles.bubbleSelfEnd : chatStyles.bubbleSelfStart, fromMe && { backgroundColor: accent }]}>
                         <Text style={[chatStyles.bubbleText, fromMe && chatStyles.bubbleTextMe]}>{msg.body}</Text>
                         <Text style={[chatStyles.bubbleTime, fromMe && chatStyles.bubbleTimeMe]}>{fmtTime(msg.created_at)}</Text>
                       </View>
@@ -242,7 +269,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
           </View>
           {!!replyTo && (
             <View style={chatStyles.replyBar}>
-              <View style={chatStyles.replyBarAccent} />
+              <View style={[chatStyles.replyBarAccent, { backgroundColor: accent }]} />
               {replyTo.kind === "song" && !!replyTo.albumArt && (
                 <CachedImage source={{ uri: replyTo.albumArt }} style={chatStyles.replyBarArt} />
               )}
@@ -286,7 +313,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                   <Ionicons name="mic-outline" size={18} color="rgba(255,255,255,0.38)" />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity style={[chatStyles.inputAction, chatStyles.sendBtn]} activeOpacity={0.8} onPress={sendMessage}>
+                <TouchableOpacity style={[chatStyles.inputAction, chatStyles.sendBtn, { backgroundColor: accent }]} activeOpacity={0.8} onPress={sendMessage}>
                   <Ionicons name="send" size={14} color="#0D0D0D" />
                 </TouchableOpacity>
               )}
@@ -294,6 +321,15 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {settingsOpen && (
+        <ChatSettingsScreen
+          conv={conv}
+          viewerId={currentUserId}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(next) => setSettings(next)}
+        />
+      )}
     </Animated.View>
   );
 }

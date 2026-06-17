@@ -3,7 +3,7 @@ import { Animated, Keyboard, AppState } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { supabase } from "../lib/supabase";
 import { openSpotifyLink, getValidSpotifyToken, setPlayback } from "../lib/spotify";
-import { joinMeet, leaveMeet, getMeet, getActiveListenerCount, getMeetMessages, sendMeetMessage, meetRowToTrackState, getMeetTracks, type MeetMessage, type MeetTrack, type MeetTrackState, type MeetRow } from "../services/meets";
+import { joinMeet, leaveMeet, getMeet, getActiveListenerCount, getMeetMessages, sendMeetMessage, meetRowToTrackState, getMeetTracks, meetSyncChannelName, type MeetMessage, type MeetSyncPayload, type MeetTrack, type MeetTrackState, type MeetRow } from "../services/meets";
 import { syncListenerToHost, sanityCheckSync, expectedHostPosition, registerMeetSync, unregisterMeetSync, startTalkAudio, stopTalkAudio, restoreVolumeIfDucked } from "../lib/meetSync";
 import { isTrackInAnyPlaylist } from "../services/playlists";
 import { MEET_GUIDE_KEY } from "../constants/meets";
@@ -146,7 +146,38 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
       .subscribe();
 
     reactChannelRef.current = channel;
-    return () => { active = false; reactChannelRef.current = null; supabase.removeChannel(channel); };
+
+    // Dedicated sync channel: the host pushes track-change / play-pause / 10s
+    // tick events here without paying the DB write → postgres_changes round-trip
+    // (~1s). On receive we extrapolate by (now - sentAtMs) so the position we
+    // hand to the seeker matches where the host actually is right now, not
+    // where it was when the broadcast left.
+    const syncCh = supabase
+      .channel(meetSyncChannelName(meetId))
+      .on('broadcast', { event: 'sync' }, ({ payload }: any) => {
+        if (!active || !payload) return;
+        const p = payload as MeetSyncPayload;
+        const elapsed = Math.max(0, Date.now() - p.sentAtMs);
+        const adjustedPos = p.positionMs != null && p.isPlaying
+          ? p.positionMs + elapsed
+          : p.positionMs;
+        // positionUpdatedAt = now (not p.sentAtMs) so the local progress ticker
+        // and any downstream extrapolation start clean from this anchor.
+        setTrackState({
+          id: p.id, name: p.name, artist: p.artist, albumArt: p.albumArt,
+          durationMs: p.durationMs, positionMs: adjustedPos,
+          isPlaying: p.isPlaying, positionUpdatedAt: new Date().toISOString(),
+          talkMode: p.talkMode,
+        });
+      })
+      .subscribe();
+
+    return () => {
+      active = false;
+      reactChannelRef.current = null;
+      supabase.removeChannel(channel);
+      supabase.removeChannel(syncCh);
+    };
   }, [visible, meetId]);
 
   // Refs holding the freshest token + host state so the steady 5s sanity-check
@@ -164,21 +195,22 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
   const isHostViewer = !!meet && !!userId && meet.host_id === userId;
 
   // ── Event-driven sync ───────────────────────────────────────────────────────
-  // The realtime `meets` UPDATE subscription re-runs this effect on every host
-  // write (~2s) because trackState changes, so we react near-live. Drift-only +
-  // cooldown logic in sanityCheckSync prevents seek thrash.
+  // Re-runs whenever trackState changes — and trackState now changes the moment
+  // a host sync broadcast arrives (~100ms after the host's action), not on the
+  // DB write round-trip (~1s). Drift-only + cooldown logic in sanityCheckSync
+  // still prevents seek thrash on minor extrapolation noise.
   // Only runs after the listener has launched Spotify (so a device is active).
   useEffect(() => {
     if (!visible || !launched || ended || isHostViewer || !accessToken || !trackState) return;
     syncListenerToHost(accessToken, trackState);
   }, [visible, launched, ended, isHostViewer, accessToken, trackState?.id, trackState?.isPlaying, trackState?.talkMode, trackState?.positionUpdatedAt]);
 
-  // ── Sanity check every 5s ─────────────────────────────────────────────────────
-  // Independent steady heartbeat: confirms the listener's song AND playback timer
-  // still match the host, correcting only when they've drifted. Reads refs so the
-  // interval never resets when host state changes (which would starve the timer).
-  // Stops once the meet has ended, so a host who keeps playing in the summary view
-  // can't drag listeners back into playback.
+  // ── Drift safety net (every 10s) ───────────────────────────────────────────
+  // Steady-state sync is event-driven (broadcasts on track / play-pause re-anchor
+  // immediately, then Spotify ticks forward at 1x on its own). This interval is
+  // just a low-frequency backstop for the edge cases — throttled JS thread, a
+  // dropped broadcast, a Spotify position hiccup. Threshold is 5s (set in
+  // meetSync.ts), so normal clock skew + Spotify jitter never trips it.
   useEffect(() => {
     if (!visible || !launched || ended || isHostViewer) return;
     const check = async () => {
@@ -188,12 +220,12 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
       const status = await sanityCheckSync(tok, st);
       setInSync(status.inSync);
       if (!status.inSync) {
-        console.log(`[MeetSync] sanity check — out of sync (${status.reason}` +
+        console.log(`[MeetSync] drift check — out of sync (${status.reason}` +
           (status.driftMs != null ? `, drift ${Math.round(status.driftMs)}ms` : '') +
           `)${status.corrected ? ' → corrected' : ''}`);
       }
     };
-    const id = setInterval(check, 5_000);
+    const id = setInterval(check, 10_000);
     return () => clearInterval(id);
   }, [visible, launched, ended]);
 

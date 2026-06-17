@@ -160,4 +160,3 @@ export function DiscographyTab({
   );
 }
 
-// ─── COMMUNITIES TAB ──────────────────────────────────────────────────────────
