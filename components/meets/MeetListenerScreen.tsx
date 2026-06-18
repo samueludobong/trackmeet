@@ -3,6 +3,7 @@ import { MeetGuideOverlay } from "../../components/meets/MeetGuideOverlay";
 import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
 import { LiveSessionBackdrop } from "../../components/meets/LiveSessionBackdrop";
 import { EqualizerBars } from "../../components/meets/EqualizerBars";
+import { SongChangingOverlay } from "../../components/meets/SongChangingOverlay";
 import { useMeetListener } from "../../hooks/useMeetListener";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, ActivityIndicator, PanResponder, Easing } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
@@ -32,7 +33,7 @@ export function MeetListenerScreen({
   onInfo?: (info: { name: string; trackName: string | null; albumArt: string | null }) => void;
 }) {
   const {
-    slideAnim, accessToken, setAccessToken, meet, setMeet, trackState, setTrackState, host, setHost, listenerCount, setListenerCount, messages, setMessages, chatInput, setChatInput, livePos, setLivePos, savedId, setSavedId, pickerOpen, setPickerOpen, ended, setEnded, summary, setSummary, reactions, setReactions, reactChannelRef, spawnReaction, sendReaction, showGuide, setShowGuide, dontShowGuide, setDontShowGuide, launched, setLaunched, openedOnceRef, handleGotIt, syncTokenRef, syncStateRef, inSync, setInSync, isHostViewer, handleSendChat, handleSaveSong, handleLeave
+    slideAnim, accessToken, setAccessToken, meet, setMeet, trackState, setTrackState, host, setHost, listenerCount, setListenerCount, messages, setMessages, chatInput, setChatInput, livePos, setLivePos, savedId, setSavedId, pickerOpen, setPickerOpen, ended, setEnded, summary, setSummary, reactions, setReactions, reactChannelRef, spawnReaction, sendReaction, showGuide, setShowGuide, dontShowGuide, setDontShowGuide, launched, setLaunched, openedOnceRef, handleGotIt, syncTokenRef, syncStateRef, inSync, setInSync, isHostViewer, changing, changingInfo, handleSendChat, handleSaveSong, handleLeave
   } = useMeetListener({ visible, onClose, meetId, userId, isPublic, minimized, onInfo, onExpand });
 
   const [lyricsOpen, setLyricsOpen] = useState(false);
@@ -205,6 +206,9 @@ export function MeetListenerScreen({
           <MeetChatList messages={messages} />
         </View>
         )}
+
+        {/* Brief "switching song…" transition while the host's new pick lands. */}
+        {!lyricsOpen && !ended && <SongChangingOverlay visible={changing} info={changingInfo} />}
 
         {lyricsOpen && (
           <View style={lyricsBand}>

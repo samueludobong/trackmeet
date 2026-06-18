@@ -39,7 +39,7 @@ export function MeetLiveScreen({
     track, liveProgressMs, listenerCount, messages, chatInput, setChatInput,
     talkOn, ending, summary, reactions, sendReaction, removeReaction, handleSendChat,
     handleToggleTalk, setTalk, handleEndMeet, closeAll, displayTrack, resumeFromCache,
-    isDriver, driverId, takeStage, dropStage, pausedCache, resumeHostSong,
+    isDriver, driverId, takeStage, dropStage, pausedCache, resumeHostSong, signalTrackChange,
   } = useMeetHost({ visible, meetId, accessToken, getApiToken: () => apiTokenRef.current, onClose, jam: jamConfig });
 
   // In a jam, only the stage holder may control playback.
@@ -51,7 +51,7 @@ export function MeetLiveScreen({
   // useMeetHost still uses the polled value internally as the broadcast source.
   const smoothProgressMs = useSmoothProgressMs();
 
-  const music = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs: smoothProgressMs, canControl });
+  const music = useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs: smoothProgressMs, canControl, onSongChange: signalTrackChange });
   const {
     slideAnim, musicSlideX, ctrlLoading, pickerOpen, setPickerOpen, apiToken, openMusicPicker, closeMusicPicker, pickerOpenRef,
     handlePrev, handleNext, handlePlayPause, fmtMs, progressPct,

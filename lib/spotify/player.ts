@@ -11,12 +11,28 @@ export const getCurrentlyPlaying = async (accessToken: string) => {
       { headers: { Authorization: `Bearer ${accessToken}` } }
     )
 
-    if (response.status === 401) return { unauthorized: true }
-    if (response.status === 204) return null
+    if (response.status === 401) { console.log('[Spotify] currently-playing 401 — token rejected by Spotify'); return { unauthorized: true } }
+    // 429 = rate-limited. Surface the Retry-After so the caller can BACK OFF —
+    // continuing to poll every 3s through a 429 only extends Spotify's penalty.
+    if (response.status === 429) {
+      const ra = parseInt(response.headers.get('Retry-After') ?? '', 10)
+      const retryAfterMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 30_000
+      console.log(`[Spotify] currently-playing 429 — rate-limited, backing off ${Math.round(retryAfterMs / 1000)}s`)
+      return { rateLimited: true as const, retryAfterMs }
+    }
+    if (response.status === 204) { console.log('[Spotify] currently-playing 204 — no active device / nothing playing'); return null }
+    // Any other non-OK (notably 403 = missing user-read-currently-playing /
+    // user-read-playback-state scope) used to fall through and look identical to
+    // "nothing playing". Surface it explicitly so a scope problem is diagnosable.
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      console.log(`[Spotify] currently-playing HTTP ${response.status}: ${body.slice(0, 200)}`)
+      return null
+    }
 
     const data = await response.json()
 
-    if (!data.item) return null
+    if (!data.item) { console.log('[Spotify] currently-playing 200 but no item in response'); return null }
 
     return {
       id: data.item.id,

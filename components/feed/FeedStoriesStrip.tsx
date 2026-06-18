@@ -5,7 +5,7 @@ import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { getActiveStories, type Story } from "../../services/stories";
-import { useNowPlaying } from "../../hooks/useNowPlaying";
+import { useNowPlayingCtx } from "../../lib/feed/contexts";
 import { prefetchSongPreview } from "../../lib/songPreview";
 import { styles } from "../../assets/styles/feed/styles";
 import { s } from "../../assets/styles/feed/FeedStoriesStrip";
@@ -18,7 +18,10 @@ import { s } from "../../assets/styles/feed/FeedStoriesStrip";
  */
 export function FeedStoriesStrip() {
   const router = useRouter();
-  const { track } = useNowPlaying();
+  // Read the SHARED now-playing context — do NOT call useNowPlaying() here. A
+  // second useNowPlaying() spins up its own 3s Spotify poll + token refresh +
+  // broadcast loop, doubling Spotify request volume and helping trip HTTP 429.
+  const { track } = useNowPlayingCtx();
   const [stories, setStories] = useState<Story[]>([]);
   const [meId, setMeId]       = useState<string | null>(null);
   const [meAvatar, setMeAvatar] = useState<string | null>(null);

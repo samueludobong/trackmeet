@@ -6,12 +6,16 @@ import { type NowPlayingTrack } from "./useNowPlaying";
 import { useNowPlayingCtx } from "../lib/feed/contexts";
 
 /** Spotify browse + playback control for the host's live-meet screen. */
-export function useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl = true }: {
+export function useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl = true, onSongChange }: {
   visible: boolean; accessToken: string | null; userId: string | null;
   track: NowPlayingTrack | null; liveProgressMs: number;
   // In a DM jam, false when this person doesn't hold the stage → playback
   // actions are blocked. Always true for normal host meets.
   canControl?: boolean;
+  // Fired the instant the host picks/skips a track, so listeners can show a
+  // "switching song" transition before our now-playing poll catches up. `info`
+  // is the new track when known; omitted for a blind prev/next skip.
+  onSongChange?: (info?: { id: string; name: string; artist: string | null; albumArt: string | null }) => void;
 }) {
   const { setOptimisticPlaying } = useNowPlayingCtx();
   const slideAnim   = useRef(new Animated.Value(SH)).current;
@@ -167,12 +171,14 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
 
   const handlePrev = async () => {
     if (!canControl || !tok || ctrlLoading) return;
+    onSongChange?.(); // blind skip — listeners show a generic "switching song"
     setCtrlLoading(true);
     await skipPrevious(tok);
     setTimeout(() => setCtrlLoading(false), 800);
   };
   const handleNext = async () => {
     if (!canControl || !tok || ctrlLoading) return;
+    onSongChange?.();
     setCtrlLoading(true);
     await skipNext(tok);
     setTimeout(() => setCtrlLoading(false), 800);
@@ -201,6 +207,7 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
 
   const handlePlayTrack = async (t: SpotifyTrackResult) => {
     if (!canControl || !tok) return;
+    onSongChange?.({ id: t.id, name: t.name, artist: t.artist, albumArt: t.albumArt });
     setPlayingId(t.id);
     await startTrackOrOpen(tok, t.id);
   };
@@ -242,7 +249,9 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
     const tracks = albumTracks[albumId] ?? await getAlbumTracks(tok, albumId);
     const uris = tracks.map((t) => `spotify:track:${t.id}`);
     if (!uris.length) return;
-    const firstId = tracks[0]?.id ?? null;
+    const first = tracks[0];
+    const firstId = first?.id ?? null;
+    if (first) onSongChange?.({ id: first.id, name: first.name, artist: null, albumArt: null });
     setPlayingId(firstId);
     const res = await playTracks(tok, uris);
     // No active device → wake one by opening Spotify to the first track (the
@@ -254,6 +263,8 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   // Play a single album track.
   const playAlbumTrack = async (trackId: string) => {
     if (!canControl || !tok) return;
+    const found = Object.values(albumTracks).flat().find((t) => t.id === trackId);
+    onSongChange?.(found ? { id: found.id, name: found.name, artist: null, albumArt: null } : undefined);
     setPlayingId(trackId);
     await startTrackOrOpen(tok, trackId);
   };

@@ -65,6 +65,10 @@ export function useNowPlaying() {
   // race back and call setTrack(result), reviving the old now-playing card
   // until the next render cycle.
   const resetGen        = useRef(0)
+  // While Spotify rate-limits us (HTTP 429) we pause Spotify reads until this
+  // timestamp. Polling straight through a 429 only extends the penalty, so we
+  // honor the Retry-After the API hands back instead.
+  const rateLimitedUntil = useRef(0)
   // Baseline of the last position we broadcast, so we can detect seeks (actual
   // position diverging from where continuous playback would have reached).
   const lastBroadcastProgress = useRef(0)
@@ -185,6 +189,10 @@ export function useNowPlaying() {
   }
 
   const poll = async () => {
+    // Still inside a rate-limit backoff window — skip this tick entirely so we
+    // make zero Spotify calls until Spotify's Retry-After has elapsed.
+    if (Date.now() < rateLimitedUntil.current) { setLoading(false); return }
+
     // Snapshot the reset generation so we can abort if a disconnect happens
     // during any of the awaits below.
     const startGen = resetGen.current
@@ -209,6 +217,14 @@ export function useNowPlaying() {
       tokenCache.current = null
       setActiveSpotifyToken(null)
       setNeedsReconnect(true)
+      setLoading(false)
+      return
+    }
+
+    // 429 — rate-limited. Arm the backoff window and bail without touching the
+    // displayed track, so the current song stays on screen while we wait it out.
+    if (raw && 'rateLimited' in raw) {
+      rateLimitedUntil.current = Date.now() + (raw.retryAfterMs ?? 30_000)
       setLoading(false)
       return
     }

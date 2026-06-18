@@ -32,6 +32,12 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
   const [ended,         setEnded]         = useState(false);
   const [summary,       setSummary]       = useState<MeetTrack[] | null>(null);
   const [reactions,     setReactions]     = useState<FloatingReactionItem[]>([]);
+  // "Switching song…" transition: set the instant the host picks a new track
+  // (track-changing broadcast), cleared once the new track actually lands.
+  const [changing,      setChanging]      = useState(false);
+  const [changingInfo,  setChangingInfo]  = useState<{ id: string; name: string; artist: string | null; albumArt: string | null } | null>(null);
+  const changingFromIdRef = useRef<string | null>(null);
+  const changingTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   // Sync channel + clock-offset state (Cristian's algorithm) — see the ping
   // useEffect below. clockOffsetRef = (host clock − listener clock) in ms;
@@ -200,6 +206,16 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
           talkMode: prev?.talkMode ?? p.talkMode,
         }));
       })
+      .on('broadcast', { event: 'track-changing' }, ({ payload }: any) => {
+        if (!active) return;
+        // Remember the song we're leaving so we know when the *new* one lands.
+        changingFromIdRef.current = syncStateRef.current?.id ?? null;
+        setChangingInfo(payload?.info ?? null);
+        setChanging(true);
+        // Safety net: never strand the overlay if the new track never arrives.
+        if (changingTimerRef.current) clearTimeout(changingTimerRef.current);
+        changingTimerRef.current = setTimeout(() => { if (active) setChanging(false); }, 8_000);
+      })
       .on('broadcast', { event: 'clock-pong' }, ({ payload }: any) => {
         if (!active || !payload || payload.toUserId !== userIdRef.current) return;
         const t0 = payload.t0 as number;   // listener-clock time at ping send
@@ -353,6 +369,16 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
     else stopTalkAudio();
   }, [visible, meetId, trackState?.talkMode]);
 
+  // Clear the "switching song" overlay once the new track actually lands — a
+  // different, playing track than the one we were leaving when the host picked.
+  useEffect(() => {
+    if (!changing) return;
+    if (trackState?.id && trackState.id !== changingFromIdRef.current && trackState.isPlaying) {
+      if (changingTimerRef.current) clearTimeout(changingTimerRef.current);
+      setChanging(false);
+    }
+  }, [changing, trackState?.id, trackState?.isPlaying]);
+
   // ── Local progress ticker (extrapolates host position) ──────────────────────
   useEffect(() => {
     if (!visible || !trackState) return;
@@ -418,9 +444,11 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
     await stopTalkAudio();
     setMeet(null); setTrackState(null); setMessages([]); setEnded(false); setSummary(null);
     setShowGuide(false); setLaunched(false); setDontShowGuide(false);
+    setChanging(false); setChangingInfo(null);
+    if (changingTimerRef.current) clearTimeout(changingTimerRef.current);
     openedOnceRef.current = false;
     onClose();
   };
 
-  return { slideAnim, accessToken, setAccessToken, meet, setMeet, trackState, setTrackState, host, setHost, listenerCount, setListenerCount, messages, setMessages, chatInput, setChatInput, livePos, setLivePos, savedId, setSavedId, pickerOpen, setPickerOpen, ended, setEnded, summary, setSummary, reactions, setReactions, reactChannelRef, spawnReaction, sendReaction, showGuide, setShowGuide, dontShowGuide, setDontShowGuide, launched, setLaunched, openedOnceRef, handleGotIt, syncTokenRef, syncStateRef, inSync, setInSync, isHostViewer, handleSendChat, handleSaveSong, handleLeave };
+  return { slideAnim, accessToken, setAccessToken, meet, setMeet, trackState, setTrackState, host, setHost, listenerCount, setListenerCount, messages, setMessages, chatInput, setChatInput, livePos, setLivePos, savedId, setSavedId, pickerOpen, setPickerOpen, ended, setEnded, summary, setSummary, reactions, setReactions, reactChannelRef, spawnReaction, sendReaction, showGuide, setShowGuide, dontShowGuide, setDontShowGuide, launched, setLaunched, openedOnceRef, handleGotIt, syncTokenRef, syncStateRef, inSync, setInSync, isHostViewer, changing, changingInfo, handleSendChat, handleSaveSong, handleLeave };
 }

@@ -129,6 +129,18 @@ export function useMeetHost({
     };
     syncChannelRef.current.send({ type: "broadcast", event: "sync", payload });
   };
+  // Fire the instant the host *picks* a new track (before our own now-playing
+  // poll catches up ~2-3s later), so listeners can show a "switching song"
+  // transition immediately instead of sitting on the old card. `info` is the
+  // new track when we know it (picked from the list); omitted for a blind skip.
+  const signalTrackChange = (info?: { id: string; name: string; artist: string | null; albumArt: string | null }) => {
+    if (isJam) return; // listeners-only feature
+    syncChannelRef.current?.send({
+      type: "broadcast",
+      event: "track-changing",
+      payload: { info: info ?? null, sentAtMs: Date.now() },
+    });
+  };
   const liveState = (): MeetTrackState | null => {
     const t = trackRef.current;
     if (!t) return null;
@@ -334,6 +346,37 @@ export function useMeetHost({
     }
   }, [isJam, visible, track?.id, track?.isPlaying]);
 
+  // Meet host (non-jam): cold-start / re-entry recovery. The live now-playing
+  // poll only reports a song while Spotify still has an active device — on a
+  // cold launch (reopening the app and popping back into the meet) the device
+  // is usually gone, so the poll returns nothing and the screen would look like
+  // the meet never had a track. But the meet row still remembers the last one.
+  // Seed pausedCache from it so the idle screen offers "Resume song" instead of
+  // a blank "Pick a song" (the listener already reads this row on join). Runs
+  // once per open and bails if Spotify is already reporting a live track — in
+  // that case the now-playing poll drives the UI and clears pausedCache itself.
+  const seededResumeRef = useRef(false);
+  useEffect(() => {
+    if (isJam || !visible || !meetId) { seededResumeRef.current = false; return; }
+    if (seededResumeRef.current) return;
+    seededResumeRef.current = true;
+    let active = true;
+    (async () => {
+      if (trackRef.current) return; // live song present → poll owns the UI
+      const m = await getMeet(meetId);
+      if (!active || !m || !m.current_track_id) return;
+      if (trackRef.current) return; // a live track landed while we awaited
+      setPausedCache({
+        id: m.current_track_id,
+        name: m.current_track_name ?? '',
+        artist: m.current_track_artist ?? '',
+        albumArt: m.current_track_album_art,
+        positionMs: m.current_track_position_ms ?? 0,
+      });
+    })();
+    return () => { active = false; };
+  }, [isJam, visible, meetId]);
+
   // Jam activate: the FOLLOWER opens Spotify once to the current track so this
   // phone becomes the active device. Until this happens nothing plays here and
   // the Web-API sync below is a no-op (this is the "nothing happens on the
@@ -508,5 +551,7 @@ export function useMeetHost({
     cachedTrack, displayTrack, resumeFromCache,
     // Host-meet pause cache / resume
     pausedCache, resumeHostSong,
+    // Instant "switching song" signal to listeners
+    signalTrackChange,
   };
 }

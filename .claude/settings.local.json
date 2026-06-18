@@ -31,7 +31,9 @@
       "Bash(grep -Ei \"groupChats|GroupChat|useGroupChat|CreateGroup|GroupSettings|app/feed.tsx|app\\\\\\\\\\\\\\\\feed.tsx\")",
       "Bash(node -e \"const p='eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlpdHVyYXp2YWp0eWpydHJub3ZnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTQ0NDQyOSwiZXhwIjoyMDk1MDIwNDI5fQ'; console.log\\(Buffer.from\\(p,'base64'\\).toString\\('utf8'\\)\\)\")",
       "PowerShell(& .\\\\scripts\\\\split-feed-styles.ps1; Write-Host '---'; Get-ChildItem lib\\\\feed\\\\styles\\\\ -File | ForEach-Object { $lc = \\(Get-Content $_.FullName\\).Count; \"{0,5}  {1}\" -f $lc, $_.Name }; Write-Host '---'; \"barrel: $\\(\\(Get-Content lib\\\\feed\\\\styles.ts\\).Count\\) lines\")",
-      "PowerShell(npx tsc --noEmit 2>&1)"
+      "PowerShell(npx tsc --noEmit 2>&1)",
+      "WebFetch(domain:techcrunch.com)",
+      "WebFetch(domain:developer.spotify.com)"
     ]
   }
 }

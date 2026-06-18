@@ -103,6 +103,7 @@ export type SyncReason =
   | 'ok'            // song + timer both in sync, nothing to do
   | 'no-device'     // nothing to play on — caller should re-open Spotify to wake one
   | 'unauthorized'  // listener token dead — caller should prompt reconnect
+  | 'rate-limited'  // Spotify 429 — skip this cycle, don't pile on more requests
 
 export type SyncStatus = {
   inSync: boolean       // song AND playback timer match the host
@@ -153,6 +154,13 @@ export async function sanityCheckSync(
   // Listener token dead — caller should prompt reconnect.
   if (mine && 'unauthorized' in mine) {
     return { inSync: false, corrected: false, reason: 'unauthorized', driftMs: null }
+  }
+
+  // Rate-limited — we can't read playback state right now. Skip without issuing
+  // any corrective play/seek (those would 429 too and extend the penalty).
+  // Treat as in-sync so the UI stays calm; the next cycle retries once clear.
+  if (mine && 'rateLimited' in mine) {
+    return { inSync: true, corrected: false, reason: 'rate-limited', driftMs: null }
   }
 
   const myTrackId = mine && !('unauthorized' in mine) ? mine.id : null
