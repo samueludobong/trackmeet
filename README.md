@@ -37,7 +37,7 @@ A **Meet** is a live session where one host plays music and any number of follow
 - **Synced playback** — listeners' Spotify is kept in lockstep with the host's track and position.
 - **Live chat & floating reactions** during the session.
 - **Talk mode** — the host can duck the music and talk over the stream (walkie-talkie style, hold-to-speak with a drag-to-lock gesture).
-- **Lyrics view** — time-synced lyrics that scroll with the live playback position.
+- **Live lyrics** — time-synced lyrics that scroll with the playback position, with on-the-fly [translation](#-lyrics--translation).
 - **Gallery-style UI** — swipe seamlessly between Lyrics ◄ Now Playing ► Music Library.
 - **Public or private join** — appear on your profile as "listening in", or join invisibly.
 - **End-of-meet summary** — the full tracklist played during the session, savable to a playlist.
@@ -62,11 +62,18 @@ Rich user profiles with a now-playing card, pinned song, customizable banner/sha
 ### 🔎 Discover
 A discovery surface for finding people, artists, and live Meets.
 
+### 🎤 Lyrics & translation
+A full karaoke-style lyrics experience that shows up wherever music plays — your profile's now-playing card, Meets, and Jams.
+
+- **Time-synced ("karaoke") lyrics** — lines highlight and auto-scroll in step with the live playback position, sourced from [lrclib.net](https://lrclib.net) and cached in Supabase so any song someone has already viewed loads instantly (negative results are cached too).
+- **AI-powered translation** — translate lyrics into **22 languages** on the fly. Translation runs through a Supabase **Edge Function** backed by **Anthropic's Claude (Haiku)**, with the API key kept server-side; the function also returns the *detected source language*. Each `(track, language)` pair is computed once, ever, and cached in a shared table so every later viewer reads it for free.
+- **"First to discover" celebration** — be the first person in the app to ever pull up a song's lyrics and you claim it: a celebratory banner and a confetti burst, tracked via a global discovery claim so it only happens once per song.
+
 ### 🟢 Spotify integration
-- OAuth (PKCE) connect/reconnect flow with token refresh.
-- Real-time now-playing polling and gradient theming derived from album art.
-- Full playback control (play/pause/seek/skip), search (songs / artists / albums), playlist & album browsing, and "add to playlist".
-- Time-synced lyrics.
+- OAuth **PKCE** connect/reconnect flow with automatic token refresh.
+- Real-time now-playing polling, with UI gradients & accents derived from the album art.
+- Full playback control (play / pause / seek / skip), search across **songs / artists / albums**, playlist & album browsing, and one-tap "add to playlist".
+- Powers the synced playback in Meets and Jams (see below).
 
 ---
 
@@ -94,8 +101,9 @@ See [`lib/meetSync.ts`](lib/meetSync.ts), [`hooks/useMeetHost.ts`](hooks/useMeet
 | Routing | [Expo Router](https://docs.expo.dev/router/introduction/) (file-based) |
 | Styling | [NativeWind](https://www.nativewind.dev/) (Tailwind CSS) + component StyleSheets |
 | Animation & gestures | React Native Reanimated, Gesture Handler, the RN Animated API |
-| Backend | [Supabase](https://supabase.com) — Postgres, Auth, Realtime, Storage |
-| Music | [Spotify Web API](https://developer.spotify.com/documentation/web-api) (OAuth via `expo-auth-session`) |
+| Backend | [Supabase](https://supabase.com) — Postgres, Auth, Realtime, Storage, **Edge Functions** |
+| AI | [Anthropic Claude](https://www.anthropic.com) (Haiku) for lyrics translation, server-side in an Edge Function |
+| Music | [Spotify Web API](https://developer.spotify.com/documentation/web-api) (OAuth/PKCE via `expo-auth-session`) + [lrclib.net](https://lrclib.net) lyrics |
 | Media | `expo-image`, `expo-video`, `expo-av`, on-device media caching |
 | Notifications | `expo-notifications` (push) |
 | Background work | `expo-background-fetch` + `expo-task-manager` |
@@ -146,8 +154,9 @@ EXPO_PUBLIC_DEVELOPMENT_STATUS=Development
 
 The Spotify client ID lives in [`lib/spotify/auth.ts`](lib/spotify/auth.ts); swap in your own Spotify app's client ID and register its redirect URI in the Spotify dashboard.
 
-### 3. Set up the database
-Apply the SQL in [`supabase/`](supabase/) to your Supabase project (e.g. via the SQL editor or CLI) to create the tables, policies, and realtime configuration.
+### 3. Set up the backend
+- Apply the SQL in [`supabase/`](supabase/) to your Supabase project (via the SQL editor or CLI) to create the tables, policies, and realtime configuration.
+- For lyrics translation, deploy the `translate-lyrics` Supabase **Edge Function** and set your `ANTHROPIC_API_KEY` as a Supabase secret (the app never sees it).
 
 ### 4. Run
 ```bash
