@@ -165,7 +165,9 @@ const pickTargetDevice = async (accessToken: string): Promise<string | null> => 
 // Spotify yet). In that case we discover an available device and retry against
 // it explicitly, which also wakes the device up.
 
-export const playTrackAt = async (accessToken: string, trackUri: string, positionMs: number): Promise<void> => {
+// Returns true when a play command was issued, false when there's no device to
+// play on (caller should wake one by opening the Spotify app to the track).
+export const playTrackAt = async (accessToken: string, trackUri: string, positionMs: number): Promise<boolean> => {
   const body = JSON.stringify({ uris: [trackUri], position_ms: Math.max(0, Math.round(positionMs)) })
   const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
   try {
@@ -174,12 +176,14 @@ export const playTrackAt = async (accessToken: string, trackUri: string, positio
       const deviceId = await pickTargetDevice(accessToken)
       if (!deviceId) {
         console.log('[Spotify] playTrackAt: no available device — listener must open Spotify')
-        return
+        return false
       }
       await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, { method: 'PUT', headers, body })
     }
+    return true
   } catch (e) {
     console.log('[Spotify] playTrackAt error:', e)
+    return false
   }
 }
 

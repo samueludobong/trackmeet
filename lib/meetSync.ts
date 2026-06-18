@@ -33,11 +33,22 @@ const DRIFT_TOLERANCE_MS = 5_000
 const ACTION_COOLDOWN_MS = 2_000
 let _lastActionAt = 0
 
-// Empirically, between issuing a Spotify Web API command and audio actually
-// starting/seeking, ~300ms elapses (network + device-side queue). Adding this
-// to seek targets makes the audio land where the host actually is at that
-// moment, rather than ~300ms behind.
-const SPOTIFY_CMD_LATENCY_MS = 2000
+// Command latency: the gap between issuing a play/seek and the audio actually
+// landing at that position (network + Spotify's device-side queue). Rather than
+// hard-code a guess, we MEASURE it: after each correction we compare where the
+// listener ends up against where the host is, and nudge this estimate to drive
+// that residual toward zero. It self-calibrates per device/network within a few
+// corrections, starting from a sane default.
+const DEFAULT_CMD_LATENCY_MS = 250
+const MIN_CMD_LATENCY_MS = 0
+const MAX_CMD_LATENCY_MS = 1500
+let _cmdLatencyMs = DEFAULT_CMD_LATENCY_MS
+// A correction is awaiting an outcome measurement, trustworthy only once Spotify
+// has settled (after the cooldown).
+let _measurePending = false
+let _measureAfter = 0
+// Expose the live estimate (handy for logging / debugging the calibration).
+export const getCmdLatencyMs = () => _cmdLatencyMs
 
 // Talk mode ducks the listener's volume to 0 (instead of pausing, which can let
 // the device go idle and leave playback stuck). We remember the pre-talk volume
@@ -90,6 +101,7 @@ export type SyncReason =
   | 'drift'         // same song but timer drifted past tolerance → re-seeked
   | 'cooldown'      // drifted but a correction was just made — let it settle
   | 'ok'            // song + timer both in sync, nothing to do
+  | 'no-device'     // nothing to play on — caller should re-open Spotify to wake one
   | 'unauthorized'  // listener token dead — caller should prompt reconnect
 
 export type SyncStatus = {
@@ -121,8 +133,14 @@ export async function sanityCheckSync(
   // Talk just ended — restore the listener's volume before resuming sync.
   if (_ducked) await unduckAfterTalk(accessToken)
 
-  // Nothing playing in the meet — leave the listener alone.
-  if (!state.id) return { inSync: true, corrected: false, reason: 'idle', driftMs: null }
+  // Host has nothing playing — not started yet, or the song ended. Make sure the
+  // listener isn't left forcing a stale track: pause and wait for the host to
+  // start. setPlayback(false) is idempotent, so reinforcing it each check is a
+  // no-op once already paused.
+  if (!state.id) {
+    await setPlayback(accessToken, false)
+    return { inSync: true, corrected: false, reason: 'idle', driftMs: null }
+  }
 
   // Host paused — pause the listener too.
   if (!state.isPlaying) {
@@ -130,7 +148,6 @@ export async function sanityCheckSync(
     return { inSync: true, corrected: true, reason: 'host-paused', driftMs: null }
   }
 
-  const target = expectedHostPosition(state)
   const mine = await getCurrentlyPlaying(accessToken)
 
   // Listener token dead — caller should prompt reconnect.
@@ -142,13 +159,24 @@ export async function sanityCheckSync(
   const myPos     = mine && !('unauthorized' in mine) ? (mine.progressMs ?? 0) : 0
   const myPlaying = mine && !('unauthorized' in mine) ? mine.isPlaying : false
 
-  // Wrong song (or stopped) → start the host's track at the right spot.
-  // This is a hard mismatch, so correct it regardless of the cooldown. Add the
-  // Spotify command buffer so audio lands where the host actually is by the
-  // time the command finishes travelling.
+  // IMPORTANT: compute the host target *now*, after the getCurrentlyPlaying
+  // round-trip (and right before each command). expectedHostPosition extrapolates
+  // from Date.now(), so computing it late means the time spent reading playback
+  // state — and the command's own travel — is already baked in. Computing it
+  // earlier (before the await) is what left the listener consistently behind.
+
+  // Mark that a correction should have its outcome measured to recalibrate the
+  // latency estimate, once Spotify has settled (after the cooldown).
+  const flagMeasure = () => { _measurePending = true; _measureAfter = Date.now() + actionCooldown }
+
+  // Wrong song (or stopped) → start the host's track at where the host is right
+  // now, plus the command-travel buffer so it lands flush.
   if (myTrackId !== state.id || !myPlaying) {
-    await playTrackAt(accessToken, `spotify:track:${state.id}`, target + SPOTIFY_CMD_LATENCY_MS)
+    const played = await playTrackAt(accessToken, `spotify:track:${state.id}`, expectedHostPosition(state) + _cmdLatencyMs)
     _lastActionAt = Date.now()
+    // No device to play on — tell the caller so it can re-open Spotify to wake one.
+    if (!played) return { inSync: false, corrected: false, reason: 'no-device', driftMs: null }
+    flagMeasure()
     return {
       inSync: false,
       corrected: true,
@@ -157,14 +185,28 @@ export async function sanityCheckSync(
     }
   }
 
-  // Same song — compare playback timers.
-  const driftMs = Math.abs(myPos - target)
+  // Same song. First, if a recent correction has settled, measure how far off we
+  // landed and nudge the latency estimate toward eliminating that residual.
+  const hostNow = expectedHostPosition(state)
+  if (_measurePending && Date.now() >= _measureAfter) {
+    const residual = hostNow - myPos // + = listener landed behind → need more lead
+    // Ignore big residuals — those are real desyncs, not a calibration signal.
+    if (Math.abs(residual) < 3_000) {
+      _cmdLatencyMs = Math.max(MIN_CMD_LATENCY_MS, Math.min(MAX_CMD_LATENCY_MS, _cmdLatencyMs + residual * 0.5))
+    }
+    _measurePending = false
+  }
+
+  // Compare playback timers against the host position as of now.
+  const driftMs = Math.abs(myPos - hostNow)
   if (driftMs > driftTolerance) {
     // Drifted too far → re-seek, unless we just issued a correction (Spotify is
-    // still settling and reporting a stale position).
+    // still settling and reporting a stale position). Recompute the target at
+    // the seek so the elapsed time since the read above is accounted for too.
     if (Date.now() - _lastActionAt > actionCooldown) {
-      await seekPlayback(accessToken, target + SPOTIFY_CMD_LATENCY_MS)
+      await seekPlayback(accessToken, expectedHostPosition(state) + _cmdLatencyMs)
       _lastActionAt = Date.now()
+      flagMeasure()
       return { inSync: false, corrected: true, reason: 'drift', driftMs }
     }
     return { inSync: false, corrected: false, reason: 'cooldown', driftMs }

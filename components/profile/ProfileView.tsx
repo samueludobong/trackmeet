@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { ProfileOverlays } from "../../components/profile/ProfileOverlays";
 import { ProfileHeaderCard } from "../../components/profile/ProfileHeaderCard";
 import { ProfileNowPlayingCard } from "../../components/profile/ProfileNowPlayingCard";
+import { ProfileMeetCard } from "../../components/profile/ProfileMeetCard";
 import { useOwnProfile } from "../../hooks/useOwnProfile";
 import { View, Text, ScrollView, TouchableOpacity, RefreshControl } from "react-native";
 import { useRouter } from "expo-router";
@@ -34,6 +35,15 @@ export const ProfileView = React.memo(function ProfileView() {
   const [postsKey, setPostsKey] = useState(0);
   const openHostMeet = useOpenHostMeet();
   const openMeet = useOpenMeet();
+
+  // While in a live meet, jumping back into the room: the host re-opens their
+  // host room, a listener re-opens the listener room. Null when not in a meet.
+  const onReturnToMeet = activeMeet
+    ? () => {
+        if (activeMeet.isHost) openHostMeet?.(activeMeet.meet.id, activeMeet.meet.name);
+        else openMeet?.(activeMeet.meet.id, activeMeet.isPublic);
+      }
+    : null;
 
   const composerUser: ComposerUser | null = userId
     ? {
@@ -79,7 +89,7 @@ export const ProfileView = React.memo(function ProfileView() {
         contentContainerStyle={profileStyles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#AB00FF" />}
       >
-      <ProfileHeaderCard profile={profile} getInitials={getInitials} setEditOpen={setEditOpen} setSocialLinksSheetOpen={setSocialLinksSheetOpen} setLinksSheetOpen={setLinksSheetOpen} setPinnedPreviewOpen={setPinnedPreviewOpen} />
+      <ProfileHeaderCard profile={profile} getInitials={getInitials} setEditOpen={setEditOpen} setSocialLinksSheetOpen={setSocialLinksSheetOpen} setLinksSheetOpen={setLinksSheetOpen} setPinnedPreviewOpen={setPinnedPreviewOpen} onReturnToMeet={meetChecked ? onReturnToMeet : null} />
 
       {/* ─── Spotify reconnect prompt ────────────────────────────── */}
       {needsReconnect && (
@@ -97,21 +107,27 @@ export const ProfileView = React.memo(function ProfileView() {
         </TouchableOpacity>
       )}
 
-      {/* ─── Now Playing card — only shown while actively playing, and only
-              once we've confirmed whether you're in a meet, so it never flashes
-              the wrong variant first ── */}
-      {!needsReconnect && track?.isPlaying && meetChecked && (
-        <ProfileNowPlayingCard
-          track={track}
-          liveProgressMs={liveProgressMs}
-          gradient={gradient}
-          activeMeet={activeMeet}
-          userId={userId}
-          accessToken={accessToken}
-          openHostMeet={openHostMeet}
-          openMeet={openMeet}
-          onStartMeet={() => setMeetOverlayVisible(true)}
-        />
+      {/* ─── Now Playing card — only once we've confirmed meet status so it
+              never flashes the wrong variant. While a track plays we show the
+              full card (with its meet-aware variants); when nothing's playing
+              but you're in a live meet, we still show the compact "meet version"
+              so there's always a way back into the room. ── */}
+      {!needsReconnect && meetChecked && (
+        track?.isPlaying ? (
+          <ProfileNowPlayingCard
+            track={track}
+            liveProgressMs={liveProgressMs}
+            gradient={gradient}
+            activeMeet={activeMeet}
+            userId={userId}
+            accessToken={accessToken}
+            openHostMeet={openHostMeet}
+            openMeet={openMeet}
+            onStartMeet={() => setMeetOverlayVisible(true)}
+          />
+        ) : activeMeet && onReturnToMeet ? (
+          <ProfileMeetCard activeMeet={activeMeet} onReturn={onReturnToMeet} />
+        ) : null
       )}
 
       {/* ─── Section tabs ────────────────────────────────────────── */}

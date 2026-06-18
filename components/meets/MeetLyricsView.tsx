@@ -16,10 +16,13 @@ type Track = { id: string | null; name: string | null; artist: string | null; du
  * already keeps in sync with the host's playback. Pure read-only view; the meet's
  * chat bar sits below it untouched.
  */
-export function MeetLyricsView({ track, positionMs, onClose }: {
+export function MeetLyricsView({ track, positionMs, onClose, scrollLocked = false }: {
   track: Track;
   positionMs: number;
   onClose: () => void;
+  // Driven by the screen's page-swipe pager — freezes lyric scrolling while a
+  // horizontal page swipe is in progress so the swipe always wins.
+  scrollLocked?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
@@ -77,7 +80,7 @@ export function MeetLyricsView({ track, positionMs, onClose }: {
             <Text style={styles.empty}>Huhh we dont know the lyrics to this one</Text>
           </View>
         ) : synced ? (
-          <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 20, paddingBottom: SH * 0.45 }}>
+          <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} scrollEnabled={!scrollLocked} contentContainerStyle={{ paddingTop: 20, paddingBottom: SH * 0.45 }}>
             {synced.map((line, i) => (
               <Text
                 key={`${i}-${line.timeMs}`}
@@ -89,7 +92,7 @@ export function MeetLyricsView({ track, positionMs, onClose }: {
             ))}
           </ScrollView>
         ) : (
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 20 }}>
+          <ScrollView showsVerticalScrollIndicator={false} scrollEnabled={!scrollLocked} contentContainerStyle={{ paddingVertical: 20 }}>
             {lyrics.plain!.split("\n").map((l, i) => (
               <Text key={i} style={[styles.line, styles.plain]}>{l || " "}</Text>
             ))}

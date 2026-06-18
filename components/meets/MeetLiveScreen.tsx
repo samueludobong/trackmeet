@@ -1,10 +1,11 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { MeetMusicPanel } from "../../components/meets/MeetMusicPanel";
 import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
+import { LiveSessionBackdrop } from "../../components/meets/LiveSessionBackdrop";
 import { useMeetMusicControl } from "../../hooks/useMeetMusicControl";
 import { useMeetHost } from "../../hooks/useMeetHost";
 import { useSmoothProgressMs } from "../../hooks/useNowPlaying";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, PanResponder } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, PanResponder, Easing } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { SW } from "../../lib/feed/dimensions";
 import { Ionicons } from "@expo/vector-icons";
@@ -37,8 +38,8 @@ export function MeetLiveScreen({
   const {
     track, liveProgressMs, listenerCount, messages, chatInput, setChatInput,
     talkOn, ending, summary, reactions, sendReaction, removeReaction, handleSendChat,
-    handleToggleTalk, handleEndMeet, closeAll, displayTrack, resumeFromCache,
-    isDriver, driverId, takeStage, dropStage,
+    handleToggleTalk, setTalk, handleEndMeet, closeAll, displayTrack, resumeFromCache,
+    isDriver, driverId, takeStage, dropStage, pausedCache, resumeHostSong,
   } = useMeetHost({ visible, meetId, accessToken, getApiToken: () => apiTokenRef.current, onClose, jam: jamConfig });
 
   // In a jam, only the stage holder may control playback.
@@ -60,6 +61,153 @@ export function MeetLiveScreen({
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const title = jam ? (jam.otherName || "Jam") : (meetName ?? "My Meet");
 
+  // ── Idle ↔ playing state cross-fade ──────────────────────────────────────────
+  // playAnim: 0 = idle (animated live-session gradient), 1 = a track is playing
+  // (album-art background + full controls). We smart-animate between the two so
+  // starting/stopping music feels like a deliberate transition, not a hard cut.
+  const hasTrack = !!displayTrack?.id;
+  const playAnim = useRef(new Animated.Value(hasTrack ? 1 : 0)).current;
+  const [showIdle, setShowIdle] = useState(!hasTrack);
+  useEffect(() => {
+    // Entering idle → mount the idle layer right away so it can fade in. Going
+    // to playing → leave it mounted (it's already up) and unmount once the fade
+    // finishes. (Previously this only ran for hasTrack, so playing→idle never
+    // re-mounted the idle layer and its elements never appeared.)
+    if (!hasTrack) setShowIdle(true);
+    Animated.timing(playAnim, {
+      toValue: hasTrack ? 1 : 0,
+      duration: 520,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: true,
+    }).start(({ finished }) => { if (finished && hasTrack) setShowIdle(false); });
+  }, [hasTrack]);
+
+  // Gentle breathing pulse on the idle icon so the empty state feels alive.
+  const idlePulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!showIdle) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idlePulse, { toValue: 1, duration: 1400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(idlePulse, { toValue: 0, duration: 1400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [showIdle]);
+
+  const idleOpacity = playAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  const pulseScale = idlePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] });
+  // Idle CTA only makes sense for whoever can actually start playback.
+  const idleCanStart = canControl;
+
+  // ── Hold-to-speak with drag-up-to-lock (walkie-talkie) ───────────────────────
+  // Press-and-hold the idle mic to talk; drag up past the threshold to LOCK so
+  // talk stays on hands-free; tap the locked mic to stop. A PanResponder (not
+  // Pressable) so we can read the vertical drag during the hold.
+  const LOCK_DRAG = 60; // px upward to arm the lock
+  const [talkLocked, setTalkLocked] = useState(false);
+  const [talkHolding, setTalkHolding] = useState(false);
+  // True while pressing a locked mic — a tap or a swipe-up will unlock on release.
+  const [talkUnlocking, setTalkUnlocking] = useState(false);
+  // True while the finger is held above the threshold — releasing here commits
+  // the lock (when holding) or the unlock (when unlocking). The commit happens
+  // on release, not on crossing; this just drives the "Release to…" hint.
+  const [atLockZone, setAtLockZone] = useState(false);
+  const inLockZoneRef = useRef(false);
+  // Latest setTalk in a ref — the PanResponder is created once, but setTalk's
+  // identity changes each render, so we always call through the ref.
+  const setTalkRef = useRef(setTalk);
+  setTalkRef.current = setTalk;
+  const talkLockedRef = useRef(false);
+  talkLockedRef.current = talkLocked;
+  const talkGestureRef = useRef<"idle" | "holding" | "unlock">("idle");
+  // The mic physically follows the finger up during a hold; snaps home on
+  // release. JS-driven (we setValue per move), so it lives on its own outer view
+  // — the inner pulse/scale stays native-driver, no mixing on one view.
+  const talkDragY = useRef(new Animated.Value(0)).current;
+  const snapTalkHome = () =>
+    Animated.spring(talkDragY, { toValue: 0, useNativeDriver: false, speed: 18, bounciness: 8 }).start();
+  // If talk turns off by any path (locked → tap, meet end, etc.), drop the lock.
+  useEffect(() => { if (!talkOn) setTalkLocked(false); }, [talkOn]);
+
+  const talkPan = useRef(
+    PanResponder.create({
+      // Grab the press (so hold-to-talk fires immediately) but only *keep*
+      // claiming the gesture while it's vertical — a horizontal drag is a page
+      // swipe and must fall through to the pager. Allow the pager to steal at
+      // any time via termination.
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (_e, { dx, dy }) => Math.abs(dy) >= Math.abs(dx),
+      onMoveShouldSetPanResponderCapture: () => false,
+      onPanResponderTerminationRequest: () => true,
+      onPanResponderGrant: () => {
+        inLockZoneRef.current = false;
+        setAtLockZone(false);
+        talkDragY.setValue(0);
+        if (talkLockedRef.current) {
+          // Locked → begin an unlock gesture. A tap OR a swipe-up both unlock,
+          // resolved on release; we follow the finger for feedback meanwhile.
+          talkGestureRef.current = "unlock";
+          setTalkUnlocking(true);
+          return;
+        }
+        talkGestureRef.current = "holding";
+        setTalkHolding(true);
+        setTalkRef.current(true);
+      },
+      onPanResponderMove: (_, { dy }) => {
+        const mode = talkGestureRef.current;
+        if (mode !== "holding" && mode !== "unlock") return;
+        // Follow the finger upward only, clamped a touch past the threshold.
+        talkDragY.setValue(Math.max(-(LOCK_DRAG + 14), Math.min(0, dy)));
+        // Above the threshold only *arms* the commit — release is what acts.
+        const inZone = dy < -LOCK_DRAG;
+        if (inZone !== inLockZoneRef.current) {
+          inLockZoneRef.current = inZone;
+          setAtLockZone(inZone);
+        }
+      },
+      onPanResponderRelease: () => {
+        const mode = talkGestureRef.current;
+        if (mode === "holding") {
+          if (inLockZoneRef.current) {
+            // Released in the zone → lock talk on, hands-free.
+            setTalkLocked(true);
+            setTalkHolding(false);
+          } else {
+            // Released below it → normal push-to-talk end.
+            setTalkRef.current(false);
+            setTalkHolding(false);
+          }
+        } else if (mode === "unlock") {
+          // Tap or swipe on a locked mic → unlock + stop talking.
+          setTalkLocked(false);
+          setTalkRef.current(false);
+          setTalkUnlocking(false);
+        }
+        setAtLockZone(false);
+        inLockZoneRef.current = false;
+        if (mode === "holding" || mode === "unlock") snapTalkHome();
+        talkGestureRef.current = "idle";
+      },
+      onPanResponderTerminate: () => {
+        const mode = talkGestureRef.current;
+        if (mode === "holding") {
+          setTalkRef.current(false); // interrupted hold → stop talk
+          setTalkHolding(false);
+        } else if (mode === "unlock") {
+          setTalkUnlocking(false);   // interrupted unlock → stay locked
+        }
+        setAtLockZone(false);
+        inLockZoneRef.current = false;
+        if (mode === "holding" || mode === "unlock") snapTalkHome();
+        talkGestureRef.current = "idle";
+      },
+    }),
+  ).current;
+
   // ── Page swipe pager: Lyrics ← Playback → Music ──────────────────────────────
   // An *interactive* pager: the music page (slides from the right) and lyrics
   // page (slides from the left) follow your finger 1:1 during the drag, then
@@ -79,17 +227,24 @@ export function MeetLiveScreen({
   const dragModeRef = useRef<null | "music" | "lyrics">(null);
   const dragBaseRef = useRef(0);   // slide value where the drag started
   const dragOffRef = useRef(0);    // dx at the moment the drag was recognised
+  // Shared scroll-lock: the instant a horizontal swipe is recognised anywhere,
+  // we lock EVERY inner scroller (chat, lyrics, music list) so the page swipe
+  // always wins — like a photo gallery — then release it when the gesture ends.
+  const [scrollLock, setScrollLock] = useState(false);
+  const scrollLockRef = useRef(false);
+  const setLock = (v: boolean) => { scrollLockRef.current = v; setScrollLock(v); };
   const settle = (mode: "music" | "lyrics", cur: number, vx: number) => {
+    // Reuse the open/close helpers so state flips on release only (pages are
+    // pre-mounted → the drag never re-renders), and close still resets the
+    // music panel's internal state like the old unmount did.
     if (mode === "music") {
       // musicSlideX: 0 = open, SW = closed. Left flick / past halfway → open.
       const open = vx < -0.35 ? true : vx > 0.35 ? false : cur < SW * 0.5;
-      if (open) Animated.spring(musicSlideX, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 220 }).start();
-      else Animated.timing(musicSlideX, { toValue: SW, useNativeDriver: true, duration: 180 }).start(() => setPickerOpen(false));
+      if (open) openMusicPicker(); else closeMusicPicker();
     } else {
       // lyricsSlideX: 0 = open, -SW = closed. Right flick / past halfway → open.
       const open = vx > 0.35 ? true : vx < -0.35 ? false : cur > -SW * 0.5;
-      if (open) Animated.spring(lyricsSlideX, { toValue: 0, useNativeDriver: true, damping: 24, stiffness: 220 }).start();
-      else Animated.timing(lyricsSlideX, { toValue: -SW, useNativeDriver: true, duration: 180 }).start(() => setLyricsOpen(false));
+      if (open) openLyrics(); else closeLyrics();
     }
   };
   const pagePan = useRef(
@@ -98,22 +253,21 @@ export function MeetLiveScreen({
       // scroll, etc.) need them.
       onStartShouldSetPanResponder: () => false,
       onStartShouldSetPanResponderCapture: () => false,
-      // Only claim once the user has committed to a *clearly* horizontal drag.
-      // Previously `dx > 4 && dx > dy * 0.6` was too lenient: accidental
-      // diagonal twitches captured, and on the chat area the child scroll
-      // sometimes won the race so the pager felt stuck. New rule:
-      //  • dx must be > 10px (filters tap jitter)
-      //  • horizontal must dominate vertical by 1.6× on playback, 2× on a panel
-      //    (so vertical scrolling in lyrics / music panel always wins)
-      // Same threshold on both capture (preempt children) and non-capture
-      // (catch-up if a child slipped past us first), for resilience.
+      // Claim as soon as the drag reads horizontal, from ANYWHERE on the screen —
+      // over the mic, chat, buttons, lyrics, or the music list. Runs in the
+      // capture phase so it preempts children, and the moment it recognises a
+      // horizontal drag it locks every inner scroller (scrollLock) so the native
+      // lists can't swallow the gesture. Horizontal must beat vertical (so a
+      // clearly-vertical scroll still passes through to the list).
       onMoveShouldSetPanResponderCapture: (_, { dx, dy }) => {
-        const onPanel = pickerOpenRef.current || lyricsOpenRef.current;
-        return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * (onPanel ? 2 : 1.6);
+        const horizontal = Math.abs(dx) > 4 && Math.abs(dx) > Math.abs(dy);
+        if (horizontal && !scrollLockRef.current) setLock(true);
+        return horizontal;
       },
       onMoveShouldSetPanResponder: (_, { dx, dy }) => {
-        const onPanel = pickerOpenRef.current || lyricsOpenRef.current;
-        return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * (onPanel ? 2 : 1.6);
+        const horizontal = Math.abs(dx) > 4 && Math.abs(dx) > Math.abs(dy);
+        if (horizontal && !scrollLockRef.current) setLock(true);
+        return horizontal;
       },
       // Once we own the horizontal drag, never give it back — a momentary
       // vertical wiggle mid-swipe shouldn't cancel into a scroll.
@@ -128,9 +282,11 @@ export function MeetLiveScreen({
       onPanResponderMove: (_, { dx }) => {
         let mode = dragModeRef.current;
         if (!mode) {
-          // From playback: the swipe direction picks the page, mounted off-screen.
-          if (dx < 0) { mode = "music";  dragBaseRef.current = SW;  setPickerOpen(true); }
-          else        { mode = "lyrics"; dragBaseRef.current = -SW; setLyricsOpen(true); }
+          // From playback: direction picks the page. Both pages are pre-mounted
+          // off-screen, so this is a pure native-driver slide — no setState, no
+          // mount hitch mid-gesture (that's what makes it feel instant).
+          if (dx < 0) { mode = "music";  dragBaseRef.current = SW; }
+          else        { mode = "lyrics"; dragBaseRef.current = -SW; }
           dragModeRef.current = mode;
           dragOffRef.current = dx;   // so the page starts exactly under the finger
         }
@@ -141,6 +297,7 @@ export function MeetLiveScreen({
       onPanResponderRelease: (_, { dx, vx }) => {
         const mode = dragModeRef.current;
         dragModeRef.current = null;
+        setLock(false);
         if (!mode) return;
         const d = dx - dragOffRef.current;
         const cur = mode === "music"
@@ -148,7 +305,7 @@ export function MeetLiveScreen({
           : clamp(dragBaseRef.current + d, -SW, 0);
         settle(mode, cur, vx);
       },
-      onPanResponderTerminate: () => { dragModeRef.current = null; },
+      onPanResponderTerminate: () => { dragModeRef.current = null; setLock(false); },
     }),
   ).current;
 
@@ -161,12 +318,22 @@ export function MeetLiveScreen({
     <Modal visible animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? onClose}>
       <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]} {...pagePan.panHandlers}>
 
-        {displayTrack?.albumArt ? (
-          <CachedImage source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
-        )}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.42)" }]} pointerEvents="none" />
+        {/* Idle: looping live-session gradient sits underneath everything. */}
+        <LiveSessionBackdrop style={StyleSheet.absoluteFill} />
+        {/* Playing: album art fades in over the gradient as a track starts. */}
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: playAnim }]} pointerEvents="none">
+          {displayTrack?.albumArt ? (
+            <CachedImage source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
+          )}
+        </Animated.View>
+        {/* Dark scrim — lighter when idle so the gradient reads, stronger when a
+            track plays for text contrast over busy album art. */}
+        <Animated.View
+          style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: playAnim.interpolate({ inputRange: [0, 1], outputRange: [0.14, 0.42] }) }]}
+          pointerEvents="none"
+        />
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.55)", "rgba(0,0,0,0.92)"]} locations={[0.30, 0.62, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
 
         {/* Plain-tap surface — dismisses the keyboard. The right-swipe gesture
@@ -207,36 +374,105 @@ export function MeetLiveScreen({
 
         <>
             <View style={mlStyles.trackSection}>
-              <Text style={mlStyles.trackName} numberOfLines={1}>{displayTrack?.name ?? "—"}</Text>
-              <Text style={mlStyles.trackArtist} numberOfLines={1}>{displayTrack?.artist ?? ""}</Text>
-              <View style={mlStyles.progressTrack}>
-                <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
-              </View>
-              <View style={mlStyles.progressTimes}>
-                <Text style={mlStyles.progressTime}>{fmtMs(smoothProgressMs)}</Text>
-                <Text style={mlStyles.progressTime}>{fmtMs(track?.durationMs ?? 0)}</Text>
-              </View>
-              <View style={mlStyles.controls}>
-                <TouchableOpacity activeOpacity={0.7} onPress={handlePrev} disabled={ctrlLoading || !canControl}>
-                  <Ionicons name="play-skip-back" size={34} color={canControl ? "#fff" : "rgba(255,255,255,0.3)"} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={mlStyles.playBtn}
-                  activeOpacity={0.8}
-                  disabled={ctrlLoading || !canControl}
-                  onPress={() => {
-                    // Device idle (no live track) but we have a cached frame →
-                    // reactivate Spotify + resume from the cached point.
-                    if (jam && !track && displayTrack) resumeFromCache();
-                    else handlePlayPause();
-                  }}
-                >
-                  <Ionicons name={displayTrack?.isPlaying ? "pause" : "play"} size={30} color={canControl ? "#fff" : "rgba(255,255,255,0.4)"} style={displayTrack?.isPlaying ? undefined : { marginLeft: 3 }} />
-                </TouchableOpacity>
-                <TouchableOpacity activeOpacity={0.7} onPress={handleNext} disabled={ctrlLoading || !canControl}>
-                  <Ionicons name="play-skip-forward" size={34} color={canControl ? "#fff" : "rgba(255,255,255,0.3)"} />
-                </TouchableOpacity>
-              </View>
+              {/* Playing block — fades out (but holds its layout) when idle so
+                  the section keeps its size during the cross-fade. */}
+              <Animated.View style={{ width: "100%", alignItems: "center", opacity: playAnim }} pointerEvents={hasTrack ? "auto" : "none"}>
+                <Text style={mlStyles.trackName} numberOfLines={1}>{displayTrack?.name ?? ""}</Text>
+                <Text style={mlStyles.trackArtist} numberOfLines={1}>{displayTrack?.artist ?? ""}</Text>
+                <View style={mlStyles.progressTrack}>
+                  <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
+                </View>
+                <View style={mlStyles.progressTimes}>
+                  <Text style={mlStyles.progressTime}>{fmtMs(smoothProgressMs)}</Text>
+                  <Text style={mlStyles.progressTime}>{fmtMs(track?.durationMs ?? 0)}</Text>
+                </View>
+                <View style={mlStyles.controls}>
+                  <TouchableOpacity activeOpacity={0.7} onPress={handlePrev} disabled={ctrlLoading || !canControl}>
+                    <Ionicons name="play-skip-back" size={34} color={canControl ? "#fff" : "rgba(255,255,255,0.3)"} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={mlStyles.playBtn}
+                    activeOpacity={0.8}
+                    disabled={ctrlLoading || !canControl}
+                    onPress={() => {
+                      // Device idle (no live track) but we have a cached frame →
+                      // reactivate Spotify + resume from the cached point.
+                      if (jam && !track && displayTrack) resumeFromCache();
+                      else handlePlayPause();
+                    }}
+                  >
+                    <Ionicons name={displayTrack?.isPlaying ? "pause" : "play"} size={30} color={canControl ? "#fff" : "rgba(255,255,255,0.4)"} style={displayTrack?.isPlaying ? undefined : { marginLeft: 3 }} />
+                  </TouchableOpacity>
+                  <TouchableOpacity activeOpacity={0.7} onPress={handleNext} disabled={ctrlLoading || !canControl}>
+                    <Ionicons name="play-skip-forward" size={34} color={canControl ? "#fff" : "rgba(255,255,255,0.3)"} />
+                  </TouchableOpacity>
+                </View>
+              </Animated.View>
+
+              {/* Idle block — overlays the faded playing block. With nothing
+                  playing, the talk mic takes centre stage as a hold-to-speak
+                  control; whoever can start playback also gets "Pick a song". */}
+              {showIdle && (
+                <Animated.View style={[mlStyles.idleWrap, { opacity: idleOpacity }]} pointerEvents={hasTrack ? "none" : "auto"}>
+                  <View style={{ alignItems: "center" }}>
+                    {(talkHolding || talkUnlocking) && (
+                      <View style={mlStyles.lockHint} pointerEvents="none">
+                        <Ionicons
+                          name={
+                            talkUnlocking
+                              ? (atLockZone ? "lock-open-outline" : "lock-closed")
+                              : (atLockZone ? "lock-closed" : "lock-open-outline")
+                          }
+                          size={15}
+                          color={atLockZone ? "#D98CFF" : "rgba(255,255,255,0.8)"}
+                        />
+                        {!atLockZone && <Ionicons name="chevron-up" size={15} color="rgba(255,255,255,0.8)" />}
+                      </View>
+                    )}
+                    <Animated.View style={{ transform: [{ translateY: talkDragY }] }}>
+                      <Animated.View style={{ transform: [{ scale: talkHolding || talkLocked ? 1 : pulseScale }] }}>
+                        <View style={[mlStyles.idleMic, talkOn && mlStyles.idleMicOn, atLockZone && mlStyles.idleMicArmed]} {...talkPan.panHandlers}>
+                          <Ionicons name={talkLocked ? (talkUnlocking && atLockZone ? "lock-open-outline" : "lock-closed") : "mic"} size={36} color="#fff" />
+                        </View>
+                      </Animated.View>
+                    </Animated.View>
+                  </View>
+                  <Text style={mlStyles.idleTitle}>
+                    {talkLocked
+                      ? (talkUnlocking ? (atLockZone ? "Release to unlock" : "Swipe up to unlock") : "Tap or swipe to stop")
+                      : talkHolding
+                        ? (atLockZone ? "Release to lock" : "Drag up to lock")
+                        : "Hold to Speak"}
+                  </Text>
+                  {idleCanStart ? (
+                    <>
+                      <Text style={mlStyles.idleSub} numberOfLines={1}>
+                        {pausedCache
+                          ? `Paused — ${pausedCache.name}`
+                          : (jam ? "No track yet — talk, or pick a song to jam" : "No track yet — talk to your listeners, or start a song")}
+                      </Text>
+                      {pausedCache ? (
+                        <>
+                          <TouchableOpacity style={mlStyles.idleBtn} activeOpacity={0.85} onPress={resumeHostSong}>
+                            <Ionicons name="play" size={18} color="#0D0D0D" />
+                            <Text style={mlStyles.idleBtnText}>Resume song</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity activeOpacity={0.7} onPress={openMusicPicker} style={{ marginTop: 12 }}>
+                            <Text style={mlStyles.idleAltText}>Pick a different song</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <TouchableOpacity style={mlStyles.idleBtn} activeOpacity={0.85} onPress={openMusicPicker}>
+                          <Ionicons name="musical-notes" size={17} color="#0D0D0D" />
+                          <Text style={mlStyles.idleBtnText}>Pick a song</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={mlStyles.idleSub}>Waiting for {jam?.otherName || "the host"} to play something</Text>
+                  )}
+                </Animated.View>
+              )}
 
               {/* Stage toggle — who's in control. */}
               {jam && (
@@ -262,7 +498,7 @@ export function MeetLiveScreen({
             </View>
 
             <View style={mlStyles.commentSection}>
-              <MeetChatList messages={messages} />
+              <MeetChatList messages={messages} scrollLocked={scrollLock} />
             </View>
         </>
 
@@ -296,13 +532,17 @@ export function MeetLiveScreen({
               </TouchableOpacity>
             </View>
             <ReactionButton onReact={sendReaction} />
-            <TouchableOpacity
-              style={[mlStyles.micBtn, talkOn && mlStyles.micBtnOn]}
-              activeOpacity={0.8}
-              onPress={handleToggleTalk}
-            >
-              <Ionicons name={talkOn ? "mic" : "mic-outline"} size={24} color="#fff" />
-            </TouchableOpacity>
+            {/* While idle the mic lives centre-stage (hold-to-speak); only show
+                the bottom-bar mic once a track is playing. */}
+            {!showIdle && (
+              <TouchableOpacity
+                style={[mlStyles.micBtn, talkOn && mlStyles.micBtnOn]}
+                activeOpacity={0.8}
+                onPress={handleToggleTalk}
+              >
+                <Ionicons name={talkOn ? "mic" : "mic-outline"} size={24} color="#fff" />
+              </TouchableOpacity>
+            )}
           </View>
         </KeyboardAvoidingView>
 
@@ -318,31 +558,37 @@ export function MeetLiveScreen({
           />
         )}
 
-        {/* Lyrics page — slides in from the LEFT (right-swipe / lyrics button). */}
-        {lyricsOpen && (
-          <Animated.View style={[mlStyles.lyricsPage, { transform: [{ translateX: lyricsSlideX }] }]}>
-            {displayTrack?.albumArt && (
-              <CachedImage source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={22} />
-            )}
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(8,0,6,0.82)" }]} />
-            <View style={mlStyles.musicHeader}>
-              <TouchableOpacity style={mlStyles.musicBackBtn} activeOpacity={0.7} onPress={closeLyrics}>
-                <Ionicons name="chevron-back" size={22} color="#fff" />
-              </TouchableOpacity>
-              <Text style={mlStyles.musicTitle}>Lyrics</Text>
-              <View style={{ width: 36 }} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <MeetLyricsView
-                track={track ? { id: track.id, name: track.name, artist: track.artist, durationMs: track.durationMs } : null}
-                positionMs={smoothProgressMs}
-                onClose={closeLyrics}
-              />
-            </View>
-          </Animated.View>
-        )}
+        {/* Lyrics page — pre-mounted off-screen LEFT (translateX -SW) so a swipe
+            is a pure native-driver slide. Swiping back is handled by the root
+            pager + shared scroll-lock. pointerEvents off while closed so it never
+            intercepts playback touches. */}
+        <Animated.View
+          style={[mlStyles.lyricsPage, { transform: [{ translateX: lyricsSlideX }] }]}
+          pointerEvents={lyricsOpen ? "auto" : "none"}
+        >
+          {displayTrack?.albumArt && (
+            <CachedImage source={{ uri: displayTrack.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={22} />
+          )}
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(8,0,6,0.82)" }]} />
+          <View style={mlStyles.musicHeader}>
+            <TouchableOpacity style={mlStyles.musicBackBtn} activeOpacity={0.7} onPress={closeLyrics}>
+              <Ionicons name="chevron-back" size={22} color="#fff" />
+            </TouchableOpacity>
+            <Text style={mlStyles.musicTitle}>Lyrics</Text>
+            <View style={{ width: 36 }} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <MeetLyricsView
+              track={track ? { id: track.id, name: track.name, artist: track.artist, durationMs: track.durationMs } : null}
+              positionMs={smoothProgressMs}
+              onClose={closeLyrics}
+              scrollLocked={scrollLock}
+            />
+          </View>
+        </Animated.View>
 
-        {pickerOpen && <MeetMusicPanel m={music} />}
+        {/* Music page — pre-mounted off-screen RIGHT (translateX SW). */}
+        <MeetMusicPanel m={music} scrollLocked={scrollLock} active={pickerOpen} />
 
       </Animated.View>
     </Modal>

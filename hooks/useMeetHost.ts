@@ -63,6 +63,10 @@ export function useMeetHost({
   const [cachedTrack, setCachedTrack] = useState<MeetTrackState | null>(null);
   const cachedTrackRef = useRef<MeetTrackState | null>(null);
   const pendingResumeRef = useRef<{ id: string; positionMs: number } | null>(null);
+  // Host-meet pause cache: when the host pauses we drop the screen to the idle
+  // state but remember the song + position, so the idle CTA becomes "Resume
+  // song" and reopens Spotify at that timestamp. Null while playing / never started.
+  const [pausedCache, setPausedCache] = useState<{ id: string; name: string; artist: string; albumArt: string | null; positionMs: number } | null>(null);
   const isDriver = !isJam || driverId === jamUserId;
   const isDriverRef = useRef(isDriver);
   isDriverRef.current = isDriver;
@@ -195,9 +199,23 @@ export function useMeetHost({
     // Meets only: open a dedicated sync channel so we can push playback state
     // (track change / play-pause / 10s heartbeat) to listeners instantly. Jams
     // already do this over reactChannelRef via the jam-sync event.
+    //
+    // Also echo clock-pings from listeners (Cristian's algorithm): a listener
+    // sends {t0: listener_now}, we reply {t0, t1: host_now} the instant it
+    // lands. The listener uses the round-trip to estimate clock offset between
+    // its phone and ours — without that, any sentAtMs-based compensation is
+    // poisoned by cross-device clock skew (often >>seconds).
     let syncCh: ReturnType<typeof supabase.channel> | null = null;
     if (!isJam) {
       syncCh = supabase.channel(meetSyncChannelName(meetId));
+      syncCh.on("broadcast", { event: "clock-ping" }, ({ payload }: any) => {
+        if (!payload?.fromUserId || !syncChannelRef.current) return;
+        syncChannelRef.current.send({
+          type: "broadcast",
+          event: "clock-pong",
+          payload: { toUserId: payload.fromUserId, t0: payload.t0, t1: Date.now() },
+        });
+      });
       syncCh.subscribe();
       syncChannelRef.current = syncCh;
     }
@@ -277,6 +295,45 @@ export function useMeetHost({
     }
   }, [visible, meetId, summary, track?.id, track?.isPlaying, driverId]);
 
+  // Meet host (non-jam): when our track disappears — song ended, Spotify device
+  // went idle, or we stopped — every effect above bails on `!track`, so the host
+  // would just go silent on the channel. Listeners would then keep re-playing the
+  // last track forever (the meet row's is_playing defaults to true). Push one
+  // explicit idle frame (no track, paused) so listeners stop and fall back to the
+  // waiting state. Guarded by hadTrackRef so a meet that opens with nothing
+  // playing doesn't emit a spurious stop.
+  const hadTrackRef = useRef(false);
+  useEffect(() => {
+    if (isJam || !visible || !meetId || summary) return;
+    if (track) { hadTrackRef.current = true; return; }
+    if (!hadTrackRef.current) return; // never started — nothing to stop
+    hadTrackRef.current = false;
+    updateMeetTrack(meetId, {
+      id: null, name: null, artist: null, albumArt: null,
+      durationMs: null, positionMs: null, isPlaying: false,
+    });
+    syncChannelRef.current?.send({
+      type: "broadcast",
+      event: "sync",
+      payload: {
+        id: null, name: null, artist: null, albumArt: null,
+        durationMs: null, positionMs: null, isPlaying: false, talkMode: false, sentAtMs: Date.now(),
+      },
+    });
+  }, [isJam, visible, meetId, summary, !!track]);
+
+  // Meet host (non-jam): remember the song + position whenever the host pauses,
+  // so the (now idle) screen can offer "Resume song". Cleared once playback
+  // resumes. progressRef holds the live position at pause time.
+  useEffect(() => {
+    if (isJam || !visible) return;
+    if (track && !track.isPlaying) {
+      setPausedCache({ id: track.id, name: track.name, artist: track.artist, albumArt: track.albumArt ?? null, positionMs: progressRef.current });
+    } else if (track?.isPlaying) {
+      setPausedCache(null);
+    }
+  }, [isJam, visible, track?.id, track?.isPlaying]);
+
   // Jam activate: the FOLLOWER opens Spotify once to the current track so this
   // phone becomes the active device. Until this happens nothing plays here and
   // the Web-API sync below is a no-op (this is the "nothing happens on the
@@ -305,21 +362,22 @@ export function useMeetHost({
     syncListenerToHost(tok, followState, JAM_SYNC_OPTS);
   }, [isJam, visible, summary, jamLaunched, driverId, followState?.id, followState?.isPlaying, followState?.positionUpdatedAt]);
 
-  // On returning from the Spotify app: a driver resuming from cache seeks to the
-  // cached point (now that the device is active again); a follower re-snaps to
-  // the driver's position.
+  // On returning from the Spotify app: finish any pending resume by seeking to
+  // the saved timestamp (host "Resume song" or jam resume-from-cache), now that
+  // the device is active again. For jams, a follower also re-snaps to the driver.
   useEffect(() => {
-    if (!isJam || !visible) return;
+    if (!visible) return;
     const sub = AppState.addEventListener("change", (next) => {
       if (next !== "active") return;
       const tok = getApiToken();
       const pend = pendingResumeRef.current;
       if (pend) {
         pendingResumeRef.current = null;
-        // Give Spotify a beat to register the device, then seek to the cached spot.
+        // Give Spotify a beat to register the device, then seek to the saved spot.
         if (tok) setTimeout(() => playTrackAt(tok, `spotify:track:${pend.id}`, pend.positionMs), 800);
         return;
       }
+      if (!isJam) return; // remaining logic is jam-follow re-sync only
       if (driverIdRef.current === jamUserId) return;
       if (tok && followStateRef.current) syncListenerToHost(tok, followStateRef.current, JAM_SYNC_OPTS);
     });
@@ -354,6 +412,22 @@ export function useMeetHost({
     openSpotifyLink(`spotify:track:${c.id}`, `https://open.spotify.com/track/${c.id}`);
   };
 
+  // Host meet: resume the paused song from where it stopped. If the device is
+  // still active we play *at* the saved position directly (no restart, no app
+  // bounce). Only when there's no device do we fall back to opening Spotify and
+  // finishing the seek on return (via pendingResumeRef + the AppState handler).
+  const resumeHostSong = async () => {
+    const c = pausedCache;
+    if (!c?.id) return;
+    const tok = getApiToken();
+    if (tok) {
+      const ok = await playTrackAt(tok, `spotify:track:${c.id}`, c.positionMs ?? 0);
+      if (ok) return;
+    }
+    pendingResumeRef.current = { id: c.id, positionMs: c.positionMs ?? 0 };
+    openSpotifyLink(`spotify:track:${c.id}`, `https://open.spotify.com/track/${c.id}`);
+  };
+
   const handleSendChat = async () => {
     const body = chatInput.trim();
     if (!body || !meetId) return;
@@ -368,6 +442,15 @@ export function useMeetHost({
     const next = !talkOn;
     setTalkOn(next);
     await setTalkMode(meetId, next);
+  };
+
+  // Explicit on/off (vs toggle) — used by the hold-to-speak mic in the idle
+  // state, where press-in turns talk on and press-out turns it off. A toggle
+  // would race across the two events.
+  const setTalk = async (on: boolean) => {
+    if (!meetId || on === talkOn) return;
+    setTalkOn(on);
+    await setTalkMode(meetId, on);
   };
 
   const handleEndMeet = async () => {
@@ -402,23 +485,28 @@ export function useMeetHost({
     setCachedTrack(null);
     cachedTrackRef.current = null;
     pendingResumeRef.current = null;
+    setPausedCache(null);
     clearJamTrack();
     hasDrivenRef.current = false;
     onClose();
   };
 
-  // What to show on screen: the live now-playing, else (in a jam) the cached
-  // last-good frame — or the partner's state for a follower — so the room never
-  // goes blank when a device idles.
-  const displayTrack = track ?? (isJam ? (cachedTrack ?? followState) : null);
+  // What to show on screen. Jam: live frame, else the cached/partner frame so it
+  // never blanks. Host meet: only while actually playing — a pause drops to the
+  // idle screen (with the "Resume song" CTA from pausedCache).
+  const displayTrack = isJam
+    ? (track ?? cachedTrack ?? followState)
+    : (track && track.isPlaying ? track : null);
 
   return {
     track, liveProgressMs,
     listenerCount, messages, chatInput, setChatInput, talkOn, ending, summary, reactions,
-    sendReaction, removeReaction, handleSendChat, handleToggleTalk, handleEndMeet, closeAll,
+    sendReaction, removeReaction, handleSendChat, handleToggleTalk, setTalk, handleEndMeet, closeAll,
     // Jam co-control (stage)
     isJam, isDriver, driverId, takeStage, dropStage, becomeDriver,
     // Jam cache / resume
     cachedTrack, displayTrack, resumeFromCache,
+    // Host-meet pause cache / resume
+    pausedCache, resumeHostSong,
   };
 }

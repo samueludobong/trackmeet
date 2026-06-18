@@ -347,6 +347,24 @@ export const getMeet = async (meetId: string): Promise<MeetRow | null> => {
   return (data as MeetRow) ?? null
 }
 
+// The signed-in user's own currently-live hosted meet (not a personal jam), if
+// any. Used on app launch to offer "rejoin or end" for a meet left running when
+// the app was last closed.
+export const getMyLiveHostedMeet = async (): Promise<{ id: string; name: string } | null> => {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data } = await supabase
+    .from('meets')
+    .select('id, name')
+    .eq('host_id', user.id)
+    .eq('is_live', true)
+    .eq('is_personal', false)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return data ?? null
+}
+
 // ─── Live playback state (host writes, listener reads) ──────────────────────────
 
 export const updateMeetTrack = async (

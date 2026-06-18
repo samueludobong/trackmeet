@@ -207,6 +207,10 @@ export const mlStyles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: BOTTOM_INSET + 24,
+    // Fill the viewport even when the list is short, so the empty bottom is part
+    // of the content (which the back-swipe handles) rather than bare, gesture-
+    // swallowing scroll-view background.
+    flexGrow: 1,
   },
   musicRow: {
     flexDirection: "row",
@@ -342,6 +346,76 @@ export const mlStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
+  // â”€â”€ Idle state (nothing playing yet) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Overlays the (faded-out) playing block during the idle→playing cross-fade.
+  idleWrap: {
+    position: "absolute",
+    top: 0, left: 0, right: 0,
+    alignItems: "center",
+  },
+  idlePulse: {
+    width: 88, height: 88, borderRadius: 44,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.35)",
+    alignItems: "center", justifyContent: "center",
+    marginBottom: 22,
+  },
+  // Hold-to-speak mic that takes centre stage when nothing is playing.
+  idleMic: {
+    width: 96, height: 96, borderRadius: 48,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.42)",
+    alignItems: "center", justifyContent: "center",
+    marginBottom: 16,
+  },
+  idleMicOn: {
+    backgroundColor: "#AB00FF",
+    borderColor: "#D98CFF",
+  },
+  // Held above the lock threshold — releasing now locks. Brighter ring cue.
+  idleMicArmed: {
+    borderColor: "#fff",
+    borderWidth: 2.5,
+  },
+  // "Drag up to lock" affordance floating just above the mic while holding.
+  lockHint: {
+    position: "absolute",
+    top: -34,
+    alignItems: "center",
+    gap: 1,
+  },
+  lockHintText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.8)",
+    letterSpacing: 0.3,
+  },
+  idleTitle: {
+    fontSize: 21, fontWeight: "800", color: "#fff",
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.45)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+    marginBottom: 6,
+  },
+  idleSub: {
+    fontSize: 13.5, fontWeight: "500",
+    color: "rgba(255,255,255,0.78)",
+    textAlign: "center",
+    lineHeight: 19,
+    paddingHorizontal: 12,
+    marginBottom: 22,
+  },
+  idleBtn: {
+    flexDirection: "row", alignItems: "center", gap: 7,
+    backgroundColor: "#fff", borderRadius: 22,
+    paddingHorizontal: 22, paddingVertical: 12,
+  },
+  idleBtnText: { fontSize: 15, fontWeight: "800", color: "#0D0D0D" },
+  idleAltText: { fontSize: 13, fontWeight: "700", color: "rgba(255,255,255,0.75)", textDecorationLine: "underline" },
 
   // â”€â”€ Jam "stage" toggle (who controls playback) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   stageWrap: { alignItems: "center", marginTop: 16, gap: 6 },

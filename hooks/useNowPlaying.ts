@@ -48,6 +48,15 @@ export function useNowPlaying() {
   const tokenCache      = useRef<{ token: string; expiresAt: string } | null>(null)
   const fetchedAt       = useRef<number>(Date.now())
   const baseProgress    = useRef<number>(0)
+  // Last non-null track, kept so an optimistic pause can hold the song on screen
+  // if Spotify briefly reports "nothing playing" right after pausing.
+  const lastTrackRef    = useRef<NowPlayingTrack | null>(null)
+  // Optimistic play/pause: when the user toggles playback we flip the UI at once
+  // instead of waiting for the 3s poll (and Spotify's eventual-consistency lag)
+  // to reflect it. We hold the optimistic value until a poll confirms it, or the
+  // window lapses — whichever comes first.
+  const optimisticPlayingRef = useRef<boolean | null>(null)
+  const optimisticUntil      = useRef(0)
   const lastBroadcastId = useRef<string | null>(null)  // track id last written to DB
   const broadcastingRef = useRef(false)                // sync ref so poll() closure reads current value
   // Bumped on resetSpotify so any in-flight poll that completes AFTER a
@@ -166,6 +175,15 @@ export function useNowPlaying() {
     return token
   }
 
+  // Flip the displayed play/pause state instantly (optimistic), before Spotify
+  // and the next poll catch up. Held until confirmed by a poll or until the
+  // window below lapses. Callers: the meet/jam play-pause control.
+  const setOptimisticPlaying = (on: boolean) => {
+    optimisticPlayingRef.current = on
+    optimisticUntil.current = Date.now() + 6000
+    setTrack((t) => (t ? { ...t, isPlaying: on } : t))
+  }
+
   const poll = async () => {
     // Snapshot the reset generation so we can abort if a disconnect happens
     // during any of the awaits below.
@@ -231,8 +249,29 @@ export function useNowPlaying() {
       }
     }
 
-    setTrack(result)
-    setLiveProgressMs(result?.progressMs ?? 0)
+    // Reconcile any pending optimistic play/pause against what Spotify now says.
+    let display = result
+    const opt = optimisticPlayingRef.current
+    if (opt != null) {
+      if (result == null) {
+        // Spotify briefly reports nothing right after a pause — don't blank the
+        // song to the idle state while the optimistic pause is still pending;
+        // keep showing the last track, paused.
+        if (Date.now() < optimisticUntil.current && lastTrackRef.current) {
+          display = { ...lastTrackRef.current, isPlaying: opt }
+        } else {
+          optimisticPlayingRef.current = null
+        }
+      } else if (result.isPlaying === opt || Date.now() > optimisticUntil.current) {
+        optimisticPlayingRef.current = null // Spotify caught up (or window lapsed)
+      } else {
+        display = { ...result, isPlaying: opt } // still pending → keep optimistic value
+      }
+    }
+
+    if (display) lastTrackRef.current = display
+    setTrack(display)
+    setLiveProgressMs(display?.progressMs ?? 0)
     setPolledAt(Date.now())
     setLoading(false)
   }
@@ -305,7 +344,7 @@ export function useNowPlaying() {
     track, liveProgressMs, polledAt, gradient, accent, loading,
     needsReconnect, refresh: poll, reconnect, resetSpotify,
     broadcastingEnabled, broadcastLoading, toggleBroadcasting,
-    accessToken,
+    accessToken, setOptimisticPlaying,
   }
 }
 

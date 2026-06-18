@@ -25,6 +25,8 @@ import { JoinMeetPrompt } from "../components/meets/JoinMeetPrompt";
 import { MeetListenerScreen } from "../components/meets/MeetListenerScreen";
 import { MeetLiveScreen } from "../components/meets/MeetLiveScreen";
 import { MeetMiniBar } from "../components/meets/MeetMiniBar";
+import { ResumeMeetPrompt } from "../components/meets/ResumeMeetPrompt";
+import { getMyLiveHostedMeet, endMeet } from "../services/meets";
 import { FeedList } from '../components/feed/FeedList';
 import { QuickComposer } from '../components/feed/QuickComposer';
 import { type NowPlayingTrack } from '../hooks/useNowPlaying';
@@ -87,6 +89,16 @@ export default function FeedScreen() {
 
   // Open group chat (mounted at root like the DM ChatDetailView to avoid clipping).
   const [openGroup, setOpenGroup] = useState<GroupChat | null>(null);
+
+  // ── Resume-your-Meet prompt ──────────────────────────────────────────────────
+  // On cold launch, if the user still has a live meet they were hosting (closed
+  // the app without ending it), offer to pop back in or end it. Runs once.
+  const [resumeMeet, setResumeMeet] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    let active = true;
+    getMyLiveHostedMeet().then((m) => { if (active && m) setResumeMeet(m); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   // Track seeded into PostComposerSheet when the sticky now-playing strip's
   // "Share as Post" is tapped. Cleared when the composer closes so the next
@@ -268,6 +280,13 @@ export default function FeedScreen() {
           bottom={onFeed ? meetBarBottom : undefined}
         />
       )}
+      {/* Cold-launch prompt to resume or end a meet left broadcasting. Suppressed
+          once the host room is open (e.g. they tapped "Pop back in"). */}
+      <ResumeMeetPrompt
+        meet={hostMeetId ? null : resumeMeet}
+        onRejoin={() => { if (resumeMeet) { openHostMeet(resumeMeet.id, resumeMeet.name); setResumeMeet(null); } }}
+        onEnd={async () => { if (resumeMeet) { await endMeet(resumeMeet.id); setResumeMeet(null); } }}
+      />
     </View>
     </JamCtx.Provider>
     </HostMeetCtx.Provider>

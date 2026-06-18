@@ -1,8 +1,10 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { MeetGuideOverlay } from "../../components/meets/MeetGuideOverlay";
 import { MeetLyricsView } from "../../components/meets/MeetLyricsView";
+import { LiveSessionBackdrop } from "../../components/meets/LiveSessionBackdrop";
+import { EqualizerBars } from "../../components/meets/EqualizerBars";
 import { useMeetListener } from "../../hooks/useMeetListener";
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, ActivityIndicator, PanResponder } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, KeyboardAvoidingView, ActivityIndicator, PanResponder, Easing } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons } from "@expo/vector-icons";
@@ -47,6 +49,40 @@ export function MeetListenerScreen({
     }),
   ).current;
 
+  // Cross-fade the album-art background + content in over the live-session
+  // gradient only while the host is actually *playing*. A pause (or a stop)
+  // drops the listener to the idle/waiting state too — mirroring the host —
+  // instead of lingering on the paused track. (Declared before the early
+  // return below so hook order stays stable.)
+  const hasTrack = !!trackState?.id && !!trackState?.isPlaying;
+  const playAnim = useRef(new Animated.Value(hasTrack ? 1 : 0)).current;
+  const [showIdle, setShowIdle] = useState(!hasTrack);
+  const idlePulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    // Entering idle → mount the idle layer immediately so its elements render;
+    // going to playing → unmount only once the fade finishes.
+    if (!hasTrack) setShowIdle(true);
+    Animated.timing(playAnim, {
+      toValue: hasTrack ? 1 : 0,
+      duration: 520,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: true,
+    }).start(({ finished }) => { if (finished && hasTrack) setShowIdle(false); });
+  }, [hasTrack]);
+  useEffect(() => {
+    if (!showIdle) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idlePulse, { toValue: 1, duration: 1400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(idlePulse, { toValue: 0, duration: 1400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [showIdle]);
+  const idleOpacity = playAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  const pulseScale = idlePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.1] });
+
   // When minimized the hooks above keep running (realtime, sync) but we don't
   // render the Modal at all. A Modal with visible={false} still creates a native
   // overlay on some platforms and consumes touches, blocking the MiniBar.
@@ -63,12 +99,20 @@ export function MeetListenerScreen({
   return (
     <Modal visible animationType="none" transparent statusBarTranslucent onRequestClose={onMinimize ?? handleLeave}>
       <Animated.View style={[mlStyles.root, { transform: [{ translateY: slideAnim }] }]} {...lyricsPan.panHandlers}>
-        {trackState?.albumArt ? (
-          <CachedImage source={{ uri: trackState.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
-        )}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.5)" }]} pointerEvents="none" />
+        {/* Idle: looping live-session gradient until the host has a track. */}
+        <LiveSessionBackdrop style={StyleSheet.absoluteFill} />
+        {/* Playing: album art fades in over the gradient once a track loads. */}
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: playAnim }]} pointerEvents="none">
+          {trackState?.albumArt ? (
+            <CachedImage source={{ uri: trackState.albumArt }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0007" }]} />
+          )}
+        </Animated.View>
+        <Animated.View
+          style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: playAnim.interpolate({ inputRange: [0, 1], outputRange: [0.14, 0.5] }) }]}
+          pointerEvents="none"
+        />
         <LinearGradient colors={["transparent", "rgba(0,0,0,0.6)", "rgba(0,0,0,0.94)"]} locations={[0.30, 0.62, 1]} style={StyleSheet.absoluteFill} pointerEvents="none" />
 
         <Pressable style={StyleSheet.absoluteFill} onPress={() => Keyboard.dismiss()} />
@@ -82,41 +126,66 @@ export function MeetListenerScreen({
 
         {!lyricsOpen && (
         <View style={mlStyles.trackSection}>
-          <Text style={mlStyles.trackName} numberOfLines={1}>{trackState?.name ?? "Waiting for host…"}</Text>
-          <Text style={mlStyles.trackArtist} numberOfLines={1}>{trackState?.artist ?? ""}</Text>
+          {/* Playing block — fades out (holding layout) when nothing's playing. */}
+          <Animated.View style={{ width: "100%", alignItems: "center", opacity: playAnim }} pointerEvents={hasTrack ? "auto" : "none"}>
+            <Text style={mlStyles.trackName} numberOfLines={1}>{trackState?.name ?? ""}</Text>
+            <Text style={mlStyles.trackArtist} numberOfLines={1}>{trackState?.artist ?? ""}</Text>
 
-          {launched && trackState?.id && !trackState?.talkMode && (
-            <View style={llStyles.syncRow}>
-              {inSync ? (
-                <>
-                  <View style={llStyles.syncDotOk} />
-                  <Text style={llStyles.syncTextOk}>In sync with host</Text>
-                </>
-              ) : (
-                <>
-                  <ActivityIndicator size="small" color="#FFB020" />
-                  <Text style={llStyles.syncTextBusy}>Syncing with host…</Text>
-                </>
-              )}
+            {launched && trackState?.id && !trackState?.talkMode && (
+              <View style={llStyles.syncRow}>
+                {inSync ? (
+                  <>
+                    <View style={llStyles.syncDotOk} />
+                    <Text style={llStyles.syncTextOk}>In sync with host</Text>
+                  </>
+                ) : (
+                  <>
+                    <ActivityIndicator size="small" color="#FFB020" />
+                    <Text style={llStyles.syncTextBusy}>Syncing with host…</Text>
+                  </>
+                )}
+              </View>
+            )}
+
+            <View style={mlStyles.progressTrack}>
+              <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
             </View>
-          )}
+            <View style={mlStyles.progressTimes}>
+              <Text style={mlStyles.progressTime}>{fmtMs(livePos)}</Text>
+              <Text style={mlStyles.progressTime}>{fmtMs(trackState?.durationMs ?? 0)}</Text>
+            </View>
+            <TouchableOpacity
+              style={[llStyles.saveSongBtn, (isSaved || !trackState?.id) && llStyles.saveSongBtnDone]}
+              activeOpacity={0.85}
+              onPress={handleSaveSong}
+              disabled={!trackState?.id}
+            >
+              <Ionicons name={isSaved ? "checkmark" : "add"} size={18} color="#fff" />
+              <Text style={llStyles.saveSongText}>{isSaved ? "Saved" : "Save song"}</Text>
+            </TouchableOpacity>
+          </Animated.View>
 
-          <View style={mlStyles.progressTrack}>
-            <View style={[mlStyles.progressFill, { width: `${progressPct * 100}%` as any }]} />
-          </View>
-          <View style={mlStyles.progressTimes}>
-            <Text style={mlStyles.progressTime}>{fmtMs(livePos)}</Text>
-            <Text style={mlStyles.progressTime}>{fmtMs(trackState?.durationMs ?? 0)}</Text>
-          </View>
-          <TouchableOpacity
-            style={[llStyles.saveSongBtn, (isSaved || !trackState?.id) && llStyles.saveSongBtnDone]}
-            activeOpacity={0.85}
-            onPress={handleSaveSong}
-            disabled={!trackState?.id}
-          >
-            <Ionicons name={isSaved ? "checkmark" : "add"} size={18} color="#fff" />
-            <Text style={llStyles.saveSongText}>{isSaved ? "Saved" : "Save song"}</Text>
-          </TouchableOpacity>
+          {/* Idle block — a styled "waiting room" instead of a bare label. Shows
+              the host is live, reflects when they're speaking, and keeps a live
+              equalizer animating so the screen never feels frozen. */}
+          {showIdle && (
+            <Animated.View style={[mlStyles.idleWrap, { opacity: idleOpacity }]} pointerEvents={hasTrack ? "none" : "auto"}>
+              <Animated.View style={[mlStyles.idlePulse, { transform: [{ scale: pulseScale }] }]}>
+                <Ionicons name={trackState?.talkMode ? "mic" : "disc"} size={32} color="#fff" />
+              </Animated.View>
+              <Text style={mlStyles.idleTitle}>
+                {trackState?.talkMode ? `${hostName} is speaking` : `Waiting for ${hostName}`}
+              </Text>
+              <Text style={mlStyles.idleSub}>
+                {trackState?.talkMode
+                  ? "Listen in — the music picks back up right after"
+                  : `Sit tight — the music starts the moment ${hostName} plays`}
+              </Text>
+              <View style={{ marginTop: 20 }}>
+                <EqualizerBars color="rgba(255,255,255,0.92)" />
+              </View>
+            </Animated.View>
+          )}
 
           <AddToPlaylistSheet
             visible={pickerOpen}

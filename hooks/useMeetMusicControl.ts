@@ -1,8 +1,9 @@
 import { useRef, useState, useEffect } from "react";
 import { Animated, PanResponder } from "react-native";
-import { searchSpotifyTracks, searchSpotifyArtists, searchSpotifyAlbums, getArtistAlbums, getAlbumTracks, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, skipPrevious, skipNext, setPlayback, playTrack, playTracks, type SpotifyTrackResult, type SpotifyPlaylist, type SpotifyArtistInfo, type SpotifyAlbum, type SpotifyAlbumTrack } from "../lib/spotify";
+import { searchSpotifyTracks, searchSpotifyArtists, searchSpotifyAlbums, getArtistAlbums, getAlbumTracks, getUserPlaylists, getPlaylistTracks, getValidSpotifyToken, skipPrevious, skipNext, setPlayback, playTrack, playTracks, openSpotifyLink, type SpotifyTrackResult, type SpotifyPlaylist, type SpotifyArtistInfo, type SpotifyAlbum, type SpotifyAlbumTrack } from "../lib/spotify";
 import { SW, SH } from "../lib/feed/dimensions";
 import { type NowPlayingTrack } from "./useNowPlaying";
+import { useNowPlayingCtx } from "../lib/feed/contexts";
 
 /** Spotify browse + playback control for the host's live-meet screen. */
 export function useMeetMusicControl({ visible, accessToken, userId, track, liveProgressMs, canControl = true }: {
@@ -12,6 +13,7 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   // actions are blocked. Always true for normal host meets.
   canControl?: boolean;
 }) {
+  const { setOptimisticPlaying } = useNowPlayingCtx();
   const slideAnim   = useRef(new Animated.Value(SH)).current;
   const musicSlideX = useRef(new Animated.Value(SW)).current;  // slides in from right
 
@@ -177,14 +179,30 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
   };
   const handlePlayPause = async () => {
     if (!canControl || !tok || ctrlLoading || !track) return;
+    const target = !track.isPlaying;
+    // Flip the UI to the new state immediately, rather than waiting up to 3s for
+    // the next now-playing poll (and Spotify's lag) to report it.
+    setOptimisticPlaying(target);
     setCtrlLoading(true);
-    await setPlayback(tok, !track.isPlaying);
+    await setPlayback(tok, target);
     setTimeout(() => setCtrlLoading(false), 600);
   };
+  // Start a track via the Web API; if there's no active Spotify device (the
+  // classic "started a meet with nothing playing" case → Web API 404s silently)
+  // fall back to opening the Spotify app to the track. That both starts playback
+  // AND registers this phone as the active device, so every later Web API call
+  // (sync, skip, pause) works — exactly the activation a listener does on join.
+  const startTrackOrOpen = async (token: string, trackId: string): Promise<void> => {
+    const ok = await playTrack(token, `spotify:track:${trackId}`);
+    if (!ok) {
+      await openSpotifyLink(`spotify:track:${trackId}`, `https://open.spotify.com/track/${trackId}`);
+    }
+  };
+
   const handlePlayTrack = async (t: SpotifyTrackResult) => {
     if (!canControl || !tok) return;
     setPlayingId(t.id);
-    await playTrack(tok, `spotify:track:${t.id}`);
+    await startTrackOrOpen(tok, t.id);
   };
 
   // ── Search tabs + album/artist browse ──────────────────────────────────────
@@ -223,13 +241,21 @@ export function useMeetMusicControl({ visible, accessToken, userId, track, liveP
     if (!canControl || !tok) return;
     const tracks = albumTracks[albumId] ?? await getAlbumTracks(tok, albumId);
     const uris = tracks.map((t) => `spotify:track:${t.id}`);
-    if (uris.length) { setPlayingId(tracks[0]?.id ?? null); await playTracks(tok, uris); }
+    if (!uris.length) return;
+    const firstId = tracks[0]?.id ?? null;
+    setPlayingId(firstId);
+    const res = await playTracks(tok, uris);
+    // No active device → wake one by opening Spotify to the first track (the
+    // rest still queues on Spotify's side once the app is the active device).
+    if (!res.ok && res.reason === "no-device" && firstId) {
+      await openSpotifyLink(`spotify:track:${firstId}`, `https://open.spotify.com/track/${firstId}`);
+    }
   };
   // Play a single album track.
   const playAlbumTrack = async (trackId: string) => {
     if (!canControl || !tok) return;
     setPlayingId(trackId);
-    await playTrack(tok, `spotify:track:${trackId}`);
+    await startTrackOrOpen(tok, trackId);
   };
 
   // ── Progress ─────────────────────────────────────────────────────────────

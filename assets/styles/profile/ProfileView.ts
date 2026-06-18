@@ -61,6 +61,19 @@ export const profileStyles = StyleSheet.create({
   avatarRow: { paddingHorizontal: 18, paddingBottom: 12 },
   avatar: { width: PROFILE_AVATAR_SIZE, height: PROFILE_AVATAR_SIZE, borderRadius: 18, backgroundColor: "#FF6B35", borderWidth: 3, borderColor: "#161618", alignItems: "center", justifyContent: "center" },
   avatarInitials: { fontSize: 28, fontWeight: "800", color: "#fff" },
+
+  // Live-meet ring around the profile avatar — tappable to jump back into the meet.
+  liveRing: { borderRadius: 21, padding: 3 },
+  liveRingGlow: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 24, backgroundColor: "#AB00FF" },
+  liveBadge: { position: "absolute", bottom: -7, left: 0, right: 0, alignItems: "center" },
+  liveBadgePill: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "#FF2D55", borderRadius: 999,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderWidth: 2, borderColor: "#161618",
+  },
+  liveBadgeText: { fontSize: 9, fontWeight: "900", color: "#fff", letterSpacing: 0.5 },
+  liveDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: "#fff" },
   infoSection: { paddingHorizontal: 20, paddingBottom: 26 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 3 },
   name: { fontSize: 21, fontWeight: "800", color: "#ffffff" },

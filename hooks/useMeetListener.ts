@@ -4,7 +4,7 @@ import * as SecureStore from "expo-secure-store";
 import { supabase } from "../lib/supabase";
 import { openSpotifyLink, getValidSpotifyToken, setPlayback } from "../lib/spotify";
 import { joinMeet, leaveMeet, getMeet, getActiveListenerCount, getMeetMessages, sendMeetMessage, meetRowToTrackState, getMeetTracks, meetSyncChannelName, type MeetMessage, type MeetSyncPayload, type MeetTrack, type MeetTrackState, type MeetRow } from "../services/meets";
-import { syncListenerToHost, sanityCheckSync, expectedHostPosition, registerMeetSync, unregisterMeetSync, startTalkAudio, stopTalkAudio, restoreVolumeIfDucked } from "../lib/meetSync";
+import { syncListenerToHost, sanityCheckSync, expectedHostPosition, getCmdLatencyMs, registerMeetSync, unregisterMeetSync, startTalkAudio, stopTalkAudio, restoreVolumeIfDucked } from "../lib/meetSync";
 import { isTrackInAnyPlaylist } from "../services/playlists";
 import { MEET_GUIDE_KEY } from "../constants/meets";
 import { SH } from "../lib/feed/dimensions";
@@ -33,6 +33,22 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
   const [summary,       setSummary]       = useState<MeetTrack[] | null>(null);
   const [reactions,     setReactions]     = useState<FloatingReactionItem[]>([]);
   const reactChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  // Sync channel + clock-offset state (Cristian's algorithm) — see the ping
+  // useEffect below. clockOffsetRef = (host clock − listener clock) in ms;
+  // adding it to a host wall-clock translates it into the listener's clock.
+  // bestRttRef holds the lowest RTT seen so we keep the offset estimated from
+  // the least-jittered sample, the way NTP picks its reference.
+  const syncChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const clockOffsetRef = useRef<number>(0);
+  const bestRttRef = useRef<number>(Number.POSITIVE_INFINITY);
+  // True once we've landed at least one clock-pong — until then we cannot
+  // safely subtract sentAtMs from our own Date.now() (the cross-device skew
+  // would leak in and push the seek target ahead of the host).
+  const hasClockOffsetRef = useRef<boolean>(false);
+  // Live userId for the clock-pong filter — avoids re-subscribing the sync
+  // channel just because userId loaded after meetId.
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
 
   const spawnReaction = (emoji: string) =>
     setReactions((prev) => [...prev.slice(-24), { id: ++feedCache.reactionSeq, emoji }]);
@@ -149,36 +165,106 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
 
     // Dedicated sync channel: the host pushes track-change / play-pause / 10s
     // tick events here without paying the DB write → postgres_changes round-trip
-    // (~1s). On receive we extrapolate by (now - sentAtMs) so the position we
-    // hand to the seeker matches where the host actually is right now, not
-    // where it was when the broadcast left.
+    // (~1s). On receive we extrapolate forward using the host clock translated
+    // into our clock via clockOffsetRef — measured by the ping/pong below.
+    //
+    // Why we can't just do (Date.now() - sentAtMs): sentAtMs comes from the
+    // host's phone; Date.now() is ours. Phone clocks aren't synchronized, so
+    // raw subtraction includes (host clock − listener clock), which can be
+    // many seconds (or worse). Cristian's algorithm measures that offset
+    // explicitly and lets us subtract it out.
     const syncCh = supabase
       .channel(meetSyncChannelName(meetId))
       .on('broadcast', { event: 'sync' }, ({ payload }: any) => {
         if (!active || !payload) return;
         const p = payload as MeetSyncPayload;
-        const elapsed = Math.max(0, Date.now() - p.sentAtMs);
+        // Translate the host's send-time into our clock, then measure elapsed
+        // against our own Date.now() — no cross-device arithmetic. Until the
+        // first pong has landed we have no offset, so the safe move is elapsed=0
+        // (we'd rather be a few hundred ms behind the host than ahead by an
+        // unknown skew — the drift checker would also catch it).
+        const sentAtLocal = p.sentAtMs - clockOffsetRef.current;
+        const elapsed = hasClockOffsetRef.current ? Math.max(0, Date.now() - sentAtLocal) : 0;
         const adjustedPos = p.positionMs != null && p.isPlaying
           ? p.positionMs + elapsed
           : p.positionMs;
         // positionUpdatedAt = now (not p.sentAtMs) so the local progress ticker
-        // and any downstream extrapolation start clean from this anchor.
-        setTrackState({
+        // and any downstream extrapolation start clean from this anchor. Talk
+        // mode is DB-authoritative (driven by the meets-row UPDATE subscription),
+        // so we preserve the current value rather than let a playback sync frame
+        // flip it — otherwise an idle/stop frame could blank "host is speaking".
+        setTrackState((prev) => ({
           id: p.id, name: p.name, artist: p.artist, albumArt: p.albumArt,
           durationMs: p.durationMs, positionMs: adjustedPos,
           isPlaying: p.isPlaying, positionUpdatedAt: new Date().toISOString(),
-          talkMode: p.talkMode,
-        });
+          talkMode: prev?.talkMode ?? p.talkMode,
+        }));
+      })
+      .on('broadcast', { event: 'clock-pong' }, ({ payload }: any) => {
+        if (!active || !payload || payload.toUserId !== userIdRef.current) return;
+        const t0 = payload.t0 as number;   // listener-clock time at ping send
+        const t1 = payload.t1 as number;   // host-clock time at ping receive
+        const t2 = Date.now();              // listener-clock time at pong receive
+        const rtt = t2 - t0;
+        // Keep the offset from the lowest-RTT sample we've seen — that's the
+        // sample with the least asymmetry between send and return legs, so
+        // the symmetric-latency assumption holds best. (Same heuristic NTP uses.)
+        if (rtt < bestRttRef.current) {
+          bestRttRef.current = rtt;
+          // Cristian: estimate host time at receive ≈ t1, midpoint of local
+          // window ≈ t0 + rtt/2 → offset = host − listener at that instant.
+          clockOffsetRef.current = t1 - (t0 + rtt / 2);
+          hasClockOffsetRef.current = true;
+        }
       })
       .subscribe();
+    syncChannelRef.current = syncCh;
 
     return () => {
       active = false;
       reactChannelRef.current = null;
+      syncChannelRef.current = null;
       supabase.removeChannel(channel);
       supabase.removeChannel(syncCh);
     };
   }, [visible, meetId]);
+
+  // ── Clock-offset handshake (Cristian's algorithm) ──────────────────────────
+  // Burst-ping the host on join (5 in the first ~5s) to get a low-RTT sample
+  // fast, then a slow keep-alive every 30s to track clock drift. Each pong
+  // updates clockOffsetRef iff its RTT is the best we've seen so far. The
+  // offset is what makes the sentAtMs → local elapsed translation correct.
+  useEffect(() => {
+    if (!visible || !meetId || !userId) return;
+    // Reset between joins so an old session's offset doesn't poison a new one.
+    clockOffsetRef.current = 0;
+    bestRttRef.current = Number.POSITIVE_INFINITY;
+    hasClockOffsetRef.current = false;
+    const ping = () => {
+      syncChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'clock-ping',
+        payload: { fromUserId: userId, t0: Date.now() },
+      });
+    };
+    // Tight burst — first ping immediately, then 5 more at 300ms intervals
+    // so we land a reliable low-RTT sample within ~1.5s of join. Until then,
+    // the sync handler falls back to elapsed=0 (see hasClockOffsetRef).
+    ping();
+    let burstCount = 0;
+    const burstId = setInterval(() => {
+      ping();
+      if (++burstCount >= 5) clearInterval(burstId);
+    }, 300);
+    // Phone clocks drift over time (10–100ms/hr). Every 30s we reset the
+    // best-RTT baseline so the next ping wins and refreshes the offset — that
+    // way one lucky early sample doesn't get locked in for the whole meet.
+    const keepAliveId = setInterval(() => {
+      bestRttRef.current = Number.POSITIVE_INFINITY;
+      ping();
+    }, 30_000);
+    return () => { clearInterval(burstId); clearInterval(keepAliveId); };
+  }, [visible, meetId, userId]);
 
   // Refs holding the freshest token + host state so the steady 5s sanity-check
   // interval below reads live values instead of a stale closure snapshot.
@@ -187,6 +273,36 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
   syncTokenRef.current = accessToken;
   syncStateRef.current = trackState;
   const [inSync, setInSync] = useState(true);
+
+  // When a sync attempt reports there's no device to play on (the listener's
+  // Spotify went idle), re-open the app to the host's track to wake one — the
+  // same activation we do on join. Cooldown-limited so we never bounce the user
+  // to Spotify repeatedly.
+  const lastWakeAtRef = useRef(0);
+  const wakeSpotifyDevice = () => {
+    const st = syncStateRef.current;
+    if (!st?.id) return;
+    if (Date.now() - lastWakeAtRef.current < 10_000) return;
+    lastWakeAtRef.current = Date.now();
+    openedOnceRef.current = true;
+    openSpotifyLink(`spotify:track:${st.id}`, `https://open.spotify.com/track/${st.id}`);
+  };
+
+  // One sync pass + outcome handling, shared by the event effect, the 10s safety
+  // net, and the foreground handler so they all recover the same way.
+  const runSyncOnce = async () => {
+    const tok = syncTokenRef.current;
+    const st  = syncStateRef.current;
+    if (!tok || !st) return;
+    const status = await sanityCheckSync(tok, st);
+    setInSync(status.inSync);
+    if (status.reason === 'no-device') wakeSpotifyDevice();
+    if (!status.inSync) {
+      console.log(`[MeetSync] ${status.reason}` +
+        (status.driftMs != null ? ` drift ${Math.round(status.driftMs)}ms` : '') +
+        (status.corrected ? ` → corrected (latency≈${Math.round(getCmdLatencyMs())}ms)` : ''));
+    }
+  };
 
   // If the viewer is actually this meet's host (e.g. they tapped their own meet
   // in the Meets list), NEVER run listener sync — it would seek the host's own
@@ -202,7 +318,7 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
   // Only runs after the listener has launched Spotify (so a device is active).
   useEffect(() => {
     if (!visible || !launched || ended || isHostViewer || !accessToken || !trackState) return;
-    syncListenerToHost(accessToken, trackState);
+    runSyncOnce();
   }, [visible, launched, ended, isHostViewer, accessToken, trackState?.id, trackState?.isPlaying, trackState?.talkMode, trackState?.positionUpdatedAt]);
 
   // ── Drift safety net (every 10s) ───────────────────────────────────────────
@@ -213,19 +329,7 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
   // meetSync.ts), so normal clock skew + Spotify jitter never trips it.
   useEffect(() => {
     if (!visible || !launched || ended || isHostViewer) return;
-    const check = async () => {
-      const tok = syncTokenRef.current;
-      const st  = syncStateRef.current;
-      if (!tok || !st) return;
-      const status = await sanityCheckSync(tok, st);
-      setInSync(status.inSync);
-      if (!status.inSync) {
-        console.log(`[MeetSync] drift check — out of sync (${status.reason}` +
-          (status.driftMs != null ? `, drift ${Math.round(status.driftMs)}ms` : '') +
-          `)${status.corrected ? ' → corrected' : ''}`);
-      }
-    };
-    const id = setInterval(check, 10_000);
+    const id = setInterval(runSyncOnce, 10_000);
     return () => clearInterval(id);
   }, [visible, launched, ended]);
 
@@ -236,7 +340,7 @@ export function useMeetListener({ visible, onClose, meetId, userId, isPublic = f
     if (!visible || !launched || ended || isHostViewer) return;
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active' && accessToken && trackState) {
-        syncListenerToHost(accessToken, trackState);
+        runSyncOnce();
       }
     });
     return () => sub.remove();

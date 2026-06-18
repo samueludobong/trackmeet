@@ -15,8 +15,11 @@ const TABS = [
 ] as const;
 
 /** Slide-in Spotify browser for the meet/jam control screen. Search is tabbed:
- *  Songs (tracks), Artists (→ their albums), Albums (expandable, play-all). */
-export function MeetMusicPanel({ m }: { m: MeetMusicControl }) {
+ *  Songs (tracks), Artists (→ their albums), Albums (expandable, play-all).
+ *  `scrollLocked` is driven by the screen's page-swipe pager: while a horizontal
+ *  swipe is in progress every list here freezes its vertical scroll, so the page
+ *  swipe always wins (gallery-style) instead of the FlatList swallowing it. */
+export function MeetMusicPanel({ m, scrollLocked = false, active = true }: { m: MeetMusicControl; scrollLocked?: boolean; active?: boolean }) {
   const searching = m.searchQuery.trim().length > 0;
 
   const back = m.selectedArtist
@@ -26,7 +29,10 @@ export function MeetMusicPanel({ m }: { m: MeetMusicControl }) {
       : () => m.closeMusicPicker();
 
   return (
-    <Animated.View style={[mlStyles.musicPage, { transform: [{ translateX: m.musicSlideX }] }]}>
+    <Animated.View
+      style={[mlStyles.musicPage, { transform: [{ translateX: m.musicSlideX }] }]}
+      pointerEvents={active ? "auto" : "none"}
+    >
       <View style={mlStyles.musicHeader}>
         <TouchableOpacity style={mlStyles.musicBackBtn} activeOpacity={0.7} onPress={back}>
           <Ionicons name="chevron-back" size={22} color="#fff" />
@@ -70,13 +76,13 @@ export function MeetMusicPanel({ m }: { m: MeetMusicControl }) {
       )}
 
       <View style={{ flex: 1 }}>
-        {renderContent(m, searching)}
+        {renderContent(m, searching, !scrollLocked)}
       </View>
     </Animated.View>
   );
 }
 
-function renderContent(m: MeetMusicControl, searching: boolean) {
+function renderContent(m: MeetMusicControl, searching: boolean, scrollEnabled: boolean) {
   // Artists tab → drilled into one artist's albums.
   if (m.selectedArtist) {
     if (m.artistAlbumsLoading) return <ActivityIndicator color="#AB00FF" style={{ marginTop: 48 }} />;
@@ -89,6 +95,7 @@ function renderContent(m: MeetMusicControl, searching: boolean) {
         extraData={m.expandedAlbumId}
         renderItem={({ item }) => <AlbumRow m={m} album={item} />}
         contentContainerStyle={mlStyles.musicListContent}
+        scrollEnabled={scrollEnabled}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={<Text style={mlStyles.musicEmpty}>No albums found</Text>}
@@ -140,6 +147,7 @@ function renderContent(m: MeetMusicControl, searching: boolean) {
         extraData={m.expandedAlbumId}
         renderItem={({ item }) => <AlbumRow m={m} album={item} />}
         contentContainerStyle={mlStyles.musicListContent}
+        scrollEnabled={scrollEnabled}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -158,6 +166,7 @@ function renderContent(m: MeetMusicControl, searching: boolean) {
         keyExtractor={(t) => t.id}
         renderItem={({ item }) => <MusicTrackRow track={item} playing={m.playingId === item.id} onPlay={m.handlePlayTrack} />}
         contentContainerStyle={mlStyles.musicListContent}
+        scrollEnabled={scrollEnabled}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"

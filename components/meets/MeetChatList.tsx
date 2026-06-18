@@ -4,7 +4,7 @@ import { CachedImage } from "../ui/CachedImage";
 import { type MeetMessage } from "../../services/meets";
 import { mcStyles } from "../../assets/styles/feed/localStyles";
 
-export function MeetChatList({ messages }: { messages: MeetMessage[] }) {
+export function MeetChatList({ messages, scrollLocked = false }: { messages: MeetMessage[]; scrollLocked?: boolean }) {
   const scrollRef = useRef<ScrollView>(null);
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
@@ -22,6 +22,7 @@ export function MeetChatList({ messages }: { messages: MeetMessage[] }) {
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
+      scrollEnabled={!scrollLocked}
     >
       {recent.map((m) => {
         const name = m.author?.display_name || m.author?.username || "Listener";

@@ -7,16 +7,20 @@ import { CachedImage } from "../ui/CachedImage";
 import { PROFILE_AVATAR_OVERLAP } from "../../constants/feedLayout";
 import { SOCIAL_PLATFORMS, BANNER_PLATFORM_PRIORITY } from "../../lib/feed/social";
 import { BannerShape } from "../../components/profile/BannerShape";
+import { LiveAvatarRing } from "../../components/profile/LiveAvatarRing";
 import { type UserProfile } from "../../app/data/mock";
 
 /** The banner + avatar + bio + stats + meta card at the top of the user's own profile. */
-export function ProfileHeaderCard({ profile, getInitials, setEditOpen, setSocialLinksSheetOpen, setLinksSheetOpen, setPinnedPreviewOpen }: {
+export function ProfileHeaderCard({ profile, getInitials, setEditOpen, setSocialLinksSheetOpen, setLinksSheetOpen, setPinnedPreviewOpen, onReturnToMeet }: {
   profile: UserProfile | null;
   getInitials: (name?: string | null) => string;
   setEditOpen: (v: boolean) => void;
   setSocialLinksSheetOpen: (v: boolean) => void;
   setLinksSheetOpen: (v: boolean) => void;
   setPinnedPreviewOpen: (v: boolean) => void;
+  // Set while the user is in a live meet — wraps the avatar in a tappable LIVE
+  // ring that jumps back into the meet. Null otherwise.
+  onReturnToMeet?: (() => void) | null;
 }) {
   return (
       <View style={profileStyles.card}>
@@ -91,13 +95,18 @@ export function ProfileHeaderCard({ profile, getInitials, setEditOpen, setSocial
 
         {/* Avatar row — negative margin overlaps banner bottom */}
         <View style={[profileStyles.avatarRow, { marginTop: -PROFILE_AVATAR_OVERLAP }]}>
-          {profile?.avatar_url ? (
-            <CachedImage source={{ uri: profile.avatar_url }} style={profileStyles.avatar} recyclingKey={profile.avatar_url} />
-          ) : (
-            <View style={profileStyles.avatar}>
-              <Text style={profileStyles.avatarInitials}>{getInitials(profile?.display_name)}</Text>
-            </View>
-          )}
+          {(() => {
+            const avatarNode = profile?.avatar_url ? (
+              <CachedImage source={{ uri: profile.avatar_url }} style={profileStyles.avatar} recyclingKey={profile.avatar_url} />
+            ) : (
+              <View style={profileStyles.avatar}>
+                <Text style={profileStyles.avatarInitials}>{getInitials(profile?.display_name)}</Text>
+              </View>
+            );
+            return onReturnToMeet
+              ? <LiveAvatarRing onPress={onReturnToMeet}>{avatarNode}</LiveAvatarRing>
+              : avatarNode;
+          })()}
         </View>
 
         {/* Info */}
