@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput, ActivityIndicator, Alert } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
@@ -7,10 +7,12 @@ import { type PinnedSong } from "../../types/music";
 import { type Comment } from "../../lib/feed/helpers";
 import { usePostComments } from "../../hooks/usePostComments";
 import { useSlideInPanel } from "../../hooks/useSlideInPanel";
+import { useMusicLinkAttach } from "../../hooks/useMusicLinkAttach";
 import { addPostComment } from "../../services/posts";
 import { PostCard } from "../../components/post/PostCard";
 import { ThreadedCommentRow } from "../../components/post/CommentRow";
 import { CommentSongPicker } from "../../components/post/CommentSongPicker";
+import { ParsedLinkChip } from "../../components/feed/ParsedLinkChip";
 import { type Post } from "../../app/data/mock";
 
 export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () => void }) {
@@ -22,20 +24,33 @@ export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () =
   const [selectedSong, setSelectedSong] = useState<PinnedSong | null>(null);
   const [songPickerVisible, setSongPickerVisible] = useState(false);
   const listRef = useRef<FlatList>(null);
+  // Freeze the comment list's vertical scroll while a reply-swipe is in flight,
+  // imperatively (no setState) so the swipe's first frame doesn't hitch.
+  const setListFrozen = useCallback((active: boolean) => {
+    listRef.current?.setNativeProps({ scrollEnabled: !active });
+  }, []);
+  // Paste-a-link song attachment (shared parser). Mutually exclusive with the
+  // Spotify-picked selectedSong.
+  const link = useMusicLinkAttach();
+  useEffect(() => { if (link.attachedLink) setSelectedSong(null); }, [link.attachedLink]);
 
   const handleSend = async () => {
-    if (!currentUserId || (!replyText.trim() && !selectedSong) || sending) return;
+    if (!currentUserId || (!replyText.trim() && !selectedSong && !link.attachedLink) || sending) return;
     const text = replyText.trim();
     const parentId = replyingTo?.id ?? null;
-    const song = selectedSong;
-    setReplyText(""); setReplyingTo(null); setSelectedSong(null); setSending(true);
+    const al = link.attachedLink;
+    const song = al
+      ? { id: al.spotifyId, name: al.name, artist: al.artist, albumArt: al.albumArt, url: al.url, provider: al.provider, links: al.links }
+      : selectedSong;
+    setReplyText(""); setReplyingTo(null); setSelectedSong(null); link.reset(); setSending(true);
     try {
       const comment = await addPostComment({ postId: post.id, userId: currentUserId, text, parentCommentId: parentId, song });
       setComments((prev) => [...prev, comment]);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (e: any) {
       Alert.alert("Comment failed", e.message ?? "Could not post comment.");
-      setReplyText(text); setSelectedSong(song);
+      setReplyText(text);
+      if (al) link.setAttachedLink(al); else setSelectedSong(selectedSong);
     } finally {
       setSending(false);
     }
@@ -75,6 +90,7 @@ export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () =
             replies={grouped.repliesMap.get(item.id) ?? []}
             currentUserId={currentUserId}
             onReply={(c) => setReplyingTo(c)}
+            onSwipeActive={setListFrozen}
           />
         )}
         ItemSeparatorComponent={() => <View style={styles.commentSeparator} />}
@@ -110,24 +126,26 @@ export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () =
             </TouchableOpacity>
           </View>
         )}
-        <View style={styles.composerGlass}>
-          <TouchableOpacity style={styles.composerPlus} activeOpacity={0.8} onPress={() => setSongPickerVisible(true)}>
+        <ParsedLinkChip parsingLink={link.parsingLink} attachedLink={link.attachedLink} onRemove={link.removeAttachedLink} />
+        <View style={[styles.composerGlass, link.parsingLink && { opacity: 0.5 }]}>
+          <TouchableOpacity style={styles.composerPlus} activeOpacity={0.8} onPress={() => setSongPickerVisible(true)} disabled={link.parsingLink}>
             <Text style={styles.composerPlusIcon}>+</Text>
           </TouchableOpacity>
           <TextInput
             style={styles.composerInput}
-            placeholder={replyingTo ? `Reply to ${replyingTo.displayName ?? `@${replyingTo.username}`}…` : "Add a comment…"}
+            placeholder={link.parsingLink ? "Parsing link…" : link.attachedLink ? "Add a caption…" : replyingTo ? `Reply to ${replyingTo.displayName ?? `@${replyingTo.username}`}…` : "Add a comment…"}
             placeholderTextColor="rgba(255,255,255,0.3)"
             value={replyText}
-            onChangeText={setReplyText}
+            onChangeText={(t) => { setReplyText(t); link.detect(t, setReplyText); }}
             returnKeyType="send"
             onSubmitEditing={handleSend}
+            editable={!link.parsingLink}
           />
           <TouchableOpacity
-            style={[styles.composerSend, ((!replyText.trim() && !selectedSong) || sending) && { opacity: 0.4 }]}
+            style={[styles.composerSend, ((!replyText.trim() && !selectedSong && !link.attachedLink) || sending || link.parsingLink) && { opacity: 0.4 }]}
             activeOpacity={0.8}
             onPress={handleSend}
-            disabled={(!replyText.trim() && !selectedSong) || sending}
+            disabled={(!replyText.trim() && !selectedSong && !link.attachedLink) || sending || link.parsingLink}
           >
             {sending ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.composerSendIcon}>↑</Text>}
           </TouchableOpacity>
@@ -137,7 +155,7 @@ export function PostDetailOverlay({ post, onClose }: { post: Post; onClose: () =
       <CommentSongPicker
         visible={songPickerVisible}
         onClose={() => setSongPickerVisible(false)}
-        onSelect={(song) => { setSelectedSong(song); setSongPickerVisible(false); }}
+        onSelect={(song) => { setSelectedSong(song); link.removeAttachedLink(); setSongPickerVisible(false); }}
         accessToken={spotifyToken}
       />
     </Animated.View>

@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { ProfileOverlays } from "../../components/profile/ProfileOverlays";
 import { ProfileHeaderCard } from "../../components/profile/ProfileHeaderCard";
+import { AccountMenuOverlay } from "../../components/profile/AccountMenuOverlay";
+import { MEETS_ENABLED, SPOTIFY_ENABLED } from "../../constants/featureFlags";
 import { ProfileNowPlayingCard } from "../../components/profile/ProfileNowPlayingCard";
 import { ProfileMeetCard } from "../../components/profile/ProfileMeetCard";
 import { useOwnProfile } from "../../hooks/useOwnProfile";
@@ -32,6 +34,7 @@ export const ProfileView = React.memo(function ProfileView() {
   const [meetOverlayVisible, setMeetOverlayVisible] = useState(false);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [postsKey, setPostsKey] = useState(0);
   const openHostMeet = useOpenHostMeet();
   const openMeet = useOpenMeet();
@@ -70,18 +73,30 @@ export const ProfileView = React.memo(function ProfileView() {
     <View style={{ flex: 1 }}>
       {/* ─── Top bar ─────────────────────────────────────────────── */}
       <View style={profileStyles.topBar}>
-        <Text style={profileStyles.topBarTitle}>Profile</Text>
-        <View style={profileStyles.topBarRight}>
-          <TouchableOpacity style={profileStyles.topBarIconBtn} activeOpacity={0.7}>
-            <Text style={profileStyles.topBarIcon}>🔔</Text>
-          </TouchableOpacity>
+        {/* <View style={profileStyles.topBarRight}> */}
+          {MEETS_ENABLED ? (
+            <TouchableOpacity style={profileStyles.topBarIconBtn} activeOpacity={0.7}>
+              <Ionicons name="add-circle" size={29} color="#AB00FF" />
+            </TouchableOpacity>
+          ) : (
+            <View style={profileStyles.topBarIconBtn} />
+          )}
+        <TouchableOpacity
+          style={{ flexDirection: "row", alignItems: "center", gap: 3 }}
+          activeOpacity={0.7}
+          onPress={() => setAccountMenuOpen(true)}
+        >
+          <Text style={profileStyles.topBarTitle}>{profile?.username ?? ""}</Text>
+          <Ionicons name="chevron-down" size={18} color="rgba(255,255,255,0.75)" />
+        </TouchableOpacity>
+
           <TouchableOpacity style={profileStyles.topBarIconBtn} activeOpacity={0.7} onPress={() => setSettingsOpen(true)}>
-            <Ionicons name="settings-outline" size={20} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
-          <TouchableOpacity style={profileStyles.proBadge} activeOpacity={0.85}>
+          {/* <TouchableOpacity style={profileStyles.proBadge} activeOpacity={0.85}>
             <Text style={profileStyles.proBadgeText}>PRO</Text>
-          </TouchableOpacity>
-        </View>
+          </TouchableOpacity> */}
+        {/* </View> */}
       </View>
 
       <ScrollView
@@ -92,7 +107,7 @@ export const ProfileView = React.memo(function ProfileView() {
       <ProfileHeaderCard profile={profile} getInitials={getInitials} setEditOpen={setEditOpen} setSocialLinksSheetOpen={setSocialLinksSheetOpen} setLinksSheetOpen={setLinksSheetOpen} setPinnedPreviewOpen={setPinnedPreviewOpen} onReturnToMeet={meetChecked ? onReturnToMeet : null} />
 
       {/* ─── Spotify reconnect prompt ────────────────────────────── */}
-      {needsReconnect && (
+      {SPOTIFY_ENABLED && needsReconnect && (
         <TouchableOpacity
           style={profileStyles.reconnectCard}
           activeOpacity={0.82}
@@ -113,7 +128,7 @@ export const ProfileView = React.memo(function ProfileView() {
               but you're in a live meet, we still show the compact "meet version"
               so there's always a way back into the room. ── */}
       {!needsReconnect && meetChecked && (
-        track?.isPlaying ? (
+        SPOTIFY_ENABLED && track?.isPlaying ? (
           <ProfileNowPlayingCard
             track={track}
             liveProgressMs={liveProgressMs}
@@ -125,7 +140,7 @@ export const ProfileView = React.memo(function ProfileView() {
             openMeet={openMeet}
             onStartMeet={() => setMeetOverlayVisible(true)}
           />
-        ) : activeMeet && onReturnToMeet ? (
+        ) : MEETS_ENABLED && activeMeet && onReturnToMeet ? (
           <ProfileMeetCard activeMeet={activeMeet} onReturn={onReturnToMeet} />
         ) : null
       )}
@@ -133,6 +148,7 @@ export const ProfileView = React.memo(function ProfileView() {
       {/* ─── Section tabs ────────────────────────────────────────── */}
       <ProfileTabs key={postsKey} userId={userId} />
     </ScrollView>
+      <AccountMenuOverlay visible={accountMenuOpen} onClose={() => setAccountMenuOpen(false)} profile={profile} />
       <ProfileOverlays linksSheetOpen={linksSheetOpen} setLinksSheetOpen={setLinksSheetOpen} socialLinksSheetOpen={socialLinksSheetOpen} setSocialLinksSheetOpen={setSocialLinksSheetOpen} editOpen={editOpen} setEditOpen={setEditOpen} settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen} pinnedPreviewOpen={pinnedPreviewOpen} setPinnedPreviewOpen={setPinnedPreviewOpen} meetOverlayVisible={meetOverlayVisible} setMeetOverlayVisible={setMeetOverlayVisible} fabMenuOpen={fabMenuOpen} setFabMenuOpen={setFabMenuOpen} composerOpen={composerOpen} setComposerOpen={setComposerOpen} profile={profile} setProfile={setProfile} accessToken={accessToken} userId={userId} refetch={refetch} openHostMeet={openHostMeet} composerUser={composerUser} setPostsKey={setPostsKey} />
     </View>
   );

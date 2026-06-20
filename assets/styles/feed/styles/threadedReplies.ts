@@ -7,7 +7,7 @@ export const threadedReplies = StyleSheet.create({
     flexDirection: "row",
     marginLeft: 52, // align with bubble (avatar width + gap)
     marginTop: 2,
-    marginBottom: 2,
+    marginBottom: 10,
   },
   threadLine: {
     width: 2,
@@ -36,11 +36,11 @@ export const threadedReplies = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "rgba(171,0,255,0.55)",
+    backgroundColor: "rgba(168, 168, 168, 0.55)",
   },
   showMoreRepliesText: {
     fontSize: 12,
-    color: "#AB00FF",
+    color: "#a0a0a093",
     fontWeight: "600",
   },
 

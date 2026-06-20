@@ -6,6 +6,7 @@ import { followUser, unfollowUser } from "../../services/follows";
 import { ds } from "../../assets/styles/feed/localStyles";
 import { DISCOVER_FILTERS, TRENDING_ARTISTS, FOR_YOU_RECS, UPCOMING_MEETS } from "../../app/data/mock";
 import { useDiscoverSearch } from "../../hooks/useDiscoverSearch";
+import { MEETS_ENABLED } from "../../constants/featureFlags";
 import { TrendingCarousel } from "../feed/TrendingCarousel";
 import { ArtistResultCard } from "./ArtistResultCard";
 import { PersonResultCard } from "./PersonResultCard";
@@ -46,10 +47,10 @@ export function DiscoverView() {
     }
   };
 
-  const showCarousel = activeFilter === "All" || activeFilter === "Events";
+  const showCarousel = MEETS_ENABLED && (activeFilter === "All" || activeFilter === "Events");
   const showArtists  = activeFilter === "All" || activeFilter === "Artists";
   const showForYou   = activeFilter === "All" || activeFilter === "Artists";
-  const showMeets    = activeFilter === "All" || activeFilter === "Events";
+  const showMeets    = MEETS_ENABLED && (activeFilter === "All" || activeFilter === "Events");
 
   const q = searchText.toLowerCase();
   const filteredArtists = TRENDING_ARTISTS.filter((a) => !q || a.name.toLowerCase().includes(q) || a.genre.toLowerCase().includes(q));
@@ -95,7 +96,7 @@ export function DiscoverView() {
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={ds.filtersRow} style={{ marginBottom: 24 }}>
-          {DISCOVER_FILTERS.map((f) => {
+          {DISCOVER_FILTERS.filter((f) => MEETS_ENABLED || f !== "Events").map((f) => {
             const active = f === activeFilter;
             return (
               <TouchableOpacity key={f} style={[ds.filterPill, active && ds.filterPillActive]} activeOpacity={0.7} onPress={() => setActiveFilter(f)}>

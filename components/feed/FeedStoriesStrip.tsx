@@ -1,27 +1,21 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
-import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { getActiveStories, type Story } from "../../services/stories";
-import { useNowPlayingCtx } from "../../lib/feed/contexts";
 import { prefetchSongPreview } from "../../lib/songPreview";
 import { styles } from "../../assets/styles/feed/styles";
-import { s } from "../../assets/styles/feed/FeedStoriesStrip";
 
 /**
- * Top-of-feed stories section. A small "Now playing" card sits above the
- * horizontal strip (hidden when nothing is playing). The strip itself starts
- * with a "Your story" tile (+ to add) and then one tile per author with at
- * least one live story.
+ * Top-of-feed stories section. The strip starts with a "Your story" tile (+ to
+ * add) and then one tile per author with at least one live story. Adding a
+ * music story is done by pasting any streaming link (resolved via Odesli) in
+ * the story composer — no Spotify dependency.
  */
 export function FeedStoriesStrip() {
   const router = useRouter();
-  // Read the SHARED now-playing context — do NOT call useNowPlaying() here. A
-  // second useNowPlaying() spins up its own 3s Spotify poll + token refresh +
-  // broadcast loop, doubling Spotify request volume and helping trip HTTP 429.
-  const { track } = useNowPlayingCtx();
   const [stories, setStories] = useState<Story[]>([]);
   const [meId, setMeId]       = useState<string | null>(null);
   const [meAvatar, setMeAvatar] = useState<string | null>(null);
@@ -61,43 +55,8 @@ export function FeedStoriesStrip() {
     router.push({ pathname: "/story-viewer", params: { authorId } });
   };
 
-  const shareCurrentSong = () => {
-    if (!track) return;
-    router.push({
-      pathname: "/story-card-picker",
-      params: {
-        songId: track.id,
-        songName: track.name,
-        songArtist: track.artist,
-        songAlbumArt: track.albumArt ?? "",
-      },
-    });
-  };
-
   return (
     <View>
-
-      {/* {track && (
-        <TouchableOpacity activeOpacity={0.85} onPress={shareCurrentSong} style={s.npCard}>
-          {track.albumArt ? (
-            <CachedImage source={{ uri: track.albumArt }} style={s.npArt} />
-          ) : (
-            <View style={[s.npArt, s.npArtFallback]}>
-              <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
-            </View>
-          )}
-          <View style={{ flex: 1 }}>
-            <Text style={s.npLabel}>Now playing</Text>
-            <Text style={s.npTitle} numberOfLines={1}>{track.name}</Text>
-            <Text style={s.npSubtitle} numberOfLines={1}>{track.artist}</Text>
-          </View>
-          <View style={s.npShareBtn}>
-            <Ionicons name="add" size={14} color="#0D0D0D" />
-            <Text style={s.npShareTxt}>Share</Text>
-          </View>
-        </TouchableOpacity>
-      )} */}
-
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}

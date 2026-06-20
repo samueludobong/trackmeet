@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { getCurrentlyPlaying, refreshSpotifyToken, reconnectSpotify, setActiveSpotifyToken } from '../lib/spotify';
 import { registerBackgroundSync, unregisterBackgroundSync } from '../lib/backgroundSync';
+import { SPOTIFY_ENABLED } from '../constants/featureFlags';
 import { gradientFromArt, accentFromArt, DEFAULT_ACCENT } from './albumColors';
 
 export type NowPlayingTrack = {
@@ -27,6 +28,14 @@ export const DEFAULT_GRADIENT: [string, string, string] = ['#3D1A0C', '#1E0D08',
 // position before we treat it as a seek and re-broadcast. Comfortably above
 // normal poll jitter so steady playback never triggers an extra write.
 const SEEK_DRIFT_MS = 3500
+
+// Adaptive polling cadence to cut idle "now playing" spam. We poll every 5s
+// while something is (or was just) playing; after this many consecutive polls
+// with nothing playing we back off to once a minute. Any poll that finds active
+// playback resets the streak and snaps back to the fast cadence.
+const POLL_FAST_MS        = 5_000
+const POLL_SLOW_MS        = 60_000
+const POLL_FAST_MAX_TRIES = 30
 
 export function useNowPlaying() {
   const [track,               setTrack]               = useState<NowPlayingTrack | null>(null)
@@ -188,20 +197,22 @@ export function useNowPlaying() {
     setTrack((t) => (t ? { ...t, isPlaying: on } : t))
   }
 
-  const poll = async () => {
+  // Returns true when this poll found active playback — the scheduler uses it to
+  // reset the back-off streak. Every bail-out path returns false (idle tick).
+  const poll = async (): Promise<boolean> => {
     // Still inside a rate-limit backoff window — skip this tick entirely so we
     // make zero Spotify calls until Spotify's Retry-After has elapsed.
-    if (Date.now() < rateLimitedUntil.current) { setLoading(false); return }
+    if (Date.now() < rateLimitedUntil.current) { setLoading(false); return false }
 
     // Snapshot the reset generation so we can abort if a disconnect happens
     // during any of the awaits below.
     const startGen = resetGen.current
 
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user || resetGen.current !== startGen) { setLoading(false); return }
+    if (!user || resetGen.current !== startGen) { setLoading(false); return false }
 
     const token = await getValidToken(user.id)
-    if (!token || resetGen.current !== startGen) { setLoading(false); return }
+    if (!token || resetGen.current !== startGen) { setLoading(false); return false }
     // Register this token so openSpotifyLink can do an in-place track swap
     // (instead of opening the Spotify app) when a device is already playing.
     setActiveSpotifyToken(token)
@@ -210,7 +221,7 @@ export function useNowPlaying() {
 
     // Disconnect happened mid-flight — discard whatever we fetched and let the
     // already-applied resetSpotify state stand.
-    if (resetGen.current !== startGen) { setLoading(false); return }
+    if (resetGen.current !== startGen) { setLoading(false); return false }
 
     // 401 — token revoked/expired even though DB says it's valid
     if (raw && 'unauthorized' in raw) {
@@ -218,7 +229,7 @@ export function useNowPlaying() {
       setActiveSpotifyToken(null)
       setNeedsReconnect(true)
       setLoading(false)
-      return
+      return false
     }
 
     // 429 — rate-limited. Arm the backoff window and bail without touching the
@@ -226,7 +237,7 @@ export function useNowPlaying() {
     if (raw && 'rateLimited' in raw) {
       rateLimitedUntil.current = Date.now() + (raw.retryAfterMs ?? 30_000)
       setLoading(false)
-      return
+      return false
     }
 
     const result = raw as NowPlayingTrack | null
@@ -290,13 +301,30 @@ export function useNowPlaying() {
     setLiveProgressMs(display?.progressMs ?? 0)
     setPolledAt(Date.now())
     setLoading(false)
+    return !!display?.isPlaying
   }
 
   useEffect(() => {
+    if (!SPOTIFY_ENABLED) { setLoading(false); return }  // live now-playing disabled for this build
     if (needsReconnect) return   // don't poll with a dead token
-    poll()
-    const id = setInterval(poll, 3_000)
-    return () => clearInterval(id)
+
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout>
+    // Consecutive polls that found nothing playing. Once it crosses
+    // POLL_FAST_MAX_TRIES we switch from the 5s cadence to once a minute; a poll
+    // that finds active playback resets it back to 0 (and thus to the fast cadence).
+    let idleTries = 0
+
+    const tick = async () => {
+      const playing = await poll()
+      if (cancelled) return
+      idleTries = playing ? 0 : idleTries + 1
+      const nextMs = idleTries >= POLL_FAST_MAX_TRIES ? POLL_SLOW_MS : POLL_FAST_MS
+      timeoutId = setTimeout(tick, nextMs)
+    }
+    tick()
+
+    return () => { cancelled = true; clearTimeout(timeoutId) }
   }, [needsReconnect])
 
   // Derive the now-playing gradient from the album art (Expo Go-safe, pure JS).

@@ -7,6 +7,7 @@ import * as SecureStore from 'expo-secure-store'
 
 // ─── Extracted shared foundation (see lib/feed/*) ─────────────────────────────
 import { OpenMeetCtx, HostMeetCtx, JamCtx, NowPlayingCtx, FeedUserCtx, PostActionsCtx } from '../lib/feed/contexts';
+import { MEETS_ENABLED } from '../constants/featureFlags';
 import { styles } from '../assets/styles/feed/styles';
 
 // FeedUserCtx is consumed by external screens via `import { FeedUserCtx } from "./feed"`.
@@ -61,7 +62,7 @@ function TabScreen({ active, children }: { active: boolean; children: ReactNode 
 export default function FeedScreen() {
   // Instantiate once at the top level so token cache + needsReconnect survive tab switches
   const {
-    nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, jamMeetId, jamOther, jamToken, jamMinimized, setJamMinimized, openJam, closeJam, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, repostedPostIds, onToggleRepost, pollVotes, onVoteOnPoll, fetchFeedPosts, onToggleLike, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight
+    nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, jamMeetId, jamOther, jamToken, jamMinimized, setJamMinimized, openJam, closeJam, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, onComposerTextChange, attachedTrack, setAttachedTrack, attachedLink, removeAttachedLink, parsingLink, likedPostIds, setLikedPostIds, repostedPostIds, onToggleRepost, pollVotes, onVoteOnPoll, fetchFeedPosts, onToggleLike, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight
   } = useFeedScreen();
 
   // ── Tab switch perf ────────────────────────────────────────────────────────
@@ -158,7 +159,7 @@ export default function FeedScreen() {
             <DiscoverView />
           </TabScreen>
         )}
-        {visited.has("Meets") && (
+        {MEETS_ENABLED && visited.has("Meets") && (
           <TabScreen active={activeNav === "Meets"}>
             <MeetsView />
           </TabScreen>
@@ -175,9 +176,13 @@ export default function FeedScreen() {
           keyboardVisible={keyboardVisible}
           attachedTrack={attachedTrack}
           setAttachedTrack={setAttachedTrack}
+          attachedLink={attachedLink}
+          removeAttachedLink={removeAttachedLink}
+          parsingLink={parsingLink}
           setMenuVisible={setMenuVisible}
           quickText={quickText}
           setQuickText={setQuickText}
+          onComposerTextChange={onComposerTextChange}
           handleQuickPost={handleQuickPost}
           handleVoicePost={handleVoicePost}
           onMeasure={setComposerHeight}
@@ -212,7 +217,8 @@ export default function FeedScreen() {
       )}
       {openGroup && (
         <GroupChatDetailView group={openGroup} userId={currentUser?.id ?? null} onClose={() => setOpenGroup(null)} />
-      )}      <JoinMeetPrompt
+      )}      {MEETS_ENABLED && (<>
+      <JoinMeetPrompt
         visible={!!joinPromptMeetId}
         onCancel={() => setJoinPromptMeetId(null)}
         onChoose={(isPublic) => {
@@ -287,6 +293,7 @@ export default function FeedScreen() {
         onRejoin={() => { if (resumeMeet) { openHostMeet(resumeMeet.id, resumeMeet.name); setResumeMeet(null); } }}
         onEnd={async () => { if (resumeMeet) { await endMeet(resumeMeet.id); setResumeMeet(null); } }}
       />
+      </>)}
     </View>
     </JamCtx.Provider>
     </HostMeetCtx.Provider>

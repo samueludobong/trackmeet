@@ -22,15 +22,29 @@ export function usePostComments(postId: string) {
   }, [postId]);
 
   const grouped = useMemo(() => {
+    const byId = new Map<string, Comment>(comments.map((c) => [c.id, c]));
+
+    // Walk up parent links to the top-level ancestor. The thread UI is one level
+    // deep, so a reply-to-a-reply must anchor to its top comment — otherwise it's
+    // bucketed under a non-top-level id nobody renders and silently disappears.
+    const topAncestorId = (c: Comment): string => {
+      let cur = c;
+      const seen = new Set<string>();
+      while (cur.parentCommentId && byId.has(cur.parentCommentId) && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        cur = byId.get(cur.parentCommentId)!;
+      }
+      return cur.id;
+    };
+
     const topLevel: Comment[] = [];
     const repliesMap = new Map<string, Comment[]>();
     for (const c of comments) {
-      if (!c.parentCommentId) topLevel.push(c);
-      else {
-        const arr = repliesMap.get(c.parentCommentId) ?? [];
-        arr.push(c);
-        repliesMap.set(c.parentCommentId, arr);
-      }
+      if (!c.parentCommentId) { topLevel.push(c); continue; }
+      const key = topAncestorId(c);
+      const arr = repliesMap.get(key) ?? [];
+      arr.push(c);
+      repliesMap.set(key, arr);
     }
     return { topLevel, repliesMap };
   }, [comments]);

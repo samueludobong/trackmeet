@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Switch, TouchableOpacity, Animated, Modal, Pres
 import * as SecureStore from "expo-secure-store";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { settingsOverlayStyles } from "../../assets/styles/feed/localStyles";
+import { SPOTIFY_ENABLED } from "../../constants/featureFlags";
 import { type UserProfile } from "../../app/data/mock";
 
 import { useSettingsOverlay } from "../../hooks/useSettingsOverlay";
@@ -70,18 +71,22 @@ export function SettingsOverlay({
 
               {!showConfirm ? (
                 <>
-                  <TouchableOpacity
-                    style={settingsOverlayStyles.menuRow}
-                    activeOpacity={0.8}
-                    onPress={() => openScreen('connected-apps')}
-                  >
-                    <View style={settingsOverlayStyles.menuIconWrap}>
-                      <Ionicons name="apps-outline" size={20} color="rgba(255,255,255,0.85)" />
-                    </View>
-                    <Text style={settingsOverlayStyles.menuLabel}>Connected Apps</Text>
-                    <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
-                  </TouchableOpacity>
-                  <View style={{ height: 4 }} />
+                  {SPOTIFY_ENABLED && (
+                    <>
+                      <TouchableOpacity
+                        style={settingsOverlayStyles.menuRow}
+                        activeOpacity={0.8}
+                        onPress={() => openScreen('connected-apps')}
+                      >
+                        <View style={settingsOverlayStyles.menuIconWrap}>
+                          <Ionicons name="apps-outline" size={20} color="rgba(255,255,255,0.85)" />
+                        </View>
+                        <Text style={settingsOverlayStyles.menuLabel}>Connected Apps</Text>
+                        <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
+                      </TouchableOpacity>
+                      <View style={{ height: 4 }} />
+                    </>
+                  )}
                   <TouchableOpacity
                     style={settingsOverlayStyles.menuRow}
                     activeOpacity={0.8}

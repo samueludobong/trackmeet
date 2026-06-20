@@ -3,6 +3,10 @@ import { View, Text, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { styles } from "../../assets/styles/feed/styles";
 import { NAV_ITEMS } from "../../constants/messages";
+import { MEETS_ENABLED } from "../../constants/featureFlags";
+
+// Hide the Meets tab when meets are disabled for this build.
+const VISIBLE_NAV_ITEMS = NAV_ITEMS.filter((i) => MEETS_ENABLED || i.label !== "Meets");
 
 export function BottomNav({
   active,
@@ -26,7 +30,7 @@ export function BottomNav({
   return (
     <View style={styles.navBarWrap} pointerEvents="box-none">
       <View style={styles.navBarGlass}>
-        {NAV_ITEMS.map((item) => {
+        {VISIBLE_NAV_ITEMS.map((item) => {
           const isActive = item.label === pendingActive;
           return (
             <Pressable

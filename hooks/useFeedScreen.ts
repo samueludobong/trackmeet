@@ -8,6 +8,7 @@ import { type ConversationInfo } from "../services/messages";
 import { joinOrStartDmJam } from "../services/meets";
 import { type JamOther } from "../lib/feed/contexts";
 import { useNowPlaying, type NowPlayingTrack } from "../hooks/useNowPlaying";
+import { useMusicLinkAttach } from "./useMusicLinkAttach";
 import { COMPOSER_ABOVE_NAV } from "../lib/feed/dimensions";
 import { type ComposerUser } from "../types/composer";
 import { ProfileView } from "../components/profile/ProfileView";
@@ -102,6 +103,11 @@ export function useFeedScreen() {
   const [currentUser, setCurrentUser] = useState<ComposerUser | null>(null);
   const [quickText, setQuickText] = useState("");
   const [attachedTrack, setAttachedTrack] = useState<NowPlayingTrack | null>(null);
+  // A song attached by pasting a streaming link (resolved via Odesli), driven by
+  // the shared parse hook. Mutually exclusive with attachedTrack.
+  const linkAttach = useMusicLinkAttach();
+  const { attachedLink, parsingLink, removeAttachedLink } = linkAttach;
+  useEffect(() => { if (attachedLink) setAttachedTrack(null); }, [attachedLink]);
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set());
   const [repostedPostIds, setRepostedPostIds] = useState<Set<string>>(new Set());
   const [pollVotes, setPollVotes] = useState<Map<string, string>>(new Map());
@@ -257,23 +263,33 @@ export function useFeedScreen() {
     }
   }, [currentUser]);
 
+  // Wraps setQuickText for the composer input: keeps the text in sync and kicks
+  // off link parsing when a supported music URL appears (typically on paste).
+  const onComposerTextChange = (next: string) => {
+    setQuickText(next);
+    linkAttach.detect(next, setQuickText);
+  };
+
   // Post directly from the floating quick-field without opening the sheet.
-  // If a track is attached the post type becomes "music" and song_data is stored.
+  // If a track or pasted-link song is attached the post becomes type "music".
   const handleQuickPost = async () => {
     const hasText  = quickText.trim().length > 0;
     const hasTrack = attachedTrack !== null;
-    if (!currentUser || (!hasText && !hasTrack)) return;
+    const hasLink  = attachedLink !== null;
+    if (!currentUser || (!hasText && !hasTrack && !hasLink)) return;
 
     const textToPost   = quickText.trim();
     const trackToPost  = attachedTrack;
+    const linkToPost   = attachedLink;
     setQuickText("");
     setAttachedTrack(null);
+    linkAttach.reset();
     Keyboard.dismiss();
 
     try {
       const payload: Record<string, any> = {
         user_id: currentUser.id,
-        type: hasTrack ? "music" : "text",
+        type: (hasTrack || hasLink) ? "music" : "text",
         text: textToPost || null,
       };
       if (trackToPost) {
@@ -285,6 +301,21 @@ export function useFeedScreen() {
         // re-scraping. Null on failure — the post still posts, just without preview.
         const previewUrl = await getOrCacheSongPreviewUrl(trackToPost.id);
         if (previewUrl) payload.song_preview_url = previewUrl;
+      } else if (linkToPost) {
+        // Spotify match (when Odesli found one) keeps song_id populated so the
+        // preview / save / in-app-swap paths still work; otherwise it's null and
+        // the card opens the source URL directly.
+        payload.song_id        = linkToPost.spotifyId ?? null;
+        payload.song_name      = linkToPost.name;
+        payload.song_artist    = linkToPost.artist;
+        payload.song_album_art = linkToPost.albumArt ?? null;
+        payload.song_url       = linkToPost.url;
+        payload.song_provider  = linkToPost.provider;
+        if (linkToPost.links.length) payload.song_links = linkToPost.links;
+        if (linkToPost.spotifyId) {
+          const previewUrl = await getOrCacheSongPreviewUrl(linkToPost.spotifyId);
+          if (previewUrl) payload.song_preview_url = previewUrl;
+        }
       }
 
       const newPost = await createPost(payload);
@@ -293,6 +324,7 @@ export function useFeedScreen() {
       Alert.alert("Post failed", e.message ?? "Could not create post.");
       setQuickText(textToPost);
       setAttachedTrack(trackToPost);
+      linkAttach.setAttachedLink(linkToPost);
     }
   };
 
@@ -403,5 +435,5 @@ useEffect(() => {
 }, []);
 
 
-  return { nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, jamMeetId, jamOther, jamToken, jamMinimized, setJamMinimized, openJam, closeJam, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, attachedTrack, setAttachedTrack, likedPostIds, setLikedPostIds, repostedPostIds, setRepostedPostIds, pollVotes, setPollVotes, onVoteOnPoll, fetchFeedPosts, onToggleLike, onToggleRepost, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight };
+  return { nowPlaying, menuVisible, setMenuVisible, activeNav, setActiveNav, quickReplyPost, setQuickReplyPost, detailPost, setDetailPost, openConv, setOpenConv, listenerMeetId, setListenerMeetId, listenerMinimized, setListenerMinimized, listenerInfo, setListenerInfo, listenerIsPublic, setListenerIsPublic, joinPromptMeetId, setJoinPromptMeetId, hostMeetId, setHostMeetId, hostMeetName, setHostMeetName, hostMeetToken, setHostMeetToken, hostMinimized, setHostMinimized, openListenerMeet, openHostMeet, jamMeetId, jamOther, jamToken, jamMinimized, setJamMinimized, openJam, closeJam, keyboardUp, setKeyboardUp, feedScrollEnabled, setFeedScrollEnabled, feedRefreshing, setFeedRefreshing, feedPosts, setFeedPosts, currentUser, setCurrentUser, quickText, setQuickText, onComposerTextChange, attachedTrack, setAttachedTrack, attachedLink, removeAttachedLink, parsingLink, likedPostIds, setLikedPostIds, repostedPostIds, setRepostedPostIds, pollVotes, setPollVotes, onVoteOnPoll, fetchFeedPosts, onToggleLike, onToggleRepost, handleQuickPost, handleVoicePost, onFeedRefresh, composerBottom, keyboardVisible, setKeyboardVisible, composerHeight, setComposerHeight };
 }

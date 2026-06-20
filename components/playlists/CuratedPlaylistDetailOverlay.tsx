@@ -8,13 +8,15 @@ import {
   reorderCuratedPlaylistSongs,
 } from "../../services/playlists";
 import { openSpotifyLink, playTracks, getValidSpotifyToken, setPlayback } from "../../lib/spotify";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, ActivityIndicator, Alert, PanResponder, Easing } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Modal, ActivityIndicator, Alert, PanResponder, Easing, Linking } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { type CuratedPlaylist, type CuratedSong } from "../../lib/feed/types";
 import { useNowPlayingCtx } from "../../lib/feed/contexts";
+import { MusicPlatformsSheet } from "../post/MusicPlatformsSheet";
 import { AddSongDialog } from "./AddSongDialog";
 import { EditPlaylistOverlay } from "./EditPlaylistOverlay";
 import { PlaylistOptionsOverlay } from "./PlaylistOptionsOverlay";
@@ -64,6 +66,8 @@ export function CuratedPlaylistDetailOverlay({
   const [showOptions, setShowOptions] = useState(false);
   const [starting, setStarting] = useState(false);
   const [shuffleOn, setShuffleOn] = useState(false);
+  // Song whose "play" overlay (Play + listen-on links) is open.
+  const [playSong, setPlaySong] = useState<CuratedSong | null>(null);
   // Becomes true while a drag is in progress so the outer ScrollView lets the
   // drag PanResponder steal the vertical gesture instead of scrolling.
   const [scrollLocked, setScrollLocked] = useState(false);
@@ -110,7 +114,13 @@ export function CuratedPlaylistDetailOverlay({
    */
   const handlePlayOrPause = async () => {
     if (starting) return;
-    if (songs.length === 0) { Alert.alert("Nothing to play", "Add some songs first."); return; }
+    // Spotify playback only covers Spotify-backed songs; non-Spotify (pasted-
+    // link) songs are skipped here and are played individually from their tap.
+    const spotifyIds = songs.map(s => s.spotify_track_id).filter((id): id is string => !!id);
+    if (spotifyIds.length === 0) {
+      Alert.alert("Nothing to play on Spotify", "This playlist has no Spotify songs to play. Tap a song to open it.");
+      return;
+    }
     setStarting(true);
     try {
       const token = await getValidSpotifyToken(currentUserId ?? userId);
@@ -122,7 +132,7 @@ export function CuratedPlaylistDetailOverlay({
         await setPlayback(token, false);
         return;
       }
-      let uris = songs.map(s => `spotify:track:${s.spotify_track_id}`);
+      let uris = spotifyIds.map(id => `spotify:track:${id}`);
       if (shuffleOn) {
         // Fisher–Yates so the first track is uniformly random — Spotify starts
         // from uris[0] so this controls which song plays first.
@@ -142,6 +152,22 @@ export function CuratedPlaylistDetailOverlay({
       }
     } finally {
       setStarting(false);
+    }
+  };
+
+  // Play a single song: Spotify songs play on the user's device (falling back to
+  // opening the app); non-Spotify songs open their source link.
+  const playThisSong = async (sng: CuratedSong) => {
+    if (sng.spotify_track_id) {
+      const token = await getValidSpotifyToken(currentUserId ?? userId);
+      if (token) {
+        const r = await playTracks(token, [`spotify:track:${sng.spotify_track_id}`]);
+        if (!r.ok) openTrackInSpotify(sng.spotify_track_id);
+      } else {
+        openTrackInSpotify(sng.spotify_track_id);
+      }
+    } else if (sng.song_url) {
+      Linking.openURL(sng.song_url).catch(() => WebBrowser.openBrowserAsync(sng.song_url!).catch(() => {}));
     }
   };
 
@@ -283,7 +309,7 @@ export function CuratedPlaylistDetailOverlay({
               isOwner={isOwner}
               activeSongId={activeSongId}
               onReorder={handleReorder}
-              onOpenTrack={(s) => openTrackInSpotify(s.spotify_track_id)}
+              onOpenTrack={(s) => setPlaySong(s)}
               onDelete={(s) => deleteSong(s.id)}
               setScrollLocked={setScrollLocked}
             />
@@ -341,6 +367,19 @@ export function CuratedPlaylistDetailOverlay({
           onDeleted={() => { setShowOptions(false); (onDeleted ?? onClose)(); }}
         />
       )}
+
+      {/* Per-song play overlay: Play action on top, then any cross-platform
+          links. No "original platform" section in this player context. */}
+      <MusicPlatformsSheet
+        visible={!!playSong}
+        onClose={() => setPlaySong(null)}
+        song={{ name: playSong?.track_name ?? "", artist: playSong?.track_artist ?? "", albumArt: playSong?.album_art ?? null }}
+        originalProvider={null}
+        originalUrl={null}
+        links={playSong?.song_links ?? []}
+        showOriginal={false}
+        onPlay={() => { if (playSong) playThisSong(playSong); }}
+      />
     </Modal>
   );
 }

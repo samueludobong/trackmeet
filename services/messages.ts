@@ -24,6 +24,11 @@ export type DbMessage = {
   spotify_track_name: string | null
   spotify_track_artist: string | null
   spotify_album_art: string | null
+  // Multi-provider pasted-link fields (Odesli). spotify_track_id holds the
+  // Spotify id when matched; song_url/provider/links cover the other platforms.
+  song_url: string | null
+  song_provider: string | null
+  song_links: { platform: string; url: string }[] | null
   reply_to_id: string | null
   reply_to_preview: string | null   // short quoted text shown in bubble
   created_at: string
@@ -197,5 +202,45 @@ export const sendSpotifyTrackMessage = async (
     .single()
 
   if (error) { console.error('[messages] sendTrack:', error.message); return null }
+  return data as DbMessage
+}
+
+/** Song attached to a chat message — a Spotify pick or a pasted multi-provider link. */
+export type MessageSong = {
+  id: string | null         // Spotify track id when known (null for non-Spotify-only)
+  name: string
+  artist: string
+  albumArt: string | null
+  url?: string | null       // source streaming link (pasted-link attachments)
+  provider?: string | null
+  links?: { platform: string; url: string }[] | null
+}
+
+export const sendSongMessage = async (
+  conversationId: string,
+  song: MessageSong,
+): Promise<DbMessage | null> => {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data, error } = await supabase
+    .from('messages')
+    .insert({
+      conversation_id: conversationId,
+      sender_id: user.id,
+      body: null,
+      type: 'spotify_track',
+      spotify_track_id: song.id,
+      spotify_track_name: song.name,
+      spotify_track_artist: song.artist,
+      spotify_album_art: song.albumArt,
+      song_url: song.url ?? null,
+      song_provider: song.provider ?? null,
+      song_links: song.links ?? null,
+    })
+    .select()
+    .single()
+
+  if (error) { console.error('[messages] sendSong:', error.message); return null }
   return data as DbMessage
 }

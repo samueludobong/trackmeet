@@ -9,6 +9,7 @@ import { type NowPlayingTrack } from "../../hooks/useNowPlaying";
 import { type Gradient } from "../../hooks/albumColors";
 import { type ActiveMeetForUser } from "../../services/meets";
 import { BroadcastRow } from "../../components/feed/BroadcastRow";
+import { MEETS_ENABLED } from "../../constants/featureFlags";
 import { LyricsOverlay } from "./LyricsOverlay";
 import { useNowPlayingCtx } from "../../lib/feed/contexts";
 
@@ -233,7 +234,7 @@ export function ProfileNowPlayingCard({
 
       {!inMeet && <BroadcastRow />}
 
-      {isHosting ? (
+      {MEETS_ENABLED && (isHosting ? (
         <TouchableOpacity style={profileStyles.startMeetBtn} activeOpacity={0.85} onPress={() => activeMeet && openHostMeet?.(activeMeet.meet.id, activeMeet.meet.name)}>
           <Ionicons name="headset" size={15} color="#fff" />
           <Text style={profileStyles.startMeetBtnText}>Return to your Meet</Text>
@@ -248,7 +249,7 @@ export function ProfileNowPlayingCard({
           <FontAwesome5 name="broadcast-tower" size={14} color="#fff" />
           <Text style={profileStyles.startMeetBtnText}>Start Meet</Text>
         </TouchableOpacity>
-      )}
+      ))}
 
       <LyricsOverlay
         visible={lyricsOpen}

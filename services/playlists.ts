@@ -3,11 +3,15 @@ import { supabase } from '../lib/supabase';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type PlaylistTrackInput = {
-  id: string
+  id: string | null            // Spotify track id, or null for a pasted-link song
   name: string
   artist: string | null
   albumArt: string | null
   durationMs?: number | null
+  // Multi-provider fields (pasted-link songs); omitted for plain Spotify tracks.
+  url?: string | null
+  provider?: string | null
+  links?: { platform: string; url: string }[] | null
 }
 
 export type CuratedPlaylistLite = {
@@ -60,6 +64,43 @@ export const isTrackInAnyPlaylist = async (
   return (count ?? 0) > 0
 }
 
+// URL-keyed variants for non-Spotify (pasted-link) songs, which have no Spotify
+// track id and are deduped by their source URL instead.
+export const getPlaylistIdsContainingUrl = async (
+  userId: string,
+  songUrl: string,
+): Promise<Set<string>> => {
+  const { data } = await supabase
+    .from('curated_playlist_songs')
+    .select('playlist_id, curated_playlists!inner(user_id)')
+    .eq('song_url', songUrl)
+    .eq('curated_playlists.user_id', userId)
+  return new Set((data ?? []).map((r: any) => r.playlist_id as string))
+}
+
+export const isUrlInAnyPlaylist = async (
+  userId: string,
+  songUrl: string,
+): Promise<boolean> => {
+  const { count } = await supabase
+    .from('curated_playlist_songs')
+    .select('id, curated_playlists!inner(user_id)', { count: 'exact', head: true })
+    .eq('song_url', songUrl)
+    .eq('curated_playlists.user_id', userId)
+  return (count ?? 0) > 0
+}
+
+export const removeSongFromCuratedPlaylistByUrl = async (
+  playlistId: string,
+  songUrl: string,
+): Promise<void> => {
+  await supabase
+    .from('curated_playlist_songs')
+    .delete()
+    .eq('playlist_id', playlistId)
+    .eq('song_url', songUrl)
+}
+
 // ─── Writes ───────────────────────────────────────────────────────────────────
 
 // Add a track to a curated playlist, skipping if it's already present. Resolves
@@ -80,6 +121,9 @@ export const addTrackToCuratedPlaylist = async (
     albumArt: track.albumArt ?? null,
     durationMs: track.durationMs ?? 0,
     previewUrl: null,
+    url: track.url ?? null,
+    provider: track.provider ?? null,
+    links: track.links ?? null,
   });
   if (!result.ok) throw new Error(result.error);
 }
@@ -110,6 +154,22 @@ export const createCuratedPlaylist = async (
 
 // ─── Curated playlist detail operations ──────────────────────────────────────
 import { type CuratedSong, type CuratedPlaylist } from '../lib/feed/types';
+
+/**
+ * The first few non-empty album arts in a curated playlist, ordered by
+ * position. Used to build a mosaic cover for playlists with no uploaded image
+ * (mirrors the detail view's hero fallback).
+ */
+export async function getCuratedPlaylistCovers(playlistId: string, limit = 4): Promise<string[]> {
+  const { data } = await supabase
+    .from('curated_playlist_songs')
+    .select('album_art')
+    .eq('playlist_id', playlistId)
+    .not('album_art', 'is', null)
+    .order('position', { ascending: true })
+    .limit(limit)
+  return (data ?? []).map((r: any) => r.album_art as string)
+}
 
 /** Load the songs in a curated playlist, ordered by position. */
 export async function getCuratedPlaylistSongs(playlistId: string): Promise<CuratedSong[]> {
@@ -229,11 +289,19 @@ async function waitForAuthedSession(timeoutMs = 4000): Promise<boolean> {
  */
 export async function addSongToCuratedPlaylist(
   playlistId: string,
-  track: SpotifyTrackResult
+  track: Omit<SpotifyTrackResult, 'id'> & { id: string | null; url?: string | null; provider?: string | null; links?: { platform: string; url: string }[] | null }
 ): Promise<AddSongResult> {
   const ready = await waitForAuthedSession();
   if (!ready) {
     return { ok: false, error: "Not signed in — please reopen the app and try again." };
+  }
+
+  // Identity column: Spotify songs dedup by track id; pasted-link songs (no
+  // Spotify id) dedup by their source URL.
+  const dedupCol = track.id ? 'spotify_track_id' : 'song_url';
+  const dedupVal = track.id ?? track.url ?? null;
+  if (!dedupVal) {
+    return { ok: false, error: "Song is missing an identifier." };
   }
 
   // Skip if the track is already in this playlist.
@@ -241,7 +309,7 @@ export async function addSongToCuratedPlaylist(
     .from('curated_playlist_songs')
     .select('id')
     .eq('playlist_id', playlistId)
-    .eq('spotify_track_id', track.id)
+    .eq(dedupCol, dedupVal)
     .limit(1);
   if (existingErr) {
     console.error('[addSongToCuratedPlaylist] existence check failed', existingErr);
@@ -264,12 +332,15 @@ export async function addSongToCuratedPlaylist(
 
   const payload = {
     playlist_id: playlistId,
-    spotify_track_id: track.id,
+    spotify_track_id: track.id ?? null,
     track_name: track.name,
     track_artist: track.artist || 'Unknown',
     album_art: track.albumArt,
     duration_ms: track.durationMs ?? 0,
     position: nextPos,
+    song_url: track.url ?? null,
+    song_provider: track.provider ?? null,
+    song_links: track.links ?? null,
   };
 
   // .select().single() forces the returning clause; an RLS denial surfaces as
