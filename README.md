@@ -26,7 +26,7 @@
 >
 > Track Meet is **shelved as a learning / portfolio project**. It is not in active development and was never shipped to the app stores.
 >
-> **Why:** the flagship feature — synced "Meets" — depends on the **Spotify Web API**, which Spotify **locked down for individual developers in February 2026** (development mode capped at 5 Premium users; commercial quota now requires a registered business with 250k+ MAU). That closed the only viable path to an indie launch, so rather than ship the app with its differentiator disabled, it was paused behind feature flags (`EXPO_PUBLIC_MEETS_ENABLED` / `EXPO_PUBLIC_SPOTIFY_ENABLED`, both `false`).
+> **Why:** the flagship feature — synced "Meets" — depends on the **Spotify Web API**, which Spotify **locked down for individual developers in February 2026** (development mode capped at 5 Premium users; commercial quota now requires a registered business with 250k+ MAU). That closed the only viable path to an indie launch, so rather than ship the app with its differentiator disabled, it was paused behind feature flags (`EXPO_PUBLIC_MEETS_ENABLED` / `EXPO_PUBLIC_SPOTIFY_ENABLED`, both `false`), Rotated ENV keys when making repo Public.
 >
 > **What still works without Spotify:** the feed, multi-provider song cards, playlists, direct messages & group chats, stories (music + text), and profiles. Song attachment was already pivoted to a **keyless multi-provider resolver** (Odesli / song.link) covering Spotify, Apple Music, YouTube and SoundCloud.
 >
