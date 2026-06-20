@@ -38,6 +38,17 @@ yarn-error.*
 
 app-example
 
+# Claude Code / agent instructions (kept local, not tracked)
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# local scratch / scratch logs / refactor temp artifacts
+.scratch.txt
+.tsc-*.txt
+.block.txt
+__rename_*
+
 # generated native folders
 /ios
 /android
