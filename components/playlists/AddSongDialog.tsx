@@ -101,10 +101,10 @@ export function AddSongDialog({
         if (!token) { setRecsLoaded(true); return; }
         // Seed with up to 5 track IDs from this playlist (genre-aligned recs).
         const inPlaylist = await getCuratedPlaylistSongs(playlistId);
-        const seedIds = inPlaylist.slice(0, 5).map(s => s.spotify_track_id);
+        const seedIds = inPlaylist.slice(0, 5).map(s => s.spotify_track_id).filter((id): id is string => !!id);
         const list = await getRecommendedTracks(token, seedIds, 30);
         // Hide ones already in playlist.
-        const have = new Set(inPlaylist.map(s => s.spotify_track_id));
+        const have = new Set(inPlaylist.map(s => s.spotify_track_id).filter(Boolean));
         setRecs(list.filter(t => !have.has(t.id)));
       } finally {
         setRecsLoading(false);

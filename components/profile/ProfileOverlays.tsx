@@ -8,6 +8,7 @@ import { type ComposerUser } from "../../types/composer";
 import { SongPreviewSheet } from "../../components/SongPreviewSheet";
 import { PostComposerSheet } from "../../components/feed/PostComposerSheet";
 import { StartMeetOverlay } from "../../components/meets/StartMeetOverlay";
+import { MEETS_ENABLED } from "../../constants/featureFlags";
 import { EditProfileOverlay } from "../../components/profile/EditProfileOverlay";
 import { SettingsOverlay } from "../../components/profile/SettingsOverlay";
 import { SocialLinksSheet } from "../../components/profile/SocialLinksSheet";
@@ -134,7 +135,7 @@ export function ProfileOverlays({
       />
     )}
 
-    {meetOverlayVisible && (
+    {MEETS_ENABLED && meetOverlayVisible && (
       <StartMeetOverlay
         visible={meetOverlayVisible}
         onClose={() => setMeetOverlayVisible(false)}

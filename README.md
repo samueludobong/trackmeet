@@ -15,7 +15,22 @@
     <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Backend-3ECF8E?logo=supabase&logoColor=white" />
     <img alt="Spotify" src="https://img.shields.io/badge/Spotify-Web%20API-1DB954?logo=spotify&logoColor=white" />
   </p>
+  <p>
+    <img alt="Status: paused" src="https://img.shields.io/badge/status-paused-9E9E9E" />
+  </p>
 </div>
+
+---
+
+> ## ⏸️ Project status — paused (June 2026)
+>
+> Track Meet is **shelved as a learning / portfolio project**. It is not in active development and was never shipped to the app stores.
+>
+> **Why:** the flagship feature — synced "Meets" — depends on the **Spotify Web API**, which Spotify **locked down for individual developers in February 2026** (development mode capped at 5 Premium users; commercial quota now requires a registered business with 250k+ MAU). That closed the only viable path to an indie launch, so rather than ship the app with its differentiator disabled, it was paused behind feature flags (`EXPO_PUBLIC_MEETS_ENABLED` / `EXPO_PUBLIC_SPOTIFY_ENABLED`, both `false`).
+>
+> **What still works without Spotify:** the feed, multi-provider song cards, playlists, direct messages & group chats, stories (music + text), and profiles. Song attachment was already pivoted to a **keyless multi-provider resolver** (Odesli / song.link) covering Spotify, Apple Music, YouTube and SoundCloud.
+>
+> **Resume path:** the timestamp-based sync engine is provider-agnostic, so reviving Meets means swapping the four Spotify player calls for a **YouTube IFrame / `expo-av`** player adapter, then flipping the flags back on. See [Synced listening engine](#synced-listening-engine).
 
 ---
 

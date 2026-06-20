@@ -3,28 +3,32 @@ import { View, Animated, PanResponder } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
-// Swipe a bubble RIGHT to reply — same gesture for every message, yours or
-// theirs. The bubble tracks the finger 1:1 and the reply icon trails on the
-// left. Rightward-only, so it never fights the list's vertical scroll; the
-// chat-close gesture is confined to a tight left-edge band so it doesn't
-// collide with a reply swipe further into the screen.
+// Swipe to reply — the bubble/row tracks the finger 1:1 and a reply icon trails
+// behind it. Single-direction (right for chat bubbles, left for comments) so it
+// never fights the list's vertical scroll. Forgiving recognition so a quick
+// flick engages immediately, a soft cap past the threshold, and a light haptic
+// the moment the gesture arms.
 //
 // `onActiveChange` lets the parent freeze the list's vertical scroll for the
 // duration of the swipe — fired the instant the swipe is recognised.
 export function SwipeToReply({
-  onReply, onActiveChange, children,
+  onReply, onActiveChange, direction = "right", children,
 }: {
   onReply: () => void;
   onActiveChange?: (active: boolean) => void;
+  /** Swipe direction that triggers a reply. Defaults to "right" (chat bubbles). */
+  direction?: "left" | "right";
   fromMe?: boolean; // accepted for call-site compatibility; gesture is uniform
   children: React.ReactNode;
 }) {
   const x = useRef(new Animated.Value(0)).current;
   const armed = useRef(false);
-  // dx accumulated before recognition — subtracted so the bubble starts from
-  // the grab point (no jump on the first frame).
+  // dx accumulated before recognition — subtracted so the row starts from the
+  // grab point (no jump on the first frame).
   const grantDx = useRef(0);
   const THRESHOLD = 38;
+  // +1 for rightward swipes, -1 for leftward — lets one body serve both.
+  const sign = direction === "left" ? -1 : 1;
 
   const settle = () => {
     armed.current = false;
@@ -32,10 +36,10 @@ export function SwipeToReply({
     Animated.spring(x, { toValue: 0, useNativeDriver: true, tension: 280, friction: 18 }).start();
   };
 
-  // A rightward, horizontal-dominant drag = a reply swipe. Forgiving thresholds
-  // so a quick flick engages immediately.
+  // A horizontal-dominant drag in the reply direction. Forgiving thresholds so a
+  // quick flick engages immediately.
   const wantsReply = (g: { dx: number; dy: number }) =>
-    g.dx > 3 && Math.abs(g.dx) > Math.abs(g.dy) * 1.1;
+    sign * g.dx > 3 && Math.abs(g.dx) > Math.abs(g.dy) * 1.1;
 
   // Detect + claim. The instant we recognise the swipe (first horizontal pixel)
   // freeze the list so nothing scrolls vertically for the rest of the gesture.
@@ -52,11 +56,11 @@ export function SwipeToReply({
     onShouldBlockNativeResponder: () => true,
     onPanResponderGrant: (_, g) => { grantDx.current = g.dx; onActiveChange?.(true); },
     onPanResponderMove: (_, g) => {
-      // Rightward travel since the grab, tracked 1:1 with a soft cap past max.
-      const travel = Math.max(g.dx - grantDx.current, 0);
+      // Directional travel since the grab, tracked 1:1 with a soft cap past max.
+      const travel = Math.max(sign * (g.dx - grantDx.current), 0);
       const MAX = THRESHOLD + 22;
       const eased = travel <= MAX ? travel : MAX + (travel - MAX) * 0.25;
-      x.setValue(eased);
+      x.setValue(sign * eased);
       const past = travel > THRESHOLD;
       if (past && !armed.current) {
         armed.current = true;
@@ -66,14 +70,16 @@ export function SwipeToReply({
       }
     },
     onPanResponderRelease: (_, g) => {
-      if (g.dx - grantDx.current > THRESHOLD) onReply();
+      if (sign * (g.dx - grantDx.current) > THRESHOLD) onReply();
       settle();
     },
     onPanResponderTerminate: settle,
   })).current;
 
-  const iconOpacity = x.interpolate({ inputRange: [0, 14, THRESHOLD], outputRange: [0, 0.3, 1], extrapolate: "clamp" });
-  const iconScale   = x.interpolate({ inputRange: [0, 14, THRESHOLD], outputRange: [0.5, 0.7, 1], extrapolate: "clamp" });
+  // Icon fades/scales in as the row travels; input ranges flip with direction.
+  const opIn  = direction === "left" ? [-THRESHOLD, -14, 0] : [0, 14, THRESHOLD];
+  const iconOpacity = x.interpolate({ inputRange: opIn, outputRange: direction === "left" ? [1, 0.3, 0] : [0, 0.3, 1], extrapolate: "clamp" });
+  const iconScale   = x.interpolate({ inputRange: opIn, outputRange: direction === "left" ? [1, 0.7, 0.5] : [0.5, 0.7, 1], extrapolate: "clamp" });
 
   return (
     <View {...pan.panHandlers}>
@@ -83,7 +89,8 @@ export function SwipeToReply({
       <Animated.View
         pointerEvents="none"
         style={{
-          position: "absolute", left: 6, top: 0, bottom: 0,
+          position: "absolute", top: 0, bottom: 0,
+          ...(direction === "left" ? { right: 6 } : { left: 6 }),
           justifyContent: "center",
           opacity: iconOpacity,
           transform: [{ scale: iconScale }],

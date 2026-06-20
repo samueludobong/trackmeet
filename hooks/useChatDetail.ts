@@ -157,6 +157,7 @@ export function useChatDetail(conv: ConversationInfo, onClose: () => void) {
       sender_id: currentUserId ?? '', body: text, type: 'text',
       spotify_track_id: null, spotify_track_name: null,
       spotify_track_artist: null, spotify_album_art: null,
+      song_url: null, song_provider: null, song_links: null,
       reply_to_id: reply?.id ?? null,
       reply_to_preview: reply?.preview ?? null,
       created_at: new Date().toISOString(),

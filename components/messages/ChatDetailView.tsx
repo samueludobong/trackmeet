@@ -4,12 +4,15 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Animated, TextInput
 import { CachedImage } from "../ui/CachedImage";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { sendSpotifyTrackMessage, getConversationSettings, type ConversationInfo, type ConversationSettings, type DbMessage } from "../../services/messages";
+import { sendSpotifyTrackMessage, sendSongMessage, sendTextMessage, getConversationSettings, type ConversationInfo, type ConversationSettings, type DbMessage } from "../../services/messages";
 import { getActiveDmJam } from "../../services/meets";
 import { supabase } from "../../lib/supabase";
+import { useMusicLinkAttach } from "../../hooks/useMusicLinkAttach";
+import { MEETS_ENABLED, SPOTIFY_ENABLED } from "../../constants/featureFlags";
 import { chatStyles } from "../../assets/styles/feed/localStyles";
 import { useOpenJam } from "../../lib/feed/contexts";
 import { NowPlayingBanner } from "../../components/feed/NowPlayingBanner";
+import { ParsedLinkChip } from "../../components/feed/ParsedLinkChip";
 import { SpotifyTrackCard } from "../../components/messages/SpotifyTrackCard";
 import { SwipeToReply } from "../../components/messages/SwipeToReply";
 import { TypingBubble } from "../../components/messages/TypingBubble";
@@ -26,6 +29,54 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
   const setSwiping = useCallback((active: boolean) => {
     flatRef.current?.setNativeProps({ scrollEnabled: !active });
   }, [flatRef]);
+
+  // Paste-a-link song attachment (shared parser).
+  const link = useMusicLinkAttach();
+
+  // Send a pasted-link song as a chat song card (with any caption as a
+  // follow-up text message); otherwise fall through to the normal text send.
+  const handleChatSend = async () => {
+    const al = link.attachedLink;
+    if (!al) { sendMessage(); return; }
+    const caption = msgText.trim();
+    link.reset();
+    setMsgText("");
+    broadcastTyping(false);
+
+    const tempId = `pending-song-${Date.now()}`;
+    const optimistic: DbMessage = {
+      id: tempId, conversation_id: conv.conversationId,
+      sender_id: currentUserId ?? "", body: null, type: "spotify_track",
+      spotify_track_id: al.spotifyId, spotify_track_name: al.name,
+      spotify_track_artist: al.artist, spotify_album_art: al.albumArt,
+      song_url: al.url, song_provider: al.provider, song_links: al.links,
+      reply_to_id: null, reply_to_preview: null,
+      created_at: new Date().toISOString(),
+    };
+    setMsgs((prev) => [...prev, optimistic]);
+    scrollToBottom();
+    const result = await sendSongMessage(conv.conversationId, {
+      id: al.spotifyId, name: al.name, artist: al.artist, albumArt: al.albumArt,
+      url: al.url, provider: al.provider, links: al.links,
+    });
+    if (result) setMsgs((prev) => [...prev.filter((m) => m.id !== tempId), result]);
+
+    if (caption) {
+      const capTemp = `pending-cap-${Date.now()}`;
+      const capOpt: DbMessage = {
+        id: capTemp, conversation_id: conv.conversationId,
+        sender_id: currentUserId ?? "", body: caption, type: "text",
+        spotify_track_id: null, spotify_track_name: null, spotify_track_artist: null, spotify_album_art: null,
+        song_url: null, song_provider: null, song_links: null,
+        reply_to_id: null, reply_to_preview: null,
+        created_at: new Date().toISOString(),
+      };
+      setMsgs((prev) => [...prev, capOpt]);
+      scrollToBottom();
+      const capRes = await sendTextMessage(conv.conversationId, caption);
+      if (capRes) setMsgs((prev) => [...prev.filter((m) => m.id !== capTemp), capRes]);
+    }
+  };
 
   // Start/join the private co-listening "jam" with this person.
   const openJam = useOpenJam();
@@ -119,12 +170,14 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[chatStyles.jamBtn, jamId && chatStyles.jamBtnActive, jamId && { backgroundColor: accent }]} activeOpacity={0.8} onPress={handleJam} disabled={startingJam}>
-            {startingJam
-              ? <ActivityIndicator size="small" color="#0D0D0D" />
-              : <Ionicons name="musical-notes" size={12} color="#0D0D0D" />}
-            <Text style={chatStyles.jamBtnText}>{jamId ? "Live" : "Jam"}</Text>
-          </TouchableOpacity>
+          {MEETS_ENABLED && (
+            <TouchableOpacity style={[chatStyles.jamBtn, jamId && chatStyles.jamBtnActive, jamId && { backgroundColor: accent }]} activeOpacity={0.8} onPress={handleJam} disabled={startingJam}>
+              {startingJam
+                ? <ActivityIndicator size="small" color="#0D0D0D" />
+                : <Ionicons name="musical-notes" size={12} color="#0D0D0D" />}
+              <Text style={chatStyles.jamBtnText}>{jamId ? "Live" : "Jam"}</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={chatStyles.headerIconBtn} activeOpacity={0.7}>
             <Ionicons name="call-outline" size={17} color="#fff" />
           </TouchableOpacity>
@@ -134,7 +187,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
         </View>
 
         {/* A live jam in this conversation — tap to connect / resume. */}
-        {jamId && (
+        {MEETS_ENABLED && jamId && (
           <TouchableOpacity style={chatStyles.jamBanner} activeOpacity={0.85} onPress={handleJam} disabled={startingJam}>
             <View style={chatStyles.jamBannerDot} />
             <Ionicons name="musical-notes" size={15} color="#fff" />
@@ -176,8 +229,8 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                 // gap when the sender changes, a tight gap within a run.
                 const topGap = firstInGroup ? 14 : 6;
 
-                // ── Spotify track card ──────────────────────────────────────
-                if (msg.type === "spotify_track" && msg.spotify_track_id) {
+                // ── Song card (Spotify or pasted multi-provider link) ───────
+                if (msg.type === "spotify_track") {
                   return (
                     <SwipeToReply fromMe={fromMe} onActiveChange={setSwiping} onReply={() => setReplyTo({
                       id: msg.id,
@@ -191,7 +244,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                     })}>
                       <View style={[chatStyles.msgWrap, fromMe && chatStyles.msgWrapMe, { marginTop: topGap }]}>
                         <SpotifyTrackCard
-                          track={{ id: msg.spotify_track_id, name: msg.spotify_track_name ?? "Unknown", artist: msg.spotify_track_artist ?? "Unknown", albumArt: msg.spotify_album_art }}
+                          track={{ id: msg.spotify_track_id, name: msg.spotify_track_name ?? "Unknown", artist: msg.spotify_track_artist ?? "Unknown", albumArt: msg.spotify_album_art, url: msg.song_url, provider: msg.song_provider, links: msg.song_links }}
                           fromMe={fromMe}
                         />
                         <Text style={[chatStyles.bubbleTime, fromMe && chatStyles.bubbleTimeMe, { paddingHorizontal: 4, marginTop: 4 }]}>
@@ -248,6 +301,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
             />
           )}
           {isOtherTyping && <TypingBubble name={otherName} />}
+          {SPOTIFY_ENABLED && (
           <View style={{ paddingHorizontal: 12 }}>
             <NowPlayingBanner onShare={async (t) => {
               const tempId = `pending-sp-${Date.now()}`;
@@ -256,6 +310,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
                 sender_id: currentUserId ?? '', body: null, type: 'spotify_track',
                 spotify_track_id: t.id, spotify_track_name: t.name,
                 spotify_track_artist: t.artist, spotify_album_art: t.albumArt,
+                song_url: null, song_provider: null, song_links: null,
                 reply_to_id: null, reply_to_preview: null,
                 created_at: new Date().toISOString(),
               };
@@ -267,6 +322,7 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
               if (result) setMsgs(prev => [...prev.filter(m => m.id !== tempId), result]);
             }} />
           </View>
+          )}
           {!!replyTo && (
             <View style={chatStyles.replyBar}>
               <View style={[chatStyles.replyBarAccent, { backgroundColor: accent }]} />
@@ -293,27 +349,33 @@ export function ChatDetailView({ conv, onClose }: { conv: ConversationInfo; onCl
               </TouchableOpacity>
             </View>
           )}
-          <View style={chatStyles.inputBar}>
-            <TouchableOpacity style={chatStyles.inputPlusBtn} activeOpacity={0.7}>
+          {(link.parsingLink || link.attachedLink) && (
+            <View style={{ paddingHorizontal: 12 }}>
+              <ParsedLinkChip parsingLink={link.parsingLink} attachedLink={link.attachedLink} onRemove={link.removeAttachedLink} />
+            </View>
+          )}
+          <View style={[chatStyles.inputBar, link.parsingLink && { opacity: 0.5 }]}>
+            <TouchableOpacity style={chatStyles.inputPlusBtn} activeOpacity={0.7} disabled={link.parsingLink}>
               <Ionicons name="add-circle-outline" size={35} color="rgba(255,255,255,0.38)" />
             </TouchableOpacity>
             <View style={chatStyles.inputWrap}>
               <TextInput
                 style={chatStyles.input}
-                placeholder="Message..."
+                placeholder={link.parsingLink ? "Parsing link…" : link.attachedLink ? "Add a caption..." : "Message..."}
                 placeholderTextColor="rgba(255,255,255,0.28)"
                 value={msgText}
-                onChangeText={handleTextChange}
+                onChangeText={(t) => { handleTextChange(t); link.detect(t, setMsgText); }}
                 multiline
                 maxLength={500}
                 returnKeyType="default"
+                editable={!link.parsingLink}
               />
-              {msgText.length === 0 ? (
+              {msgText.length === 0 && !link.attachedLink ? (
                 <TouchableOpacity style={chatStyles.inputAction} activeOpacity={0.7}>
                   <Ionicons name="mic-outline" size={18} color="rgba(255,255,255,0.38)" />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity style={[chatStyles.inputAction, chatStyles.sendBtn, { backgroundColor: accent }]} activeOpacity={0.8} onPress={sendMessage}>
+                <TouchableOpacity style={[chatStyles.inputAction, chatStyles.sendBtn, { backgroundColor: accent }]} activeOpacity={0.8} onPress={handleChatSend} disabled={link.parsingLink}>
                   <Ionicons name="send" size={14} color="#0D0D0D" />
                 </TouchableOpacity>
               )}

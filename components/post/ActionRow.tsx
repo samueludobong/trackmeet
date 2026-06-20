@@ -16,6 +16,7 @@ import { openSpotifyLink } from "../../lib/spotify";
 import { AddToPlaylistSheet } from "../../components/AddToPlaylistSheet";
 import { PostActionsOverlay } from "./PostActionsOverlay";
 import { UnrepostConfirmOverlay } from "./UnrepostConfirmOverlay";
+import { ShareSheet } from "./ShareSheet";
 
 export function ActionRow({ post }: { post: Post }) {
   const { currentUserId, likedPostIds, onToggleLike, repostedPostIds, onToggleRepost } = useContext(FeedUserCtx);
@@ -26,6 +27,7 @@ export function ActionRow({ post }: { post: Post }) {
   const [commentsCount, setCommentsCount] = useState(post.comments);
   const [repostCount, setRepostCount] = useState(post.reposts ?? 0);
   const [unrepostConfirmOpen, setUnrepostConfirmOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const openDetail = useContext(OpenDetailCtx);
   const { onRemovePost } = usePostActions();
@@ -130,7 +132,7 @@ export function ActionRow({ post }: { post: Post }) {
           </Text>
         )}
       </TouchableOpacity>
-      <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7}>
+      <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7} onPress={() => openDetail?.()}>
         <Ionicons
           name="chatbubble-outline"
           size={22}
@@ -160,7 +162,7 @@ export function ActionRow({ post }: { post: Post }) {
       <TouchableOpacity
         style={styles.actionBtn}
         activeOpacity={0.7}
-        onPress={() => {}}
+        onPress={() => setShareOpen(true)}
       >
         <Ionicons
           name="share-outline"
@@ -184,6 +186,14 @@ export function ActionRow({ post }: { post: Post }) {
           post={post}
           onClose={() => setUnrepostConfirmOpen(false)}
           onConfirm={confirmUnrepost}
+        />
+      )}
+
+      {shareOpen && (
+        <ShareSheet
+          post={post}
+          currentUserId={currentUserId}
+          onClose={() => setShareOpen(false)}
         />
       )}
 

@@ -33,7 +33,7 @@ const DRIFT_TOLERANCE_MS = 5_000
 const ACTION_COOLDOWN_MS = 2_000
 let _lastActionAt = 0
 
-// Command latency: the gap between issuing a play/seek and the audio actually
+// Command latency: the gap between issuing a play/seek and the audio actually 
 // landing at that position (network + Spotify's device-side queue). Rather than
 // hard-code a guess, we MEASURE it: after each correction we compare where the
 // listener ends up against where the host is, and nudge this estimate to drive

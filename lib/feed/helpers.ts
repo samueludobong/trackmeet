@@ -39,6 +39,9 @@ export function dbRowToPost(row: any): Post {
     song:     row.song_name      ?? undefined,
     artist:   row.song_artist    ?? undefined,
     songId:   row.song_id        ?? undefined,
+    songUrl:      row.song_url      ?? null,
+    songProvider: row.song_provider ?? null,
+    songLinks:    row.song_links    ?? null,
     albumArt: row.song_album_art ?? undefined,
     previewUrl: row.song_preview_url ?? null,
     pollQuestion: row.poll_question ?? undefined,
@@ -74,6 +77,10 @@ export type Comment = {
   songName: string | null;
   songArtist: string | null;
   songAlbumArt: string | null;
+  // Multi-provider pasted-link fields (Odesli). songId stays the Spotify id when matched.
+  songUrl: string | null;
+  songProvider: string | null;
+  songLinks: { platform: string; url: string }[] | null;
 };
 
 export function rowToComment(row: any): Comment {
@@ -93,11 +100,14 @@ export function rowToComment(row: any): Comment {
     songName:    row.song_name      ?? null,
     songArtist:  row.song_artist    ?? null,
     songAlbumArt:row.song_album_art ?? null,
+    songUrl:      row.song_url      ?? null,
+    songProvider: row.song_provider ?? null,
+    songLinks:    row.song_links    ?? null,
   };
 }
 
 export const COMMENT_SELECT =
-  "id, post_id, user_id, parent_comment_id, text, likes_count, created_at, song_id, song_name, song_artist, song_album_art, users!user_id(id, username, display_name, avatar_url)";
+  "id, post_id, user_id, parent_comment_id, text, likes_count, created_at, song_id, song_name, song_artist, song_album_art, song_url, song_provider, song_links, users!user_id(id, username, display_name, avatar_url)";
 
 // ─── Color luminance ──────────────────────────────────────────────────────────
 

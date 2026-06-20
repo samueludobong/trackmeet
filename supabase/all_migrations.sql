@@ -1552,3 +1552,57 @@ CREATE POLICY "DM participants full access on conversation playlist songs"
     )
   );
 
+
+-- ============================================================
+-- add_song_link_fields.sql
+-- ============================================================
+-- Multi-provider music posts. When a song is attached by pasting a streaming
+-- link (Spotify, Apple Music, YouTube, SoundCloud) we store the source URL and
+-- which provider it came from so the music card's open button launches the
+-- right app. `song_id` still holds the Spotify track id when Odesli found a
+-- match (keeps 30s preview + Add-to-Playlist working); it's null for songs only
+-- found on a non-Spotify provider.
+alter table public.posts
+  add column if not exists song_url      text,
+  add column if not exists song_provider text;
+
+-- ============================================================
+-- add_song_links.sql
+-- ============================================================
+-- Full cross-platform link set for a pasted-link music post (resolved via
+-- Odesli). Lets the music card offer "listen on <your platform>" alternatives
+-- alongside the original. Shape: [{ "platform": "spotify", "url": "https://…" }].
+alter table public.posts
+  add column if not exists song_links jsonb;
+
+-- ============================================================
+-- add_comment_message_song_links.sql
+-- ============================================================
+-- Extend the pasted-link multi-provider song attachment to comments and chats.
+-- Same shape as posts: song_url (source link to open), song_provider, and the
+-- full Odesli platform set (song_links). On messages we reuse the existing
+-- spotify_track_* columns for name/artist/art + spotify id.
+alter table public.post_comments
+  add column if not exists song_url      text,
+  add column if not exists song_provider text,
+  add column if not exists song_links    jsonb;
+
+alter table public.messages
+  add column if not exists song_url      text,
+  add column if not exists song_provider text,
+  add column if not exists song_links    jsonb;
+
+-- ============================================================
+-- add_playlist_song_links.sql
+-- ============================================================
+-- Let curated playlists hold non-Spotify songs (added from pasted-link music
+-- cards). spotify_track_id is no longer required; song_url/provider/links carry
+-- the multi-provider identity so the play overlay can offer "listen on …" and
+-- the play-all button can still filter to Spotify-only tracks.
+alter table public.curated_playlist_songs
+  alter column spotify_track_id drop not null;
+
+alter table public.curated_playlist_songs
+  add column if not exists song_url      text,
+  add column if not exists song_provider text,
+  add column if not exists song_links    jsonb;

@@ -1,6 +1,7 @@
 import { View, Text, Modal, Pressable, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform, Keyboard } from "react-native";
 import { CachedImage } from "./ui/CachedImage";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
+import { PlaylistCover } from "./playlists/PlaylistCover";
 import { type PlaylistTrackInput } from "../services/playlists";
 
 import { s } from "../assets/styles/components/AddToPlaylistSheet";
@@ -26,7 +27,7 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
     mode, setMode,
     spotifyToken,
     activeLoading, activePlaylists, activeMemberOf, activeAddedTo,
-    canCreate, createDisabledReason,
+    canCreate, createDisabledReason, spotifyDisabled,
     error, dismissError,
     reconnect, reconnecting,
   } = useAddToPlaylist({ visible, onClose, track, tracks, userId, onSavedChange });
@@ -59,25 +60,28 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
               </View>
             )}
 
-            {/* ── Mode selector ── */}
-            <View style={s.modeRow}>
-              <TouchableOpacity
-                style={[s.modeBtn, !isSpotify && s.modeBtnActive]}
-                activeOpacity={0.85}
-                onPress={() => setMode("curated")}
-              >
-                <Ionicons name="albums-outline" size={14} color={!isSpotify ? "#0D0D0D" : "rgba(255,255,255,0.7)"} />
-                <Text style={[s.modeBtnText, !isSpotify && s.modeBtnTextActive]}>TrackMeet</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.modeBtn, isSpotify && s.modeBtnActiveSpotify]}
-                activeOpacity={0.85}
-                onPress={() => setMode("spotify")}
-              >
-                <FontAwesome5 name="spotify" size={13} color={isSpotify ? "#0D0D0D" : "rgba(255,255,255,0.7)"} />
-                <Text style={[s.modeBtnText, isSpotify && s.modeBtnTextActive]}>Spotify</Text>
-              </TouchableOpacity>
-            </View>
+            {/* ── Mode selector ── Hidden for non-Spotify songs (no Spotify id),
+                which can only go into TrackMeet curated playlists. */}
+            {!spotifyDisabled && (
+              <View style={s.modeRow}>
+                <TouchableOpacity
+                  style={[s.modeBtn, !isSpotify && s.modeBtnActive]}
+                  activeOpacity={0.85}
+                  onPress={() => setMode("curated")}
+                >
+                  <Ionicons name="albums-outline" size={14} color={!isSpotify ? "#0D0D0D" : "rgba(255,255,255,0.7)"} />
+                  <Text style={[s.modeBtnText, !isSpotify && s.modeBtnTextActive]}>TrackMeet</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.modeBtn, isSpotify && s.modeBtnActiveSpotify]}
+                  activeOpacity={0.85}
+                  onPress={() => setMode("spotify")}
+                >
+                  <FontAwesome5 name="spotify" size={13} color={isSpotify ? "#0D0D0D" : "rgba(255,255,255,0.7)"} />
+                  <Text style={[s.modeBtnText, isSpotify && s.modeBtnTextActive]}>Spotify</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* ── Create new playlist row (always at top, in either mode) ── */}
             {canCreate ? (
@@ -171,12 +175,8 @@ export function AddToPlaylistSheet({ visible, onClose, track, tracks, userId, on
                         <View style={[s.cover, { backgroundColor: "rgba(29,185,84,0.14)", alignItems: "center", justifyContent: "center" }]}>
                           <Ionicons name="heart" size={18} color="#1DB954" />
                         </View>
-                      ) : pl.image_url ? (
-                        <CachedImage source={{ uri: pl.image_url }} style={s.cover} />
                       ) : (
-                        <View style={[s.cover, s.coverFallback]}>
-                          <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
-                        </View>
+                        <PlaylistCover imageUrl={pl.image_url} playlistId={pl.id} size={44} style={{ borderRadius: 8 }} mosaic={!isSpotify} />
                       )}
                       <Text style={s.rowName} numberOfLines={1}>{pl.name}</Text>
                       {busy === pl.id ? (

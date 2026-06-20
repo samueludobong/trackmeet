@@ -1,20 +1,16 @@
-import React, { useEffect, useRef, useState } from "react";
-import { View, Text, TouchableOpacity, TextInput, ActivityIndicator, StyleSheet, FlatList } from "react-native";
-import { CachedImage } from "../components/ui/CachedImage";
+import React, { useState } from "react";
+import { View, Text, TouchableOpacity, TextInput, StyleSheet, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
-import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
-import {
-  getValidSpotifyToken,
-  getUserTopTracks,
-  searchSpotifyTracks,
-  getCurrentlyPlaying,
-  type SpotifyTrackResult,
-} from "../lib/spotify";
+import { useMusicLinkAttach } from "../hooks/useMusicLinkAttach";
+import { createTextStory } from "../services/stories";
+import { isLightColor } from "../lib/feed/helpers";
+import { ParsedLinkChip } from "../components/feed/ParsedLinkChip";
 import { KeyboardDismissView } from "../components/shared/KeyboardDismissView";
 import { s } from "../assets/styles/app/story-composer";
 
-type StoryType = "music" | "text" | "wrapped";
+type StoryType = "music" | "text";
 
 export default function StoryComposerScreen() {
   const router = useRouter();
@@ -31,7 +27,7 @@ export default function StoryComposerScreen() {
       </View>
 
       <View style={s.tabsRow}>
-        {(["music","text","wrapped"] as StoryType[]).map((t) => {
+        {(["music","text"] as StoryType[]).map((t) => {
           const active = type === t;
           return (
             <TouchableOpacity
@@ -41,194 +37,170 @@ export default function StoryComposerScreen() {
               style={[s.tab, active && s.tabActive]}
             >
               <Ionicons
-                name={t === "music" ? "musical-notes" : t === "text" ? "text" : "sparkles"}
+                name={t === "music" ? "musical-notes" : "text"}
                 size={14}
                 color={active ? "#0D0D0D" : "rgba(255,255,255,0.6)"}
               />
               <Text style={[s.tabTxt, active && s.tabTxtActive]}>
-                {t === "music" ? "Music" : t === "text" ? "Text" : "Wrapped"}
+                {t === "music" ? "Music" : "Text"}
               </Text>
             </TouchableOpacity>
           );
         })}
       </View>
 
-      {type === "music"   && <MusicComposer />}
-      {type === "text"    && <PlaceholderTab label="Text stories — coming soon" icon="text" />}
-      {type === "wrapped" && <PlaceholderTab label="Wrapped stories — coming soon" icon="sparkles" />}
+      {type === "music" && <MusicComposer />}
+      {type === "text"  && <TextComposer />}
     </KeyboardDismissView>
   );
 }
 
 // ─── Music tab ────────────────────────────────────────────────────────────────
+// Paste a streaming link (Spotify / Apple Music / YouTube / SoundCloud) and we
+// resolve it via Odesli — no Spotify account required.
 function MusicComposer() {
   const router = useRouter();
-  const [token, setToken]       = useState<string | null>(null);
-  const [nowPlaying, setNowPlaying] = useState<SpotifyTrackResult | null>(null);
-  const [popular, setPopular]   = useState<SpotifyTrackResult[]>([]);
-  const [loadingPop, setLoadingPop] = useState(true);
-  const [query, setQuery]       = useState("");
-  const [searchRes, setSearchRes] = useState<SpotifyTrackResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [text, setText] = useState("");
+  const link = useMusicLinkAttach();
 
-  // Load Spotify token + currently-playing + initial popular list
-  useEffect(() => {
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoadingPop(false); return; }
-      const t = await getValidSpotifyToken(user.id);
-      setToken(t);
-      if (t) {
-        const [np, top] = await Promise.all([
-          getCurrentlyPlaying(t),
-          getUserTopTracks(t, 25),
-        ]);
-        if (np && !("unauthorized" in np) && np.id) {
-          setNowPlaying({
-            id: np.id,
-            name: np.name,
-            artist: np.artist,
-            albumArt: np.albumArt ?? null,
-            durationMs: np.durationMs,
-            previewUrl: np.previewUrl ?? null,
-          });
-        }
-        setPopular(top);
-      }
-      setLoadingPop(false);
-    })();
-  }, []);
-
-  // Debounced search
-  useEffect(() => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    const q = query.trim();
-    if (!q) { setSearchRes([]); return; }
-    if (!token) return;
-    searchTimer.current = setTimeout(async () => {
-      setSearching(true);
-      setSearchRes(await searchSpotifyTracks(token, q, 25));
-      setSearching(false);
-    }, 350);
-    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
-  }, [query, token]);
-
-  const isSearching = query.trim().length > 0;
-  // While not searching, surface "Now playing" at the very top of the list and
-  // dedupe it out of the Popular section so the same track doesn't appear twice.
-  const popularDeduped = nowPlaying ? popular.filter((t) => t.id !== nowPlaying.id) : popular;
-  const list = isSearching ? searchRes : popularDeduped;
-  const listLoading = isSearching ? searching : loadingPop;
-  const showNowPlaying = !isSearching && nowPlaying != null;
-
-  const onPick = (t: SpotifyTrackResult) => {
+  const onContinue = () => {
+    const a = link.attachedLink;
+    if (!a) return;
     router.push({
       pathname: "/story-card-picker",
       params: {
-        songId: t.id,
-        songName: t.name,
-        songArtist: t.artist,
-        songAlbumArt: t.albumArt ?? "",
+        // Spotify id when Odesli matched one (enables the 30s preview); empty
+        // otherwise — the story still shows the card from the metadata.
+        songId: a.spotifyId ?? "",
+        songName: a.name,
+        songArtist: a.artist,
+        songAlbumArt: a.albumArt ?? "",
       },
     });
   };
 
-  if (!token && !loadingPop) {
-    return (
-      <View style={s.connectWrap}>
-        <FontAwesome5 name="spotify" size={32} color="#1DB954" />
-        <Text style={s.connectTitle}>Connect Spotify</Text>
-        <Text style={s.connectSub}>Link your Spotify account to share music stories.</Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 6 }}>
       <View style={s.searchWrap}>
-        <Ionicons name="search-outline" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
+        <Ionicons name="link-outline" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
         <TextInput
           style={s.searchInput}
-          placeholder="Search Spotify"
+          placeholder="Paste a song link"
           placeholderTextColor="rgba(255,255,255,0.3)"
-          value={query}
-          onChangeText={setQuery}
+          value={text}
+          onChangeText={(t) => { setText(t); link.detect(t, setText); }}
+          editable={!link.parsingLink}
+          autoFocus
+          autoCapitalize="none"
           autoCorrect={false}
         />
-        {query.length > 0 && (
-          <TouchableOpacity onPress={() => setQuery("")} activeOpacity={0.7}>
+        {text.length > 0 && !link.parsingLink && (
+          <TouchableOpacity onPress={() => { setText(""); link.removeAttachedLink(); }} activeOpacity={0.7}>
             <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.4)" />
           </TouchableOpacity>
         )}
       </View>
 
-      {listLoading ? (
-        <ActivityIndicator color="#AB00FF" style={{ marginTop: 30 }} />
-      ) : !showNowPlaying && list.length === 0 ? (
-        <Text style={s.emptyTxt}>{isSearching ? `No results for "${query.trim()}"` : "No popular tracks yet."}</Text>
-      ) : (
-        <FlatList
-          data={list}
-          keyExtractor={(t) => t.id}
-          contentContainerStyle={{ paddingBottom: 40 }}
-          keyboardShouldPersistTaps="handled"
-          ListHeaderComponent={
-            <>
-              {showNowPlaying && (
-                <>
-                  <Text style={s.sectionHeader}>Now playing</Text>
-                  <TouchableOpacity activeOpacity={0.8} style={s.trackRow} onPress={() => onPick(nowPlaying!)}>
-                    {nowPlaying!.albumArt ? (
-                      <CachedImage source={{ uri: nowPlaying!.albumArt }} style={s.trackArt} />
-                    ) : (
-                      <View style={[s.trackArt, s.trackArtFallback]}>
-                        <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <View style={s.nowPlayingBadge}>
-                        <View style={s.nowPlayingDot} />
-                        <Text style={s.nowPlayingBadgeTxt}>Live on Spotify</Text>
-                      </View>
-                      <Text style={s.trackName} numberOfLines={1}>{nowPlaying!.name}</Text>
-                      <Text style={s.trackArtist} numberOfLines={1}>{nowPlaying!.artist}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
-                  </TouchableOpacity>
-                </>
-              )}
-              <Text style={s.sectionHeader}>{isSearching ? "Results" : "Popular right now"}</Text>
-            </>
-          }
-          renderItem={({ item }) => (
-            <TouchableOpacity activeOpacity={0.8} style={s.trackRow} onPress={() => onPick(item)}>
-              {item.albumArt ? (
-                <CachedImage source={{ uri: item.albumArt }} style={s.trackArt} />
-              ) : (
-                <View style={[s.trackArt, s.trackArtFallback]}>
-                  <FontAwesome5 name="music" size={14} color="rgba(255,255,255,0.3)" />
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={s.trackName} numberOfLines={1}>{item.name}</Text>
-                <Text style={s.trackArtist} numberOfLines={1}>{item.artist}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+      {link.parsingLink || link.attachedLink ? (
+        <View style={{ marginTop: 16 }}>
+          <ParsedLinkChip
+            parsingLink={link.parsingLink}
+            attachedLink={link.attachedLink}
+            onRemove={() => { link.removeAttachedLink(); setText(""); }}
+          />
+          {link.attachedLink && (
+            <TouchableOpacity style={cta.btn} activeOpacity={0.85} onPress={onContinue}>
+              <Text style={cta.txt}>Continue</Text>
+              <Ionicons name="arrow-forward" size={16} color="#fff" />
             </TouchableOpacity>
           )}
-        />
+        </View>
+      ) : (
+        <View style={{ alignItems: "center", marginTop: 44, paddingHorizontal: 24 }}>
+          <Ionicons name="musical-notes" size={30} color="rgba(255,255,255,0.25)" />
+          <Text style={s.connectTitle}>Share any song</Text>
+          <Text style={s.connectSub}>Paste a link from Spotify, Apple Music, YouTube or SoundCloud to add it to your story.</Text>
+        </View>
       )}
     </View>
   );
 }
 
-function PlaceholderTab({ label, icon }: { label: string; icon: keyof typeof Ionicons.glyphMap }) {
+const cta = StyleSheet.create({
+  btn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "#AB00FF", borderRadius: 14, paddingVertical: 14, marginTop: 16,
+  },
+  txt: { color: "#fff", fontSize: 15, fontWeight: "700" },
+});
+
+// ─── Text tab ─────────────────────────────────────────────────────────────────
+const BG_COLORS = ["#AB00FF", "#1DB954", "#FF3CAC", "#FF6C1A", "#2D6CDF", "#E11D48", "#0D0D0D", "#F5F5F5"];
+
+function TextComposer() {
+  const router = useRouter();
+  const [text, setText] = useState("");
+  const [bg, setBg]     = useState(BG_COLORS[0]);
+  const [posting, setPosting] = useState(false);
+  const fg = isLightColor(bg) ? "#0D0D0D" : "#FFFFFF";
+
+  const post = async () => {
+    const t = text.trim();
+    if (!t || posting) return;
+    setPosting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setPosting(false); return; }
+      await createTextStory({ userId: user.id, text: t, bgColor: bg, fgColor: fg });
+      router.back();
+    } catch {
+      setPosting(false);
+    }
+  };
+
   return (
-    <View style={s.connectWrap}>
-      <Ionicons name={icon} size={32} color="rgba(255,255,255,0.4)" />
-      <Text style={s.connectTitle}>{label}</Text>
-      <Text style={s.connectSub}>Tap the Music tab to share a song right now.</Text>
+    <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 6 }}>
+      {/* Live preview — type directly on the chosen background */}
+      <View style={{ flex: 1, borderRadius: 20, backgroundColor: bg, alignItems: "center", justifyContent: "center", padding: 24, marginBottom: 16 }}>
+        <TextInput
+          style={{ color: fg, fontSize: 24, fontWeight: "700", textAlign: "center", width: "100%" }}
+          placeholder="Type something…"
+          placeholderTextColor={fg === "#FFFFFF" ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)"}
+          value={text}
+          onChangeText={setText}
+          multiline
+          maxLength={250}
+          autoFocus
+        />
+      </View>
+
+      {/* Background swatches */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center", marginBottom: 16 }}>
+        {BG_COLORS.map((c) => (
+          <TouchableOpacity
+            key={c}
+            activeOpacity={0.8}
+            onPress={() => setBg(c)}
+            style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: c, borderWidth: bg === c ? 2 : StyleSheet.hairlineWidth, borderColor: bg === c ? "#fff" : "rgba(255,255,255,0.2)" }}
+          />
+        ))}
+      </View>
+
+      <TouchableOpacity
+        style={[cta.btn, (!text.trim() || posting) && { opacity: 0.5 }]}
+        activeOpacity={0.85}
+        onPress={post}
+        disabled={!text.trim() || posting}
+      >
+        {posting ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <>
+            <Text style={cta.txt}>Share to story</Text>
+            <Ionicons name="arrow-forward" size={16} color="#fff" />
+          </>
+        )}
+      </TouchableOpacity>
     </View>
   );
 }

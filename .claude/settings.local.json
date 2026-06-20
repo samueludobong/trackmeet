@@ -33,7 +33,8 @@
       "PowerShell(& .\\\\scripts\\\\split-feed-styles.ps1; Write-Host '---'; Get-ChildItem lib\\\\feed\\\\styles\\\\ -File | ForEach-Object { $lc = \\(Get-Content $_.FullName\\).Count; \"{0,5}  {1}\" -f $lc, $_.Name }; Write-Host '---'; \"barrel: $\\(\\(Get-Content lib\\\\feed\\\\styles.ts\\).Count\\) lines\")",
       "PowerShell(npx tsc --noEmit 2>&1)",
       "WebFetch(domain:techcrunch.com)",
-      "WebFetch(domain:developer.spotify.com)"
+      "WebFetch(domain:developer.spotify.com)",
+      "WebFetch(domain:api.song.link)"
     ]
   }
 }

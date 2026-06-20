@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
 import { useViewer } from "../../hooks/useViewer";
+import { useMusicLinkAttach } from "../../hooks/useMusicLinkAttach";
 import { addPostComment } from "../../services/posts";
+import { ParsedLinkChip } from "../../components/feed/ParsedLinkChip";
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Modal, Pressable, TextInput, Platform, Keyboard, ActivityIndicator } from "react-native";
 import { CachedImage } from "../ui/CachedImage";
 import { FontAwesome5 } from "@expo/vector-icons";
@@ -26,6 +28,8 @@ export function QuickReplyOverlay({
   const [sending, setSending] = useState(false);
   const [selectedSong, setSelectedSong] = useState<PinnedSong | null>(null);
   const [songPickerVisible, setSongPickerVisible] = useState(false);
+  const link = useMusicLinkAttach();
+  useEffect(() => { if (link.attachedLink) setSelectedSong(null); }, [link.attachedLink]);
   const backdropAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
   const inputBottomAnim = useRef(new Animated.Value(BOTTOM_INSET + 16)).current;
@@ -69,13 +73,17 @@ export function QuickReplyOverlay({
 
   const handleSend = async () => {
     const trimmed = text.trim();
-    if ((!trimmed && !selectedSong) || !currentUserId || sending) return;
+    if ((!trimmed && !selectedSong && !link.attachedLink) || !currentUserId || sending) return;
     setSending(true);
-    const song = selectedSong;
+    const al = link.attachedLink;
+    const song = al
+      ? { id: al.spotifyId, name: al.name, artist: al.artist, albumArt: al.albumArt, url: al.url, provider: al.provider, links: al.links }
+      : selectedSong;
     try {
       await addPostComment({ postId: post.id, userId: currentUserId, text: trimmed, parentCommentId: null, song });
       setText("");
       setSelectedSong(null);
+      link.reset();
       handleClose();
     } catch {
       // leave input intact on failure
@@ -137,12 +145,15 @@ export function QuickReplyOverlay({
           </View>
         )}
 
-        <Pressable style={styles.qrInputGlass} onPress={() => {}}>
+        <ParsedLinkChip parsingLink={link.parsingLink} attachedLink={link.attachedLink} onRemove={link.removeAttachedLink} />
+
+        <Pressable style={[styles.qrInputGlass, link.parsingLink && { opacity: 0.5 }]} onPress={() => {}}>
           {/* + button — opens song picker */}
           <TouchableOpacity
             style={styles.qrPlusBtn}
             activeOpacity={0.8}
             onPress={() => setSongPickerVisible(true)}
+            disabled={link.parsingLink}
           >
             <Text style={styles.qrPlusBtnIcon}>+</Text>
           </TouchableOpacity>
@@ -160,18 +171,19 @@ export function QuickReplyOverlay({
             <Text style={styles.qrReplyingTo}>Replying to {post.handle}</Text>
             <TextInput
               style={styles.qrInput}
-              placeholder="Add a comment..."
+              placeholder={link.parsingLink ? "Parsing link…" : link.attachedLink ? "Add a caption..." : "Add a comment..."}
               placeholderTextColor="rgba(255,255,255,0.3)"
               value={text}
-              onChangeText={setText}
+              onChangeText={(t) => { setText(t); link.detect(t, setText); }}
               autoFocus
               returnKeyType="send"
               onSubmitEditing={handleSend}
+              editable={!link.parsingLink}
             />
           </View>
           <TouchableOpacity
-            style={[styles.qrSend, ((!text.trim() && !selectedSong) || sending) && { opacity: 0.35 }]}
-            disabled={(!text.trim() && !selectedSong) || sending}
+            style={[styles.qrSend, ((!text.trim() && !selectedSong && !link.attachedLink) || sending || link.parsingLink) && { opacity: 0.35 }]}
+            disabled={(!text.trim() && !selectedSong && !link.attachedLink) || sending || link.parsingLink}
             activeOpacity={0.8}
             onPress={handleSend}
           >
@@ -187,7 +199,7 @@ export function QuickReplyOverlay({
       <PinnedSongOverlay
         visible={songPickerVisible}
         onClose={() => setSongPickerVisible(false)}
-        onSelect={(song) => { setSelectedSong(song); setSongPickerVisible(false); }}
+        onSelect={(song) => { setSelectedSong(song); link.removeAttachedLink(); setSongPickerVisible(false); }}
         accessToken={spotifyToken}
         ctaLabel="Attach to Reply"
         ctaIcon="music"

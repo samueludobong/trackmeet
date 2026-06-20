@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { type PlaylistTrackInput } from "../services/playlists";
 import {
-  getMyCuratedPlaylists, getPlaylistIdsContainingTrack, addTrackToCuratedPlaylist,
-  removeTrackFromCuratedPlaylist, createCuratedPlaylist, type CuratedPlaylistLite,
+  getMyCuratedPlaylists, getPlaylistIdsContainingTrack, getPlaylistIdsContainingUrl,
+  addTrackToCuratedPlaylist, removeTrackFromCuratedPlaylist, removeSongFromCuratedPlaylistByUrl,
+  createCuratedPlaylist, type CuratedPlaylistLite,
 } from "../services/playlists";
 import {
   getValidSpotifyToken, getUserPlaylists, isTrackSaved,
@@ -41,6 +42,10 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
   const items = (tracks && tracks.length > 0) ? tracks : (track ? [track] : []);
   const bulk = items.length > 1;
   const single = items.length === 1 ? items[0] : null;
+  // Non-Spotify (pasted-link) songs can't go into Spotify playlists — only the
+  // curated "TrackMeet" mode. Disable the Spotify tab when nothing here has a
+  // Spotify id.
+  const spotifyDisabled = !items.some((t) => !!t.id);
 
   // Mode selector ──────────────────────────────────────────────────────────
   const [mode, setMode] = useState<SaveMode>("curated");
@@ -68,7 +73,7 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
   const [error, setError] = useState<SaveError | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
 
-  const key = single?.id ?? `bulk:${items.length}`;
+  const key = single?.id ?? single?.url ?? `bulk:${items.length}`;
 
   // ── Load curated playlists + membership ───────────────────────────────
   useEffect(() => {
@@ -81,7 +86,11 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
     setError(null);
     (async () => {
       const pls = await getMyCuratedPlaylists(userId);
-      const mem = single ? await getPlaylistIdsContainingTrack(userId, single.id) : new Set<string>();
+      const mem = single
+        ? (single.id
+            ? await getPlaylistIdsContainingTrack(userId, single.id)
+            : single.url ? await getPlaylistIdsContainingUrl(userId, single.url) : new Set<string>())
+        : new Set<string>();
       if (!active) return;
       setPlaylists(pls);
       setMemberOf(mem);
@@ -106,7 +115,7 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
       if (!tok) { setSpotifyLoading(false); return; }
       const [pls, likedHit] = await Promise.all([
         getUserPlaylists(tok),
-        single ? isTrackSaved(tok, single.id) : Promise.resolve(false),
+        single?.id ? isTrackSaved(tok, single.id) : Promise.resolve(false),
       ]);
       if (!active) return;
       // Liked Songs always appears first in getUserPlaylists; everything else
@@ -136,7 +145,8 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
       } else if (single) {
         const next = new Set(memberOf);
         if (memberOf.has(playlistId)) {
-          await removeTrackFromCuratedPlaylist(playlistId, single.id);
+          if (single.id) await removeTrackFromCuratedPlaylist(playlistId, single.id);
+          else if (single.url) await removeSongFromCuratedPlaylistByUrl(playlistId, single.url);
           next.delete(playlistId);
         } else {
           await addTrackToCuratedPlaylist(playlistId, single);
@@ -160,6 +170,7 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
     try {
       if (bulk) {
         for (const t of items) {
+          if (!t.id) continue; // non-Spotify songs can't be added to Spotify
           const r = playlistId === LIKED_ID
             ? await saveTrackToLikedDetailed(spotifyToken, t.id)
             : await addTrackToSpotifyPlaylist(spotifyToken, playlistId, t.id);
@@ -168,18 +179,19 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
         const next = new Set(spotifyMemberOf).add(playlistId);
         setSpotifyMemberOf(next);
         onSavedChange?.(true);
-      } else if (single) {
+      } else if (single?.id) {
+        const trackId = single.id;
         const next = new Set(spotifyMemberOf);
         const isMember = spotifyMemberOf.has(playlistId);
         let r: SpotifyWriteResult;
         if (playlistId === LIKED_ID) {
           r = isMember
-            ? await removeTrackFromLiked(spotifyToken, single.id)
-            : await saveTrackToLikedDetailed(spotifyToken, single.id);
+            ? await removeTrackFromLiked(spotifyToken, trackId)
+            : await saveTrackToLikedDetailed(spotifyToken, trackId);
         } else {
           r = isMember
-            ? await removeTrackFromSpotifyPlaylist(spotifyToken, playlistId, single.id)
-            : await addTrackToSpotifyPlaylist(spotifyToken, playlistId, single.id);
+            ? await removeTrackFromSpotifyPlaylist(spotifyToken, playlistId, trackId)
+            : await addTrackToSpotifyPlaylist(spotifyToken, playlistId, trackId);
         }
         if (!r.ok) { setError(errFromWrite(r)); return; }
         isMember ? next.delete(playlistId) : next.add(playlistId);
@@ -222,6 +234,7 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
         const pl = createRes.playlist;
         // Add the current track(s) to the brand-new playlist.
         for (const t of items) {
+          if (!t.id) continue;
           const r = await addTrackToSpotifyPlaylist(spotifyToken, pl.id, t.id);
           if (!r.ok) { setError(errFromWrite(r)); /* keep the playlist row though */ break; }
         }
@@ -274,7 +287,7 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
       setSpotifyToken(tok);
       const [pls, likedHit] = await Promise.all([
         getUserPlaylists(tok),
-        single ? isTrackSaved(tok, single.id) : Promise.resolve(false),
+        single?.id ? isTrackSaved(tok, single.id) : Promise.resolve(false),
       ]);
       console.log('[useAddToPlaylist] post-reconnect: loaded', pls.length, 'playlists; likedHit=', likedHit);
       setSpotifyPlaylists(pls);
@@ -293,7 +306,7 @@ export function useAddToPlaylist({ visible, onClose, track, tracks, userId, onSa
     mode, setMode,
     spotifyToken, spotifyPlaylists, spotifyMemberOf, spotifyLoading,
     activeLoading, activePlaylists, activeMemberOf, activeAddedTo,
-    canCreate, createDisabledReason,
+    canCreate, createDisabledReason, spotifyDisabled,
     // error surface
     error, dismissError: () => setError(null),
     // inline reconnect

@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import { styles } from "../../assets/styles/app/signup";
 import { STREAMING_SERVICES, DUMMY_ARTISTS } from "../../constants/signup";
+import { SPOTIFY_ENABLED } from "../../constants/featureFlags";
 
 export function StreamingGrid({
   connected,
@@ -17,7 +18,7 @@ export function StreamingGrid({
 }) {
   return (
     <View style={{ gap: 10 }}>
-      {STREAMING_SERVICES.map((s) => {
+      {STREAMING_SERVICES.filter((s) => SPOTIFY_ENABLED || s.id !== "spotify").map((s) => {
         const ok = connected.has(s.id);
         const isSpotify = s.id === "spotify";
         const isConnecting = isSpotify && spotifyConnecting;

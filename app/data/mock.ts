@@ -65,6 +65,9 @@ export type Post = {
   song?: string;
   artist?: string;
   songId?: string;
+  songUrl?: string | null;      // source streaming link to open (multi-provider posts)
+  songProvider?: string | null; // "spotify" | "appleMusic" | "youtube" | "soundcloud"
+  songLinks?: { platform: string; url: string }[] | null; // all platforms Odesli matched
   albumArt?: string | null;     // real album-art URL from Spotify
   albumColor?: string;
   albumAccent?: string;

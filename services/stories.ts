@@ -155,6 +155,32 @@ export async function createMusicStory(input: CreateMusicStoryInput): Promise<St
   return rowToStory(data);
 }
 
+export type CreateTextStoryInput = {
+  userId: string;
+  text: string;
+  bgColor: string;
+  fgColor: string;
+  durationMs?: number;
+};
+
+export async function createTextStory(input: CreateTextStoryInput): Promise<Story> {
+  const { data, error } = await supabase
+    .from("stories")
+    .insert({
+      user_id: input.userId,
+      type: "text",
+      card_design: 0,
+      text: input.text,
+      bg_color: input.bgColor,
+      fg_color: input.fgColor,
+      duration_ms: input.durationMs ?? 5000,
+    })
+    .select(STORY_SELECT)
+    .single();
+  if (error) throw error;
+  return rowToStory(data);
+}
+
 export async function deleteStory(storyId: string): Promise<void> {
   const { error } = await supabase.from("stories").delete().eq("id", storyId);
   if (error) throw error;

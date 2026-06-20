@@ -8,7 +8,6 @@ import { STREAM_CARD_GAP, STREAM_CARD_W, WAVE_HEIGHTS, CARD_AVATAR_SIZE, CARD_AV
 export const profileStyles = StyleSheet.create({
   scrollContent: { padding: 10, paddingBottom: NAVBAR_H + BOTTOM_INSET + 32 },
 
-  // Top bar â€” flat, no border radius
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -17,7 +16,7 @@ export const profileStyles = StyleSheet.create({
     paddingVertical: 12,
   },
   topBarTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "800",
     color: "#ffffff",
     letterSpacing: -0.3,

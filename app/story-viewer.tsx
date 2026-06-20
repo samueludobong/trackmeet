@@ -155,6 +155,7 @@ export default function StoryViewerScreen() {
   const liked  = false;
 
   const isMusic = current.type === "music" && current.songId && current.songName && current.songArtist;
+  const isText  = current.type === "text" && !!current.text;
   const hasCanvas = isMusic && current.canvas != null;
 
   return (
@@ -162,7 +163,7 @@ export default function StoryViewerScreen() {
      <Animated.View
        style={{
          flex: 1,
-         backgroundColor: "#000",
+         backgroundColor: isText ? (current.bgColor ?? "#0D0D0D") : "#000",
          overflow: "hidden",
          borderRadius: dragRadius,
          opacity: dragOpacity,
@@ -293,6 +294,12 @@ export default function StoryViewerScreen() {
               overlayFont={current.overlayFont}
               overlayColor={current.overlayColor}
             />
+          ) : isText ? (
+            <View style={{ paddingHorizontal: 32 }}>
+              <Text style={{ color: current.fgColor ?? "#fff", fontSize: 26, fontWeight: "700", textAlign: "center", lineHeight: 34 }}>
+                {current.text}
+              </Text>
+            </View>
           ) : (
             <View style={{ padding: 24 }}>
               <Text style={{ color: "rgba(255,255,255,0.5)" }}>Unsupported story type.</Text>

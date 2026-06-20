@@ -1,6 +1,16 @@
 import { supabase } from "../lib/supabase";
 import { rowToComment, COMMENT_SELECT, type Comment } from "../lib/feed/helpers";
-import { type PinnedSong } from "../types/music";
+
+/** Song attached to a comment — a Spotify pick or a pasted multi-provider link. */
+export type CommentSong = {
+  id: string | null;        // Spotify track id when known (null for non-Spotify-only)
+  name: string;
+  artist: string | null;
+  albumArt: string | null;
+  url?: string | null;      // source streaming link (pasted-link attachments)
+  provider?: string | null;
+  links?: { platform: string; url: string }[] | null;
+};
 
 /** Fetch all comments for a post, oldest first. */
 export async function getPostComments(postId: string): Promise<Comment[]> {
@@ -18,7 +28,7 @@ export async function addPostComment(input: {
   userId: string;
   text: string;
   parentCommentId: string | null;
-  song: PinnedSong | null;
+  song: CommentSong | null;
 }): Promise<Comment> {
   const { postId, userId, text, parentCommentId, song } = input;
   const { data, error } = await supabase
@@ -33,6 +43,9 @@ export async function addPostComment(input: {
         song_name: song.name,
         song_artist: song.artist,
         song_album_art: song.albumArt,
+        song_url: song.url ?? null,
+        song_provider: song.provider ?? null,
+        song_links: song.links ?? null,
       }),
     })
     .select(COMMENT_SELECT)
@@ -45,7 +58,7 @@ import { dbRowToPost } from "../lib/feed/helpers";
 import { type Post } from "../app/data/mock";
 
 const FEED_POST_SELECT =
-  "id, type, text, media_urls, media_aspect, song_id, song_name, song_artist, song_album_art, song_preview_url, poll_question, poll_options, voice_url, voice_duration_ms, voice_waveform, created_at, likes_count, comments_count, reposts_count, users!user_id(id, username, display_name, avatar_url, is_verified)";
+  "id, type, text, media_urls, media_aspect, song_id, song_name, song_artist, song_album_art, song_preview_url, song_url, song_provider, song_links, poll_question, poll_options, voice_url, voice_duration_ms, voice_waveform, created_at, likes_count, comments_count, reposts_count, users!user_id(id, username, display_name, avatar_url, is_verified)";
 
 /** Fetch the latest feed posts (newest first). */
 export async function getFeedPosts(limit = 50): Promise<Post[]> {
